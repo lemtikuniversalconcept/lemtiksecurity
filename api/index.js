@@ -15,13 +15,21 @@ export default async function handler(req, res) {
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const url = new URL(req.url, `${protocol}://${host}`);
     
-    const fetchRequest = new Request(url.toString(), {
+    const hasBody = !['GET', 'HEAD'].includes(req.method);
+    const requestInit = {
       method: req.method,
       headers: Object.fromEntries(
         Object.entries(req.headers).map(([k, v]) => [k, String(v)])
       ),
-      body: ['GET', 'HEAD'].includes(req.method) ? null : req,
-    });
+    };
+
+    // Add body and duplex option for streaming requests
+    if (hasBody) {
+      requestInit.body = req;
+      requestInit.duplex = 'half';
+    }
+
+    const fetchRequest = new Request(url.toString(), requestInit);
 
     // Call the TanStack Start server handler
     const fetchResponse = await serverHandler.fetch(fetchRequest, {}, {});
