@@ -2,7 +2,6 @@
   "buildCommand": "pnpm build",
   "outputDirectory": "dist/client",
   "framework": "vite",
-  "nodeVersion": "20.x",
   "functions": {
     "server.js": {
       "runtime": "nodejs20.x"
