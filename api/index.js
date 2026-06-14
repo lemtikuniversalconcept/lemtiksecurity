@@ -1,49 +1,50 @@
-import { createServer } from 'http';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const serverPath = join(__dirname, '../dist/server/server.js');
 
 // Import the built server handler
-const { default: serverHandler } = await import('./dist/server/server.js');
+const serverModule = await import(serverPath);
+const serverHandler = serverModule.default;
 
-const server = createServer(async (req, res) => {
+export default async function handler(req, res) {
   try {
     // Convert Node.js request/response to Fetch API Request/Response
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const url = new URL(req.url, `${protocol}://${host}`);
+    
     const fetchRequest = new Request(url.toString(), {
       method: req.method,
-      headers: req.headers,
+      headers: Object.fromEntries(
+        Object.entries(req.headers).map(([k, v]) => [k, String(v)])
+      ),
       body: ['GET', 'HEAD'].includes(req.method) ? null : req,
     });
 
     // Call the TanStack Start server handler
     const fetchResponse = await serverHandler.fetch(fetchRequest, {}, {});
 
-    // Convert Fetch API response back to Node.js response
+    // Set response status
     res.statusCode = fetchResponse.status;
+    
+    // Set response headers
     fetchResponse.headers.forEach((value, key) => {
       res.setHeader(key, value);
     });
 
+    // Send response body
     if (fetchResponse.body) {
-      const reader = fetchResponse.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
+      const buffer = await fetchResponse.arrayBuffer();
+      res.end(Buffer.from(buffer));
+    } else {
+      res.end();
     }
-    res.end();
   } catch (error) {
-    console.error('Server error:', error);
+    console.error('[v0] Server error:', error);
     res.statusCode = 500;
     res.setHeader('Content-Type', 'text/plain');
     res.end('Internal Server Error');
   }
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+}
