@@ -15,6 +15,16 @@ const TIER_LABELS: Record<string, string> = {
   government: "Government",
 };
 
+function featuresList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export const Route = createFileRoute("/app/admin/billing")({
   head: () => ({ meta: [{ title: "Billing · Lemtik Admin" }] }),
   beforeLoad: async () => {
@@ -42,12 +52,15 @@ function BillingPage() {
   const defaults = useMemo(() => Object.keys(TIER_LABELS).map((tier) => ({
     tier,
     amount: pricingDraft[tier]?.amount ?? String(pricing[tier]?.monthly_amount ?? ""),
-    features: pricingDraft[tier]?.features ?? ((pricing[tier]?.features ?? []) as string[]).join(", "),
+    features: pricingDraft[tier]?.features ?? featuresList(pricing[tier]?.features).join(", "),
   })), [pricing, pricingDraft]);
 
   const saveMut = useMutation({
     mutationFn: (tier: string) => {
-      const draft = pricingDraft[tier] ?? { amount: String(pricing[tier]?.monthly_amount ?? 0), features: (pricing[tier]?.features ?? []).join(", ") };
+      const draft = pricingDraft[tier] ?? {
+        amount: String(pricing[tier]?.monthly_amount ?? 0),
+        features: featuresList(pricing[tier]?.features).join(", "),
+      };
       return updatePricing({
         data: {
           tier: tier as never,
@@ -220,7 +233,7 @@ function BillingPage() {
                   <label className="space-y-1.5">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Features</div>
                     <input
-                      value={pricingDraft[row.tier]?.features ?? row.features.join(", ")}
+                      value={pricingDraft[row.tier]?.features ?? row.features}
                       onChange={(e) => setPricingDraft((p) => ({ ...p, [row.tier]: { amount: pricingDraft[row.tier]?.amount ?? row.amount, features: e.target.value } }))}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none"
                       placeholder="Comma-separated features"
@@ -228,7 +241,7 @@ function BillingPage() {
                   </label>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
-                  Unlocks: {(pricing[row.tier]?.features ?? []).join(", ") || "No features set"}
+                  Unlocks: {featuresList(pricing[row.tier]?.features).join(", ") || "No features set"}
                 </div>
               </div>
             ))}

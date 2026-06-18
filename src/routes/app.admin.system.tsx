@@ -14,6 +14,7 @@ import {
   Loader2,
   MessageSquareMore,
   RefreshCw,
+  Zap,
   ShieldCheck,
   Wifi,
   WifiOff,

@@ -27,6 +27,19 @@ function monthLabel(date: Date) {
   return new Intl.DateTimeFormat("en-NG", { month: "short", year: "2-digit" }).format(date);
 }
 
+function normalizeFeatures(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function isBillable(status: string) {
   return !["suspended", "cancelled"].includes(status);
 }
@@ -68,7 +81,7 @@ export const getPlatformBilling = createServerFn({ method: "GET" })
       const row = pricingRows.find((r: any) => r.tier === tier) ?? DEFAULT_PRICING[tier];
       pricingMap.set(tier, {
         monthly_amount: Number(row.monthly_amount ?? DEFAULT_PRICING[tier].monthly_amount),
-        features: Array.isArray(row.features) ? row.features : DEFAULT_PRICING[tier].features,
+        features: normalizeFeatures(row.features).length ? normalizeFeatures(row.features) : DEFAULT_PRICING[tier].features,
       });
     }
 
