@@ -1,5 +1,5 @@
-const CACHE_NAME = "lemtik-security-v1";
-const TILE_CACHE_NAME = "lemtik-mapbox-v1";
+const CACHE_NAME = "lemtik-security-v2";
+const TILE_CACHE_NAME = "lemtik-mapbox-v2";
 const PRECACHE_URLS = [
   "/",
   "/app/",
@@ -33,6 +33,12 @@ self.addEventListener("fetch", (event) => {
     requestUrl.hostname.endsWith("mapbox.com") ||
     requestUrl.hostname.endsWith("tiles.mapbox.com") ||
     requestUrl.hostname.endsWith("api.mapbox.com");
+  const isStaticAsset =
+    event.request.destination === "script" ||
+    event.request.destination === "style" ||
+    event.request.destination === "image" ||
+    event.request.destination === "font" ||
+    event.request.destination === "worker";
 
   if (isMapboxAsset) {
     event.respondWith(
@@ -61,6 +67,12 @@ self.addEventListener("fetch", (event) => {
 
   if (requestUrl.origin !== self.location.origin) return;
 
+  // Keep dynamic same-origin requests on the network so app data and server-fn
+  // responses cannot get mixed with stale cached assets.
+  if (event.request.mode !== "navigate" && !isStaticAsset) {
+    return;
+  }
+
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)
@@ -80,16 +92,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (!isStaticAsset) return;
+
+  // Static assets use a network-first strategy with cache fallback to avoid
+  // serving stale JS/CSS chunks after deployments.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
-    })
+      })
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        return cached ?? new Response("", { status: 504, statusText: "Offline" });
+      })
   );
 });

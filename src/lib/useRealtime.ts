@@ -8,15 +8,21 @@ import { supabase } from "@/integrations/supabase/client";
 export function useRealtimeInvalidate(table: string, queryKeys: string[][]) {
   const qc = useQueryClient();
   const channelId = useRef(crypto.randomUUID());
+  const queryKeysRef = useRef(queryKeys);
+
+  useEffect(() => {
+    queryKeysRef.current = queryKeys;
+  }, [queryKeys]);
+
   useEffect(() => {
     const channel = supabase
       .channel(`realtime:${table}:${channelId.current}`)
       .on("postgres_changes", { event: "*", schema: "public", table }, () => {
-        queryKeys.forEach((key) => qc.invalidateQueries({ queryKey: key }));
+        queryKeysRef.current.forEach((key) => qc.invalidateQueries({ queryKey: key }));
       })
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [table, qc, queryKeys]);
+  }, [table, qc]);
 }
