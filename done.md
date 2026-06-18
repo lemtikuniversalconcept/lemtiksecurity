@@ -67,6 +67,9 @@ Conservative trace of spec items that are actually present in code today.
 - The incident detail page now enforces field-officer access by ownership check and exposes reporter/assignee/time metadata in the unified header.
 - The evidence workflow now persists custody metadata, chain-of-custody entries, and legal evidence flags on incident records.
 - The related-incidents tab now includes a coordinate-based cluster preview in addition to linked and suggested cases.
+- The command dashboard incident intake now uses a five-step wizard for basic info, location, people, evidence, and review/submit.
+- The new incident flow now supports GPS capture, manual pin placement, saved locations, indoor floor notes, rich-text-style description entry, drag-and-drop evidence uploads, and voice note recording.
+- Submitting a new incident now routes the user into the incident detail page and opens the AI analysis tab automatically.
 - Incident list supports search, sorting, filtering, bulk actions, offline queueing, and create incident flow.
 - Patrols list and detail pages exist with route management, shifts, check-ins, archive/restore, and duplicate actions.
 - Alerts page has history and alert-preference configuration sections.

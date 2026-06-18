@@ -9,7 +9,8 @@ import { getActiveOrg, listLocations, listMembers } from "@/lib/orgs.functions";
 import { severityMeta, statusMeta, typeMeta, type Severity, type IncidentType, type IncidentStatus } from "@/lib/mockData";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { IncidentReportForm, type IncidentSubmitPayload } from "@/components/IncidentReportForm";
+import { IncidentWizardForm } from "@/components/IncidentWizardForm";
+import { type IncidentSubmitPayload } from "@/components/IncidentReportForm";
 import * as offline from "@/lib/offlineQueue";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { Plus, Filter, Loader2, Download, WifiOff, CloudUpload, ArrowUpDown, Search, X, Eye, UserRoundPlus, ListChecks, BrainCircuit, ChevronLeft, ChevronRight } from "lucide-react";
@@ -89,6 +90,7 @@ function Incidents() {
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState<Partial<IncidentSubmitPayload> | null>(null);
   const [bulkOpen, setBulkOpen] = useState<"status" | "assign" | null>(null);
+  const AUTO_OPEN_TAB_KEY = "lemtik-open-incident-tab";
 
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [pending, setPending] = useState<offline.QueuedIncident[]>([]);
@@ -204,9 +206,13 @@ function Incidents() {
       }
       return create({ data });
     },
-    onSuccess: () => {
+    onSuccess: (row: any) => {
       queryClient.invalidateQueries({ queryKey: ["incidents"] });
       setShowNew(false);
+      if (row?.id) {
+        sessionStorage.setItem(AUTO_OPEN_TAB_KEY, row.id);
+        navigate({ to: "/app/incidents/$id", params: { id: row.id } });
+      }
     },
   });
 
@@ -470,7 +476,7 @@ function Incidents() {
       </div>
 
       {showNew && activeOrg && (
-        <IncidentReportForm
+        <IncidentWizardForm
           organisationId={activeOrg.id}
           savedLocations={locations.map((l) => ({ id: l.id, name: l.name, coord_x: l.coord_x as number | null, coord_y: l.coord_y as number | null }))}
           defaultZone={draft?.zone ?? locations[0]?.name ?? "Lekki Phase 1"}
