@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -7,9 +7,10 @@ import { supabase } from "@/integrations/supabase/client";
  */
 export function useRealtimeInvalidate(table: string, queryKeys: string[][]) {
   const qc = useQueryClient();
+  const channelId = useRef(crypto.randomUUID());
   useEffect(() => {
     const channel = supabase
-      .channel(`realtime:${table}`)
+      .channel(`realtime:${table}:${channelId.current}`)
       .on("postgres_changes", { event: "*", schema: "public", table }, () => {
         queryKeys.forEach((key) => qc.invalidateQueries({ queryKey: key }));
       })
@@ -17,6 +18,5 @@ export function useRealtimeInvalidate(table: string, queryKeys: string[][]) {
     return () => {
       supabase.removeChannel(channel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table]);
+  }, [table, qc, queryKeys]);
 }
