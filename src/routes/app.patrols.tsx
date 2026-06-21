@@ -19,7 +19,6 @@ import {
   FileText,
   List,
   Lock,
-  Map,
   MapPinned,
   Pencil,
   Plus,
@@ -30,6 +29,7 @@ import {
   X,
   CheckCircle2,
   AlertTriangle,
+  Map as MapIcon,
 } from "lucide-react";
 
 export const Route = createFileRoute("/app/patrols")({
@@ -108,9 +108,9 @@ function Patrols() {
     () => (patrolRows as any[]).filter((patrol) => (showArchived ? !!patrol.archived_at : !patrol.archived_at)),
     [patrolRows, showArchived],
   );
-  const locationById = useMemo(() => new Map((locations as any[]).map((loc) => [loc.id, loc])), [locations]);
+  const locationById = useMemo(() => new globalThis.Map((locations as any[]).map((loc) => [loc.id, loc])), [locations]);
   const latestCheckInByPatrol = useMemo(() => {
-    const map = new Map<string, any>();
+    const map = new globalThis.Map<string, any>();
     for (const checkIn of checkins as any[]) {
       const patrolId = checkIn.patrol_id || checkIn.patrolId;
       if (!patrolId) continue;
@@ -400,7 +400,7 @@ function Patrols() {
                   </div>
                   <div className="flex items-center gap-2 pt-1">
                     <Link to="/app/patrols/$id" params={{ id: patrol.id }} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] hover:bg-surface-2">
-                      <Map className="h-3 w-3" /> View
+                      <MapIcon className="h-3 w-3" /> View
                     </Link>
                     {canManage && (
                       <Link to="/app/patrols/$id" params={{ id: patrol.id }} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] hover:bg-surface-2">
