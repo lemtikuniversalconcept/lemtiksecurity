@@ -427,20 +427,20 @@ function LiveMap() {
   const zoneGeo = useMemo(
     () => ({
       type: "FeatureCollection" as const,
-      features: locations
-        .filter((location) => location.geofence)
-        .map((location) => {
-          const risk = deriveRisk(location.name, incidents, patrols);
-          return {
-            type: "Feature" as const,
-            geometry: location.geofence as any,
-            properties: {
-              id: location.id,
-              name: location.name,
-              risk,
-            },
-          };
-        }),
+      features: locations.flatMap((location) => {
+        const feature = toGeoJsonFeature(location.geofence);
+        if (!feature) return [];
+        const risk = deriveRisk(location.name, incidents, patrols);
+        return [{
+          ...feature,
+          properties: {
+            ...(feature.properties ?? {}),
+            id: location.id,
+            name: location.name,
+            risk,
+          },
+        }];
+      }),
     }),
     [incidents, locations, patrols],
   );
