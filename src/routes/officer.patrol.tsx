@@ -249,68 +249,81 @@ function OfficerPatrol() {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    waypointMarkers.current.forEach((marker) => marker.remove());
-    waypointMarkers.current = [];
-    incidentMarkers.current.forEach((marker) => marker.remove());
-    incidentMarkers.current = [];
-    currentMarker.current?.remove();
-    currentMarker.current = null;
+    const renderRouteLayer = () => {
+      if (!mapRef.current || mapRef.current !== map) return;
+      if (!map.isStyleLoaded()) {
+        map.once("style.load", renderRouteLayer);
+        return;
+      }
 
-    const routeCoords = waypoints.map((wp) => wp.coord);
-    const sourceData = {
-      type: "Feature",
-      geometry: {
-        type: "LineString",
-        coordinates: routeCoords,
-      },
-      properties: {},
-    } as any;
-    const existingRoute = map.getSource("patrol-route") as mapboxgl.GeoJSONSource | undefined;
-    if (existingRoute) {
-      existingRoute.setData(sourceData);
-    } else {
-      map.addSource("patrol-route", { type: "geojson", data: sourceData });
-      map.addLayer({
-        id: "patrol-route-line",
-        type: "line",
-        source: "patrol-route",
-        paint: { "line-color": "#38bdf8", "line-width": 4, "line-opacity": 0.9 },
+      waypointMarkers.current.forEach((marker) => marker.remove());
+      waypointMarkers.current = [];
+      incidentMarkers.current.forEach((marker) => marker.remove());
+      incidentMarkers.current = [];
+      currentMarker.current?.remove();
+      currentMarker.current = null;
+
+      const routeCoords = waypoints.map((wp) => wp.coord);
+      const sourceData = {
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: routeCoords,
+        },
+        properties: {},
+      } as any;
+      const existingRoute = map.getSource("patrol-route") as mapboxgl.GeoJSONSource | undefined;
+      if (existingRoute) {
+        existingRoute.setData(sourceData);
+      } else {
+        map.addSource("patrol-route", { type: "geojson", data: sourceData });
+        map.addLayer({
+          id: "patrol-route-line",
+          type: "line",
+          source: "patrol-route",
+          paint: { "line-color": "#38bdf8", "line-width": 4, "line-opacity": 0.9 },
+        });
+      }
+
+      waypoints.forEach((wp, index) => {
+        const el = document.createElement("div");
+        const completed = index < completedCount;
+        const isCurrent = index === currentIndex;
+        el.className = `h-4 w-4 rounded-full border-2 ${completed ? "border-emerald-200 bg-emerald-400" : isCurrent ? "border-white bg-white animate-pulse" : "border-slate-200 bg-slate-900"}`;
+        const marker = new mapboxgl.Marker({ element: el })
+          .setLngLat(wp.coord)
+          .setPopup(new mapboxgl.Popup({ offset: 18 }).setHTML(`<strong>${wp.name}</strong><br/>${completed ? "Completed" : isCurrent ? "Current waypoint" : "Upcoming"}`))
+          .addTo(map);
+        waypointMarkers.current.push(marker);
       });
-    }
 
-    waypoints.forEach((wp, index) => {
-      const el = document.createElement("div");
-      const completed = index < completedCount;
-      const isCurrent = index === currentIndex;
-      el.className = `h-4 w-4 rounded-full border-2 ${completed ? "border-emerald-200 bg-emerald-400" : isCurrent ? "border-white bg-white animate-pulse" : "border-slate-200 bg-slate-900"}`;
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat(wp.coord)
-        .setPopup(new mapboxgl.Popup({ offset: 18 }).setHTML(`<strong>${wp.name}</strong><br/>${completed ? "Completed" : isCurrent ? "Current waypoint" : "Upcoming"}`))
-        .addTo(map);
-      waypointMarkers.current.push(marker);
-    });
+      if (currentPosition) {
+        const el = document.createElement("div");
+        el.className = "h-5 w-5 rounded-full border-2 border-cyan-100 bg-cyan-400 shadow-[0_0_0_12px_rgba(34,211,238,0.14)]";
+        currentMarker.current = new mapboxgl.Marker({ element: el }).setLngLat(currentPosition).addTo(map);
+      }
 
-    if (currentPosition) {
-      const el = document.createElement("div");
-      el.className = "h-5 w-5 rounded-full border-2 border-cyan-100 bg-cyan-400 shadow-[0_0_0_12px_rgba(34,211,238,0.14)]";
-      currentMarker.current = new mapboxgl.Marker({ element: el }).setLngLat(currentPosition).addTo(map);
-    }
+      nearbyIncidents.forEach((incident) => {
+        const el = document.createElement("div");
+        el.className = "h-4 w-4 rotate-45 border border-red-100 bg-red-500 shadow-[0_0_0_8px_rgba(239,68,68,0.12)]";
+        const marker = new mapboxgl.Marker({ element: el })
+          .setLngLat([Number(incident.coord_x), Number(incident.coord_y)])
+          .setPopup(new mapboxgl.Popup({ offset: 18 }).setHTML(`<strong>${incident.code}</strong><br/>${incident.location}`))
+          .addTo(map);
+        incidentMarkers.current.push(marker);
+      });
 
-    nearbyIncidents.forEach((incident) => {
-      const el = document.createElement("div");
-      el.className = "h-4 w-4 rotate-45 border border-red-100 bg-red-500 shadow-[0_0_0_8px_rgba(239,68,68,0.12)]";
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([Number(incident.coord_x), Number(incident.coord_y)])
-        .setPopup(new mapboxgl.Popup({ offset: 18 }).setHTML(`<strong>${incident.code}</strong><br/>${incident.location}`))
-        .addTo(map);
-      incidentMarkers.current.push(marker);
-    });
+      const bounds = new mapboxgl.LngLatBounds();
+      routeCoords.forEach((coord) => bounds.extend(coord));
+      if (currentPosition) bounds.extend(currentPosition);
+      nearbyIncidents.forEach((incident) => bounds.extend([Number(incident.coord_x), Number(incident.coord_y)]));
+      if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 70, duration: 500, maxZoom: 17 });
+    };
 
-    const bounds = new mapboxgl.LngLatBounds();
-    routeCoords.forEach((coord) => bounds.extend(coord));
-    if (currentPosition) bounds.extend(currentPosition);
-    nearbyIncidents.forEach((incident) => bounds.extend([Number(incident.coord_x), Number(incident.coord_y)]));
-    if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 70, duration: 500, maxZoom: 17 });
+    renderRouteLayer();
+    return () => {
+      map.off("style.load", renderRouteLayer);
+    };
   }, [mapReady, waypoints, currentPosition, nearbyIncidents, completedCount, currentIndex]);
 
   const submitCheckIn = async (override = false) => {
