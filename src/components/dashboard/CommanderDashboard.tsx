@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols, listCheckIns } from "@/lib/patrols.functions";
@@ -27,6 +26,10 @@ import {
   Smartphone,
   UserRoundCheck,
 } from "lucide-react";
+
+type MapboxModule = typeof import("mapbox-gl");
+type MapboxMap = import("mapbox-gl").Map;
+type MapboxGeoJSONSource = import("mapbox-gl").GeoJSONSource;
 
 const MAP_COLORS = {
   red: "#f43f5e",
@@ -538,8 +541,9 @@ function CommandMapPreview({
   onSelectIncident: (id: string) => void;
 }) {
   const mapContainer = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const loadedRef = useRef(false);
+  const mapboxRef = useRef<MapboxModule | null>(null);
 
   const lagos: [number, number] = [3.4219, 6.4281];
   const incidentGeo = useMemo(
@@ -590,118 +594,130 @@ function CommandMapPreview({
   );
 
   useEffect(() => {
-    if (!token || !mapContainer.current || mapRef.current) return;
-    mapboxgl.accessToken = token;
-    const map = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: "mapbox://styles/mapbox/dark-v11",
-      center: lagos,
-      zoom: 10.7,
-      attributionControl: false,
-    });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
-    map.on("load", () => {
-      loadedRef.current = true;
-      map.addSource("incidents", { type: "geojson", data: incidentGeo, cluster: true, clusterRadius: 42, clusterMaxZoom: 14 });
-      map.addLayer({
-        id: "incidents-cluster",
-        type: "circle",
-        source: "incidents",
-        filter: ["has", "point_count"],
-        paint: {
-          "circle-color": MAP_COLORS.red,
-          "circle-radius": ["step", ["get", "point_count"], 16, 5, 22, 15, 30],
-          "circle-opacity": 0.78,
-        },
-      });
-      map.addLayer({
-        id: "incidents-point",
-        type: "circle",
-        source: "incidents",
-        filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-color": [
-            "match",
-            ["get", "sev"],
-            5, MAP_COLORS.red,
-            4, MAP_COLORS.orange,
-            3, MAP_COLORS.amber,
-            2, MAP_COLORS.yellow,
-            MAP_COLORS.slate,
-          ],
-          "circle-radius": 7,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": MAP_COLORS.ink,
-        },
-      });
-      map.addLayer({
-        id: "incidents-label",
-        type: "symbol",
-        source: "incidents",
-        filter: ["!", ["has", "point_count"]],
-        layout: {
-          "text-field": ["get", "sev"],
-          "text-size": 10,
-          "text-font": ["DIN Pro Medium", "Arial Unicode MS Bold"],
-          "text-offset": [0, 1.1],
-        },
-        paint: { "text-color": "#fff" },
-      });
-      map.addSource("patrols", { type: "geojson", data: patrolGeo });
-      map.addLayer({
-        id: "patrols-point",
-        type: "circle",
-        source: "patrols",
-        paint: {
-          "circle-color": [
-            "match",
-            ["get", "status"],
-            "complete", MAP_COLORS.green,
-            "missed", MAP_COLORS.red,
-            "delayed", MAP_COLORS.orange,
-            MAP_COLORS.blue,
-          ],
-          "circle-radius": 6,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": MAP_COLORS.ink,
-        },
-      });
-      map.addSource("zones", { type: "geojson", data: zoneGeo });
-      map.addLayer({
-        id: "zones-fill",
-        type: "fill",
-        source: "zones",
-        paint: { "fill-color": MAP_COLORS.blue, "fill-opacity": 0.10 },
-      });
-      map.addLayer({
-        id: "zones-line",
-        type: "line",
-        source: "zones",
-        paint: { "line-color": MAP_COLORS.blue, "line-width": 1.4, "line-dasharray": [2, 2] },
-      });
+    let cancelled = false;
+    let map: MapboxMap | null = null;
+    let ro: ResizeObserver | null = null;
 
-      map.on("click", "incidents-point", (e) => {
-        const feature = e.features?.[0];
-        const id = feature?.properties?.id as string | undefined;
-        const coords = (feature?.geometry as any)?.coordinates as [number, number] | undefined;
-        if (id) onSelectIncident(id);
-        if (coords) map.easeTo({ center: coords, zoom: 13, duration: 600 });
+    const mount = async () => {
+      if (!token || !mapContainer.current || mapRef.current) return;
+      const mapboxgl = mapboxRef.current ?? (await import("mapbox-gl"));
+      mapboxRef.current = mapboxgl;
+      if (cancelled || !mapContainer.current || mapRef.current) return;
+      mapboxgl.default.accessToken = token;
+      map = new mapboxgl.default.Map({
+        container: mapContainer.current,
+        style: "mapbox://styles/mapbox/dark-v11",
+        center: lagos,
+        zoom: 10.7,
+        attributionControl: false,
       });
-      map.on("mouseenter", "incidents-point", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "incidents-point", () => { map.getCanvas().style.cursor = ""; });
-      requestAnimationFrame(() => map.resize());
-    });
-    mapRef.current = map;
-    const ro = new ResizeObserver(() => {
-      try {
-        map.resize();
-      } catch {}
-    });
-    if (mapContainer.current) ro.observe(mapContainer.current);
+      map.addControl(new mapboxgl.default.NavigationControl({ showCompass: false }), "top-right");
+      map.on("load", () => {
+        loadedRef.current = true;
+        map!.addSource("incidents", { type: "geojson", data: incidentGeo, cluster: true, clusterRadius: 42, clusterMaxZoom: 14 });
+        map!.addLayer({
+          id: "incidents-cluster",
+          type: "circle",
+          source: "incidents",
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": MAP_COLORS.red,
+            "circle-radius": ["step", ["get", "point_count"], 16, 5, 22, 15, 30],
+            "circle-opacity": 0.78,
+          },
+        });
+        map!.addLayer({
+          id: "incidents-point",
+          type: "circle",
+          source: "incidents",
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": [
+              "match",
+              ["get", "sev"],
+              5, MAP_COLORS.red,
+              4, MAP_COLORS.orange,
+              3, MAP_COLORS.amber,
+              2, MAP_COLORS.yellow,
+              MAP_COLORS.slate,
+            ],
+            "circle-radius": 7,
+            "circle-stroke-width": 2,
+            "circle-stroke-color": MAP_COLORS.ink,
+          },
+        });
+        map!.addLayer({
+          id: "incidents-label",
+          type: "symbol",
+          source: "incidents",
+          filter: ["!", ["has", "point_count"]],
+          layout: {
+            "text-field": ["get", "sev"],
+            "text-size": 10,
+            "text-font": ["DIN Pro Medium", "Arial Unicode MS Bold"],
+            "text-offset": [0, 1.1],
+          },
+          paint: { "text-color": "#fff" },
+        });
+        map!.addSource("patrols", { type: "geojson", data: patrolGeo });
+        map!.addLayer({
+          id: "patrols-point",
+          type: "circle",
+          source: "patrols",
+          paint: {
+            "circle-color": [
+              "match",
+              ["get", "status"],
+              "complete", MAP_COLORS.green,
+              "missed", MAP_COLORS.red,
+              "delayed", MAP_COLORS.orange,
+              MAP_COLORS.blue,
+            ],
+            "circle-radius": 6,
+            "circle-stroke-width": 2,
+            "circle-stroke-color": MAP_COLORS.ink,
+          },
+        });
+        map!.addSource("zones", { type: "geojson", data: zoneGeo });
+        map!.addLayer({
+          id: "zones-fill",
+          type: "fill",
+          source: "zones",
+          paint: { "fill-color": MAP_COLORS.blue, "fill-opacity": 0.10 },
+        });
+        map!.addLayer({
+          id: "zones-line",
+          type: "line",
+          source: "zones",
+          paint: { "line-color": MAP_COLORS.blue, "line-width": 1.4, "line-dasharray": [2, 2] },
+        });
+
+        map!.on("click", "incidents-point", (e) => {
+          const feature = e.features?.[0];
+          const id = feature?.properties?.id as string | undefined;
+          const coords = (feature?.geometry as any)?.coordinates as [number, number] | undefined;
+          if (id) onSelectIncident(id);
+          if (coords) map!.easeTo({ center: coords, zoom: 13, duration: 600 });
+        });
+        map!.on("mouseenter", "incidents-point", () => { map!.getCanvas().style.cursor = "pointer"; });
+        map!.on("mouseleave", "incidents-point", () => { map!.getCanvas().style.cursor = ""; });
+        requestAnimationFrame(() => map!.resize());
+      });
+      mapRef.current = map;
+      ro = new ResizeObserver(() => {
+        try {
+          map!.resize();
+        } catch {}
+      });
+      if (mapContainer.current) ro.observe(mapContainer.current);
+    };
+
+    void mount();
     return () => {
-      ro.disconnect();
+      cancelled = true;
+      ro?.disconnect();
       loadedRef.current = false;
-      map.remove();
+      map?.remove();
       mapRef.current = null;
     };
   }, [onSelectIncident, token]);
@@ -709,19 +725,19 @@ function CommandMapPreview({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
-    (map.getSource("incidents") as mapboxgl.GeoJSONSource | undefined)?.setData(incidentGeo);
+    (map.getSource("incidents") as MapboxGeoJSONSource | undefined)?.setData(incidentGeo);
   }, [incidentGeo]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
-    (map.getSource("patrols") as mapboxgl.GeoJSONSource | undefined)?.setData(patrolGeo);
+    (map.getSource("patrols") as MapboxGeoJSONSource | undefined)?.setData(patrolGeo);
   }, [patrolGeo]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
-    (map.getSource("zones") as mapboxgl.GeoJSONSource | undefined)?.setData(zoneGeo);
+    (map.getSource("zones") as MapboxGeoJSONSource | undefined)?.setData(zoneGeo);
   }, [zoneGeo]);
 
   useEffect(() => {
