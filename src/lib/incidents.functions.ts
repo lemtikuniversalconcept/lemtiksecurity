@@ -39,6 +39,59 @@ const incidentInput = z.object({
   evidence: z.array(evidenceItem).max(15).optional(),
 });
 
+function relationshipApiConfig() {
+  const baseUrl = process.env.RELATIONSHIP_API_URL?.trim().replace(/\/+$/, "");
+  const apiKey = process.env.RELATIONSHIP_API_KEY?.trim();
+  if (!baseUrl || !apiKey) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Relationship API is not configured for incident orchestration.");
+    }
+    return null;
+  }
+  return { baseUrl, apiKey };
+}
+
+async function orchestrateIncident(row: Record<string, any>, orgId: string, userId: string) {
+  const config = relationshipApiConfig();
+  if (!config) return null;
+
+  const response = await fetch(`${config.baseUrl}/api/v1/incidents`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": config.apiKey,
+      "X-Org-Id": orgId,
+      "X-Actor-Id": userId,
+      "X-Actor-Role": "operator",
+      "X-Client-Name": "c4isod-dashboard",
+    },
+    body: JSON.stringify({
+      id: row.id,
+      type: row.type,
+      severity: row.severity,
+      description: row.description || row.title || "",
+      reported_at: row.reported_at || row.created_at || new Date().toISOString(),
+      reporter_id: userId,
+      org_id: orgId,
+      client_type: "dashboard",
+      status: row.status || "reported",
+      location: {
+        name: row.location,
+        description: [row.location, row.zone, row.floor].filter(Boolean).join(" · "),
+        lat: typeof row.coord_y === "number" ? row.coord_y : undefined,
+        lng: typeof row.coord_x === "number" ? row.coord_x : undefined,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(`Relationship API incident orchestration failed: ${response.status} ${message}`.trim());
+  }
+
+  return response.json();
+}
+
 
 export const listIncidents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -62,6 +115,7 @@ export const createIncident = createServerFn({ method: "POST" })
       .insert({ ...data, reported_by: context.userId, organisation_id: orgId })
       .select().single();
     if (error) throwSafeError("incidents.create", error, "Unable to create incident.");
+    await orchestrateIncident(row as Record<string, any>, orgId, context.userId);
     return row;
   });
 

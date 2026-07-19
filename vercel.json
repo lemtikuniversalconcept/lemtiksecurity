@@ -1,11 +1,3 @@
 {
-  "buildCommand": "pnpm build",
-  "outputDirectory": "dist/client",
-  "framework": "vite",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api"
-    }
-  ]
+  "framework": "tanstack-start"
 }
