@@ -65,6 +65,23 @@ type DecisionResult = {
   decisionLogs: string[];
 };
 
+function normalizeCameraList(payload: unknown): CameraRecord[] {
+  if (Array.isArray(payload)) {
+    return payload.filter(Boolean) as CameraRecord[];
+  }
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const record = payload as Record<string, unknown>;
+  const candidates = [record.data, record.cameras, record.items, record.results, record.records];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(Boolean) as CameraRecord[];
+    }
+  }
+  return [];
+}
+
 function CctvControlRoom() {
   const { appAccess } = Route.useRouteContext();
   const listCamerasFn = useServerFn(getCameras);
@@ -74,7 +91,7 @@ function CctvControlRoom() {
 
   const { data: cameras = [], isLoading } = useQuery({
     queryKey: ["cctv-cameras", appAccess.orgId],
-    queryFn: () => listCamerasFn() as Promise<CameraRecord[]>,
+    queryFn: async () => normalizeCameraList(await listCamerasFn()),
   });
 
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
@@ -89,7 +106,7 @@ function CctvControlRoom() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const selectedCamera = useMemo(
-    () => cameras.find((camera) => camera.id === selectedCameraId) ?? cameras[0] ?? null,
+    () => (Array.isArray(cameras) ? cameras.find((camera) => camera.id === selectedCameraId) ?? cameras[0] ?? null : null),
     [cameras, selectedCameraId],
   );
 
@@ -547,4 +564,3 @@ function InfoCard({ icon: Icon, title, body }: { icon: typeof Video; title: stri
     </div>
   );
 }
-

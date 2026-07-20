@@ -20,6 +20,33 @@ const verifyInput = commonFrameInput.extend({
   image_data_url: z.string().min(1),
 });
 
+function normalizeCameraList(payload: unknown): CameraRecord[] {
+  if (Array.isArray(payload)) {
+    return payload.filter(Boolean) as CameraRecord[];
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const record = payload as Record<string, unknown>;
+  const candidates = [
+    record.data,
+    record.cameras,
+    record.items,
+    record.results,
+    record.records,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(Boolean) as CameraRecord[];
+    }
+  }
+
+  return [];
+}
+
 export type CCTVFrameResult = {
   id?: string;
   request_id?: string;
@@ -51,7 +78,7 @@ export const getCameras = createServerFn({ method: "GET" })
       method: "GET",
       query: { org_id: orgId },
     });
-    return result ?? [];
+    return normalizeCameraList(result);
   });
 
 export const ingestFrame = createServerFn({ method: "POST" })
@@ -119,4 +146,3 @@ export const verifyVision = createServerFn({ method: "POST" })
       recommended_actions: ["Confirm camera coverage", "Review blind spot transition"],
     };
   });
-
