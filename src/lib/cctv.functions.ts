@@ -6,7 +6,8 @@ import { requestRelationshipApi } from "@/lib/relationship-api";
 import type { CameraRecord } from "@/lib/cameras.functions";
 
 const commonFrameInput = z.object({
-  camera_id: z.string().min(1).optional(),
+  camera_id: z.string().min(1),
+  frame_data: z.string().min(1).optional(),
   image_data_url: z.string().min(1).optional(),
   voice_transcript: z.string().max(2000).optional(),
   event_type: z.string().min(1).max(120),
@@ -17,7 +18,7 @@ const commonFrameInput = z.object({
 });
 
 const verifyInput = commonFrameInput.extend({
-  image_data_url: z.string().min(1),
+  frame_data: z.string().min(1),
 });
 
 function normalizeCameraList(payload: unknown): CameraRecord[] {
@@ -89,6 +90,7 @@ export const ingestFrame = createServerFn({ method: "POST" })
     const result = await requestRelationshipApi<CCTVFrameResult>("/api/v1/frames/ingest", {
       body: {
         ...data,
+        frame_data: data.frame_data ?? data.image_data_url,
         org_id: orgId,
         source: "c4isod-dashboard",
       },
@@ -133,6 +135,7 @@ export const verifyVision = createServerFn({ method: "POST" })
     const result = await requestRelationshipApi<CCTVFrameResult>("/api/v1/vision/verify", {
       body: {
         ...data,
+        frame_data: data.frame_data,
         org_id: orgId,
         source: "c4isod-dashboard",
       },

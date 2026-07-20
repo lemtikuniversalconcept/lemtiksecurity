@@ -162,6 +162,7 @@ function CctvControlRoom() {
   const runDiagnostics = async () => {
     const payload = {
       camera_id: selectedCamera?.id,
+      frame_data: imageDataUrl ?? undefined,
       image_data_url: imageDataUrl ?? undefined,
       voice_transcript: voiceTranscript,
       event_type: eventType,
@@ -180,7 +181,7 @@ function CctvControlRoom() {
 
       if (imageDataUrl) {
         primary = (await ingestFn({ data: payload })) as CCTVFrameResult | null;
-        secondary = (await verifyFn({ data: { ...payload, image_data_url: imageDataUrl } })) as CCTVFrameResult | null;
+        secondary = (await verifyFn({ data: { ...payload, frame_data: imageDataUrl } })) as CCTVFrameResult | null;
       } else {
         primary = (await analyzeFn({ data: payload })) as CCTVFrameResult | null;
       }
