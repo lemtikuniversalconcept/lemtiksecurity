@@ -9,7 +9,15 @@ const orgType = z.enum(["estate", "corporate", "hotel", "government"]);
 // Subscription tier/status are intentionally not exposed in any user-facing
 // validator — billing must be updated via privileged paths only.
 
-const appRole = z.enum(["officer", "supervisor", "manager", "client_admin", "lemtik_admin"]);
+const appRole = z.enum(["officer", "supervisor", "manager", "client_admin"]);
+
+async function assertAdmin(supabase: any, userId: string, orgId: string) {
+  const { data } = await supabase
+    .from("organisation_members").select("role")
+    .eq("organisation_id", orgId).eq("user_id", userId).maybeSingle();
+  if (!data || !["manager", "client_admin", "lemtik_admin"].includes(data.role))
+    throw new Error("Access denied. Admin role required.");
+}
 
 // ---------- READS ----------------------------------------------------------
 
@@ -318,6 +326,22 @@ export const updateMemberRole = createServerFn({ method: "POST" })
     role: appRole,
   }).parse(d))
   .handler(async ({ data, context }) => {
+    const { data: targetMember, error: targetError } = await context.supabase
+      .from("organisation_members")
+      .select("organisation_id, user_id")
+      .eq("id", data.member_id)
+      .maybeSingle();
+
+    if (targetError || !targetMember) {
+      throw new Error("Target member not found.");
+    }
+
+    await assertAdmin(context.supabase, context.userId, targetMember.organisation_id);
+
+    if (targetMember.user_id === context.userId) {
+      throw new Error("You cannot change your own role.");
+    }
+
     const { error } = await context.supabase
       .from("organisation_members").update({ role: data.role }).eq("id", data.member_id);
     if (error) throwSafeError("orgs.members.update", error, "Access denied or unable to update member.");

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { getActiveOrgId } from "@/lib/orgs.server";
 
 export type CommandScope = "incidents" | "patrols" | "targets" | "intelligence" | "system";
 
@@ -97,6 +98,9 @@ const approvalInput = z.object({
   delay_minutes: z.number().int().min(1).max(240).optional(),
   modification: z.string().max(500).optional(),
   command_text: z.string().max(500).optional(),
+  operation_id: z.string().optional(),
+  request_id: z.string().optional(),
+  org_id: z.string().uuid().optional(),
 });
 
 function relationshipApiConfig() {
@@ -331,16 +335,112 @@ export const submitAiRecommendation = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => recommendationInput.parse(data))
   .handler(async ({ data, context }) => {
     const commandText = data.command_text ?? data.incident_id ?? "recommend response";
-    const result = await sendRelationshipApi<AiRecommendation>("/api/v1/ai/recommend-response", {
-      actor_id: context.userId,
-      organisation_id: data.org_id ?? null,
-      incident_id: data.incident_id ?? null,
-      scope: data.scope ?? "incidents",
-      selected_ids: data.selected_ids ?? [],
-      command_text: commandText,
-      source: "c4isod-dashboard",
-    });
-    return result ?? buildRecommendation(commandText, {
+    const orgId = data.org_id ?? "";
+    let incidentObj: any = null;
+
+    if (data.incident_id) {
+      const { data: incident, error: incErr } = await context.supabase
+        .from("incidents")
+        .select("*")
+        .eq("id", data.incident_id)
+        .maybeSingle();
+
+      if (!incErr && incident) {
+        incidentObj = {
+          id: incident.id,
+          type: incident.type || "unknown",
+          severity: Number(incident.severity) || 1,
+          description: incident.description || "",
+          location: {
+            name: incident.location || "Default Location",
+            lat: incident.coord_x ? Number(incident.coord_x) : 6.4281,
+            lng: incident.coord_y ? Number(incident.coord_y) : 3.4219,
+            address: incident.location || "",
+          },
+          reported_at: incident.reported_at || new Date().toISOString(),
+          reporter_id: incident.reporter_id || context.userId,
+          org_id: orgId || incident.organisation_id || "",
+          status: incident.status || "reported"
+        };
+      }
+    }
+
+    if (!incidentObj) {
+      incidentObj = {
+        id: crypto.randomUUID(),
+        type: "unknown",
+        severity: 1,
+        description: commandText,
+        location: {
+          name: "Main Zone",
+          lat: 6.4281,
+          lng: 3.4219,
+          address: "Main Zone",
+        },
+        reported_at: new Date().toISOString(),
+        reporter_id: context.userId,
+        org_id: orgId,
+        status: "reported"
+      };
+    }
+
+    const payload = {
+      request_type: "ai_recommend_response" as const,
+      request_id: `req-${crypto.randomUUID()}`,
+      org_id: orgId || incidentObj.org_id || "default",
+      incident: incidentObj,
+      context: {
+        operator_id: context.userId,
+        constraints: {
+          command_text: commandText,
+          scope: data.scope ?? "incidents",
+          selected_ids: data.selected_ids ?? []
+        }
+      }
+    };
+
+    const result = await sendRelationshipApi<any>("/api/v1/ai/recommend-response", payload);
+    
+    if (result && result.status === "success" && result.data) {
+      const nested = result.data;
+      const actions = Array.isArray(nested.actions)
+        ? nested.actions.map((act: any, idx: number) => {
+            if (typeof act === "string") {
+              return {
+                id: `action-${idx}`,
+                label: act,
+                selected: true,
+                requiresApproval: true,
+                kind: "dispatch" as const
+              };
+            }
+            return {
+              id: act.id || `action-${idx}`,
+              label: act.label || act.title || String(act),
+              selected: act.selected !== false,
+              requiresApproval: act.requiresApproval !== false,
+              kind: act.kind || "dispatch"
+            };
+          })
+        : [];
+
+      return {
+        accepted: true,
+        request_id: result.request_id || nested.request_id || `req-${crypto.randomUUID()}`,
+        priority: nested.priority || nested.response_plan?.priority || "medium",
+        suggested_patrols: Array.isArray(nested.suggested_patrols) ? nested.suggested_patrols : [],
+        dispatch_route: Array.isArray(nested.dispatch_route) ? nested.dispatch_route : [],
+        affected_devices: Array.isArray(nested.affected_devices) ? nested.affected_devices : [],
+        actions,
+        reasoning: Array.isArray(nested.reasoning) ? nested.reasoning : [],
+        meta: result.meta || {
+          operation_id: result.meta?.operation_id || nested.operation_id,
+          request_id: result.request_id
+        }
+      } as any;
+    }
+
+    return buildRecommendation(commandText, {
       scope: data.scope ?? "incidents",
       selected_ids: data.selected_ids ?? [],
       incident_id: data.incident_id,
@@ -351,21 +451,37 @@ export const submitApprovalDecision = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => approvalInput.parse(data))
   .handler(async ({ data, context }) => {
+    const orgId = data.org_id || (await getActiveOrgId()) || "default";
+    const decisionMap = {
+      approve_all: "approved",
+      approve_selected: "approved",
+      reject: "rejected",
+      modify: "modified",
+      delay: "rejected",
+    } as const;
+
+    const gatewayDecision = decisionMap[data.decision] || "approved";
+
     const result = await sendRelationshipApi<{
       accepted?: boolean;
       request_id?: string;
-    }>("/api/v1/approval-decisions", {
-      actor_id: context.userId,
-      decision: data.decision,
-      proposal_ids: data.proposal_ids,
-      note: data.note ?? null,
-      delay_minutes: data.delay_minutes ?? null,
-      modification: data.modification ?? null,
-      command_text: data.command_text ?? null,
-      source: "c4isod-dashboard",
+    }>("/api/v1/ai/approve", {
+      request_type: "ai_approve" as const,
+      request_id: data.request_id ?? `req-${crypto.randomUUID()}`,
+      org_id: orgId,
+      operation_id: data.operation_id ?? `op-${crypto.randomUUID()}`,
+      decision: gatewayDecision,
+      notes: data.note ?? "",
+      approved_payload: {
+        proposal_ids: data.proposal_ids,
+        modification: data.modification,
+        command_text: data.command_text,
+      }
     });
 
-    if (result?.accepted !== false) {
+    const isAccepted = data.decision !== "reject";
+
+    if (isAccepted) {
       await sendAutonomousController("/api/v1/actions/execute", {
         actor_id: context.userId,
         decision: data.decision,
@@ -379,7 +495,7 @@ export const submitApprovalDecision = createServerFn({ method: "POST" })
     }
 
     return result ?? {
-      accepted: true,
-      request_id: `local-${crypto.randomUUID()}`,
+      accepted: isAccepted,
+      request_id: data.request_id ?? `local-${crypto.randomUUID()}`,
     };
   });

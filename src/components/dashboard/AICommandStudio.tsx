@@ -299,6 +299,8 @@ export function HumanApprovalLayer({
   const submitDecision = useServerFn(submitApprovalDecision);
   const recommendResponse = useServerFn(submitAiRecommendation);
   const [recommendation, setRecommendation] = useState<AiRecommendation | null>(null);
+  const [operationId, setOperationId] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
   const [selectedActions, setSelectedActions] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [editedRoute, setEditedRoute] = useState("");
@@ -317,6 +319,10 @@ export function HumanApprovalLayer({
       });
       if (cancelled) return;
       setRecommendation(result as AiRecommendation);
+      if (result && (result as any).meta) {
+        setOperationId((result as any).meta.operation_id || null);
+        setRequestId((result as any).meta.request_id || null);
+      }
       const actions = (result as AiRecommendation).actions ?? [];
       setSelectedActions(actions.filter((action) => action.selected).map((action) => action.id));
       setEditedRoute((result as AiRecommendation).dispatch_route.join(" → "));
@@ -370,6 +376,9 @@ export function HumanApprovalLayer({
         note: note.trim() || undefined,
         modification: editedRoute.trim() || undefined,
         command_text: commandText ?? undefined,
+        operation_id: operationId ?? undefined,
+        request_id: requestId ?? undefined,
+        org_id: orgId ?? undefined,
       };
       await submitDecision({ data: payload });
       onDecision?.(decision, payload.proposal_ids, {

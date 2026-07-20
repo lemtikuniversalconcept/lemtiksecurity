@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { recordBlackboxAudit } from "@/lib/audit.server";
 import { buildWelcomeEmail, sendResendEmail } from "@/lib/email.service";
 import { throwSafeError } from "@/lib/server-errors";
+import { getSiteUrl } from "@/lib/orgs.server";
 
 const orgType = z.enum(["estate", "corporate", "hotel", "government"]);
 const subscriptionTier = z.enum(["basic", "professional", "enterprise", "government"]);
@@ -269,8 +270,8 @@ export const createPlatformOrganisation = createServerFn({ method: "POST" })
     if (inviteErr) throwSafeError("platform.org.invite", inviteErr, "Organisation created but the admin invite failed.");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const siteUrl = (process.env.SITE_URL ?? "").replace(/\/$/, "");
-    const redirectTo = siteUrl ? `${siteUrl}/onboarding?invite=${invite.token}` : undefined;
+    const siteUrl = getSiteUrl();
+    const redirectTo = `${siteUrl}/onboarding?invite=${invite.token}`;
     const { error: emailErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
       data: {
         invite_token: invite.token,
@@ -279,13 +280,13 @@ export const createPlatformOrganisation = createServerFn({ method: "POST" })
         invited_role: "client_admin",
         invited_by: me?.display_name ?? null,
       },
-      ...(redirectTo ? { redirectTo } : {}),
+      redirectTo,
     });
     const deliveryWarning = await sendWelcomeEmail({
       email: invite.email,
       organisationName: org.name,
       adminName: data.admin_name ?? me?.display_name ?? null,
-      inviteUrl: redirectTo ?? invite.token,
+      inviteUrl: redirectTo,
     });
 
     await recordBlackboxAudit({

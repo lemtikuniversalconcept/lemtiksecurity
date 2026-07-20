@@ -213,14 +213,16 @@ function LiveMap() {
         qc.invalidateQueries({ queryKey: ["incidents"] });
       })
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") { setConn("live"); retry = 0; }
+        if (status === "SUBSCRIBED") {
+          setConn("live");
+        }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           setConn("reconnecting");
-          retry = Math.min(retry + 1, 6);
-          setTimeout(() => channel.subscribe(), Math.min(1000 * 2 ** retry, 30_000));
         }
       });
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [qc]);
 
   useEffect(() => {

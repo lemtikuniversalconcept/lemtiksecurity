@@ -23,7 +23,7 @@ export const Route = createFileRoute("/app/users")({
   component: Users,
 });
 
-const ROLES = ["officer", "supervisor", "manager", "client_admin", "lemtik_admin"] as const;
+const ROLES = ["officer", "supervisor", "manager", "client_admin"] as const;
 type Role = (typeof ROLES)[number];
 
 const statusTone: Record<string, string> = {

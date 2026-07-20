@@ -4,9 +4,9 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { recordBlackboxAudit } from "@/lib/audit.server";
 import { buildUserInvitationEmail, sendResendEmail } from "@/lib/email.service";
 import { throwSafeError } from "@/lib/server-errors";
-import { getActiveOrgId } from "@/lib/orgs.server";
+import { getActiveOrgId, getSiteUrl } from "@/lib/orgs.server";
 
-const appRole = z.enum(["officer", "supervisor", "manager", "client_admin", "lemtik_admin"]);
+const appRole = z.enum(["officer", "supervisor", "manager", "client_admin"]);
 
 async function assertAdmin(supabase: any, userId: string, orgId: string) {
   const { data } = await supabase
@@ -202,11 +202,9 @@ export const createInvite = createServerFn({ method: "POST" })
 
     // Send Supabase magic-link invite via admin
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const redirectBase = (process.env.SITE_URL ?? "").replace(/\/$/, "");
-    const redirectTo = redirectBase
-      ? `${redirectBase}/onboarding?invite=${invite.token}`
-      : undefined;
-    const inviteUrl = redirectTo ?? (redirectBase ? `${redirectBase}/onboarding?invite=${invite.token}` : invite.token);
+    const redirectBase = getSiteUrl();
+    const redirectTo = `${redirectBase}/onboarding?invite=${invite.token}`;
+    const inviteUrl = redirectTo;
     const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
       data: {
         invite_token: invite.token,
@@ -215,7 +213,7 @@ export const createInvite = createServerFn({ method: "POST" })
         invited_role: data.role,
         invited_by: meProf?.display_name ?? null,
       },
-      ...(redirectTo ? { redirectTo } : {}),
+      redirectTo,
     });
     const deliveryWarning = await sendInvitationEmail({
       email: invite.email,
@@ -260,8 +258,8 @@ export const resendInvite = createServerFn({ method: "POST" })
       .from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle();
     const { data: org } = await context.supabase
       .from("organisations").select("name").eq("id", orgId).maybeSingle();
-    const redirectBase = (process.env.SITE_URL ?? "").replace(/\/$/, "");
-    const inviteUrl = redirectBase ? `${redirectBase}/onboarding?invite=${invite.token}` : invite.token;
+    const redirectBase = getSiteUrl();
+    const inviteUrl = `${redirectBase}/onboarding?invite=${invite.token}`;
     const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
       data: {
         invite_token: invite.token,
@@ -270,7 +268,7 @@ export const resendInvite = createServerFn({ method: "POST" })
         organisation_name: org?.name ?? "your team",
         invited_by: meProf?.display_name ?? null,
       },
-      ...(redirectBase ? { redirectTo: inviteUrl } : {}),
+      redirectTo: inviteUrl,
     });
     const deliveryWarning = await sendInvitationEmail({
       email: invite.email,
@@ -313,7 +311,7 @@ export const bulkInvite = createServerFn({ method: "POST" })
       .from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle();
     const { data: org } = await context.supabase
       .from("organisations").select("name").eq("id", orgId).maybeSingle();
-    const redirectBase = (process.env.SITE_URL ?? "").replace(/\/$/, "");
+    const redirectBase = getSiteUrl();
 
     for (const row of data.rows) {
       const email = row.email.toLowerCase().trim();
@@ -333,14 +331,14 @@ export const bulkInvite = createServerFn({ method: "POST" })
             organisation_name: org?.name ?? "your team",
             invited_by: meProf?.display_name ?? null,
           },
-          ...(redirectBase ? { redirectTo: `${redirectBase}/onboarding?invite=${invite.token}` } : {}),
+          redirectTo: `${redirectBase}/onboarding?invite=${invite.token}`,
         });
         const deliveryWarning = await sendInvitationEmail({
           email,
           organisationName: org?.name ?? "your team",
           role: invite.role,
           invitedBy: meProf?.display_name ?? null,
-          inviteUrl: redirectBase ? `${redirectBase}/onboarding?invite=${invite.token}` : invite.token,
+          inviteUrl: `${redirectBase}/onboarding?invite=${invite.token}`,
         });
         results.push({ email, ok: true, error: inviteErr?.message ?? deliveryWarning ?? undefined });
       } catch (e: any) {

@@ -1,4 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getRequest } from "@tanstack/react-start/server";
+
+export function getSiteUrl(): string {
+  const envUrl = process.env.SITE_URL;
+  if (envUrl && envUrl.trim() !== "" && envUrl.toLowerCase() !== "none selected" && envUrl.toLowerCase() !== "none") {
+    return envUrl.replace(/\/$/, "");
+  }
+  try {
+    const request = getRequest();
+    if (request) {
+      const url = new URL(request.url);
+      const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? url.host;
+      const proto = request.headers.get("x-forwarded-proto") ?? (request.url.startsWith("https") ? "https" : "http");
+      return `${proto}://${host}`;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return "http://localhost:3000";
+}
 
 /**
  * Resolve the user's currently active organisation. Throws a friendly error
