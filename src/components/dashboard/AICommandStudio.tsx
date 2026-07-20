@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { BadgeAlert, CheckCircle2, Clock3, Loader2, MessageSquareMore, ShieldAlert, Sparkles, Target, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   submitAiQuery,
