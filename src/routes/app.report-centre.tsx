@@ -242,6 +242,11 @@ function ReportCentre() {
       return;
     }
 
+    const shareUrl =
+      selectedTemplate === "weekly"
+        ? `${window.location.origin}/app/report-centre/share/${buildShareToken(selectedTemplateData.title, currentOrg.id)}`
+        : null;
+
     const summary = await summaryFn({
       data: {
         template_id: selectedTemplateData.id,
@@ -262,13 +267,32 @@ function ReportCentre() {
       },
     }) as string;
 
+    const { error: saveError } = await supabase.from("security_reports" as any).insert({
+      organisation_id: currentOrg.id,
+      org_id: currentOrg.id,
+      title: selectedTemplateData.title,
+      report_name: selectedTemplateData.title,
+      report_type: selectedTemplateData.id,
+      period_label: selectedTemplateData.window,
+      summary,
+      channels: selectedTemplateData.delivery,
+      recipient_emails: recipients,
+      recipient_count: recipients.length,
+      share_url: shareUrl,
+      generated_at: new Date().toISOString(),
+      source: "c4isod-dashboard",
+      created_by: appAccess.userId,
+    } as any);
+
+    if (saveError) {
+      toast.warning(`Report saved in memory, but database insert failed: ${saveError.message}`);
+    }
+
     const result = await sendReport({
       report_name: selectedTemplateData.title,
       summary,
       recipient_emails: recipients,
-      report_url: selectedTemplate === "weekly"
-        ? `${window.location.origin}/app/report-centre/share/${buildShareToken(selectedTemplateData.title, currentOrg.id)}`
-        : null,
+      report_url: shareUrl,
       unsubscribe_url: null,
     }) as { ok?: boolean; warning?: string; skipped?: boolean };
 

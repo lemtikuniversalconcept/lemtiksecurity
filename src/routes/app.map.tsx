@@ -47,7 +47,6 @@ const WINDOWS: { value: Window; label: string; ms: number }[] = [
 ];
 const TYPE_OPTS: (IncidentType | "all")[] = ["all", "intrusion", "theft", "medical", "fire", "suspicious", "civil_unrest", "other"];
 const SMART_DEVICE_TYPES = ["Camera", "Door Sensor", "Barrier", "Radar"] as const;
-const TRACKED_TARGET_IDS = ["REID-2048", "REID-3071", "REID-4816"] as const;
 const MAP_COLORS = {
   red: "#f43f5e",
   orange: "#fb923c",
@@ -76,6 +75,18 @@ type IncidentDraft = {
   description?: string;
   type?: IncidentType;
   severity?: number;
+};
+
+type TelemetryRow = {
+  id: string;
+  target_id: string;
+  camera_name?: string | null;
+  coord_x?: number | null;
+  coord_y?: number | null;
+  blind_spot?: boolean | null;
+  confidence?: number | null;
+  captured_at?: string | null;
+  zone?: string | null;
 };
 
 function normaliseLngLat(lng: number, lat: number): [number, number] {
@@ -108,6 +119,49 @@ function riskColor(risk: number) {
   if (risk >= 65) return MAP_COLORS.orange;
   if (risk >= 45) return MAP_COLORS.amber;
   return MAP_COLORS.green;
+}
+
+function telemetryCoord(row: TelemetryRow): [number, number] | null {
+  if (row.coord_x == null || row.coord_y == null) return null;
+  return normaliseLngLat(Number(row.coord_x), Number(row.coord_y));
+}
+
+function buildTelemetryPath(rows: TelemetryRow[], locations: { coord_x?: number | null; coord_y?: number | null }[]) {
+  const points = rows
+    .map((row, index) => {
+      const coord = telemetryCoord(row);
+      if (!coord) return null;
+      return {
+        coord,
+        row,
+        index,
+        camera: row.camera_name ?? `Camera ${index + 1}`,
+      };
+    })
+    .filter(Boolean) as Array<{ coord: [number, number]; row: TelemetryRow; index: number; camera: string }>;
+
+  if (points.length >= 1) return points;
+
+  const fallback = locations
+    .filter((location) => location.coord_x != null && location.coord_y != null)
+    .slice(0, 4)
+    .map((location, index) => ({
+      coord: normaliseLngLat(Number(location.coord_x), Number(location.coord_y)),
+      row: {
+        id: `seed-${index}`,
+        target_id: `telemetry-seed-${index + 1}`,
+        camera_name: (location as any).name ?? `Camera ${index + 1}`,
+        coord_x: Number(location.coord_x),
+        coord_y: Number(location.coord_y),
+        blind_spot: index % 3 === 1,
+        confidence: 72 + index * 4,
+        captured_at: new Date(Date.now() - index * 90_000).toISOString(),
+      } satisfies TelemetryRow,
+      index,
+      camera: (location as any).name ?? `Camera ${index + 1}`,
+    }));
+
+  return fallback;
 }
 
 // Severity → CSS color (resolves design tokens to literal colors for mapbox paint)
@@ -203,10 +257,10 @@ function LiveMap() {
   const [contextMenu, setContextMenu] = useState<MapMenuState | null>(null);
   const [areaIntel, setAreaIntel] = useState<{ lng: number; lat: number; label: string } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [telemetryRows, setTelemetryRows] = useState<TelemetryRow[]>([]);
 
   // ---- Realtime + connection banner ----
   useEffect(() => {
-    let retry = 0;
     const channel = supabase
       .channel("incidents-map")
       .on("postgres_changes", { event: "*", schema: "public", table: "incidents" }, () => {
@@ -224,6 +278,48 @@ function LiveMap() {
       supabase.removeChannel(channel);
     };
   }, [qc]);
+
+  useEffect(() => {
+    let active = true;
+    const loadTelemetry = async () => {
+      const { data, error } = await supabase
+        .from("cctv_ai_telemetry" as any)
+        .select("*")
+        .order("captured_at", { ascending: true })
+        .limit(200);
+      if (!active) return;
+      if (error) {
+        setConn("reconnecting");
+        return;
+      }
+      setTelemetryRows((data ?? []) as TelemetryRow[]);
+    };
+    void loadTelemetry();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("cctv-ai-telemetry")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "cctv_ai_telemetry" }, (payload) => {
+        const next = payload.new as TelemetryRow;
+        setTelemetryRows((current) => {
+          const merged = [...current.filter((row) => row.id !== next.id), next];
+          merged.sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime());
+          return merged.slice(-200);
+        });
+        setConn("live");
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") setConn("live");
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setConn("reconnecting");
+      });
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
@@ -517,51 +613,56 @@ function LiveMap() {
     }),
     [canViewSmartInfra, incidents, locations, patrols],
   );
-  const [targetTick, setTargetTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTargetTick((value) => value + 1), 1800);
-    return () => window.clearInterval(id);
-  }, []);
   const trackedTargets = useMemo<TargetTrack[]>(() => {
-    return TRACKED_TARGET_IDS.map((id, index) => {
-      const sourceLocation = locations[(index * 2 + incidents.length) % Math.max(locations.length, 1)];
-      const base: [number, number] = sourceLocation?.coord_x != null && sourceLocation?.coord_y != null
-        ? [Number(sourceLocation.coord_x), Number(sourceLocation.coord_y)]
-        : [LAGOS[0] + 0.004 * (index + 1), LAGOS[1] - 0.003 * (index + 1)];
-      const path = buildTargetPath(index + incidents.length, base, locations);
-      const cycleLength = Math.max(1, (path.length - 1) * 4);
-      const phase = (targetTick + index * 3) % cycleLength;
-      const segment = Math.min(path.length - 2, Math.floor(phase / 4));
-      const ratio = (phase % 4) / 4;
-      const start = path[segment];
-      const end = path[segment + 1];
-      const blindSpot = (segment + index) % 3 === 1;
-      const handoff = segment === path.length - 2 && ratio > 0.5;
-      const position: [number, number] = [
-        Number(lerp(start[0], end[0], ratio).toFixed(6)),
-        Number(lerp(start[1], end[1], ratio).toFixed(6)),
-      ];
-      return {
-        id,
-        label: `Target ${id}`,
-        path,
-        position,
-        blindSpot,
-        handoff,
-        confidence: Math.max(68, 91 - index * 4 - (blindSpot ? 8 : 0)),
-        lastSeen: new Date(Date.now() - (index + 1) * 90_000).toISOString(),
-        routeNote: blindSpot
-          ? "Entering blind spot corridor"
-          : handoff
-            ? "Exiting blind spot transition"
-            : "Tracked across visible segment",
-      };
+    const groups = new Map<string, TelemetryRow[]>();
+    telemetryRows.forEach((row) => {
+      if (!row.target_id) return;
+      const current = groups.get(row.target_id) ?? [];
+      current.push(row);
+      groups.set(row.target_id, current);
     });
-  }, [incidents.length, locations, targetTick]);
+
+    const tracks = [...groups.entries()]
+      .map(([id, rows], index) => {
+        const ordered = [...rows]
+          .filter((row) => row.coord_x != null && row.coord_y != null)
+          .sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime());
+        if (!ordered.length) return null;
+        const path = buildTelemetryPath(ordered, locations).map((entry) => entry.coord);
+        const latest = ordered[ordered.length - 1];
+        const latestPoint = telemetryCoord(latest) ?? path[path.length - 1] ?? [LAGOS[0], LAGOS[1]];
+        const blindSpot = Boolean(latest.blind_spot);
+        const handoff = ordered.length > 1 && Boolean(ordered[ordered.length - 2]?.blind_spot) && !blindSpot;
+        return {
+          id,
+          label: id,
+          path,
+          position: latestPoint,
+          blindSpot,
+          handoff,
+          confidence: Math.max(0, Math.min(100, Number(latest.confidence ?? 74))),
+          lastSeen: latest.captured_at ?? new Date().toISOString(),
+          routeNote: blindSpot
+            ? `Blind spot at ${latest.camera_name ?? "unknown camera"}`
+            : handoff
+              ? `Reappeared after blind spot via ${latest.camera_name ?? "camera handoff"}`
+              : `Visible at ${latest.camera_name ?? "camera feed"}`,
+        } satisfies TargetTrack;
+      })
+      .filter(Boolean) as TargetTrack[];
+
+    if (tracks.length > 0) return tracks;
+
+    return [];
+  }, [locations, telemetryRows]);
   const mcmotTransitions = useMemo(
     () =>
       trackedTargets.map((target, index) => {
-        const hopNames = target.path.map((point, hopIndex) => {
+        const hopNames = telemetryRows
+          .filter((row) => row.target_id === target.id)
+          .sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime())
+          .map((row, hopIndex) => row.camera_name ?? `Camera ${hopIndex + 1}`);
+        const fallbackNames = target.path.map((point, hopIndex) => {
           const nearestLocation = locations.find((location) => {
             if (location.coord_x == null || location.coord_y == null) return false;
             const lngDelta = Math.abs(Number(location.coord_x) - point[0]);
@@ -570,17 +671,18 @@ function LiveMap() {
           });
           return nearestLocation?.name ?? `Camera ${hopIndex + 1}`;
         });
+        const routeNames = hopNames.length ? hopNames : fallbackNames;
         return {
           id: target.id,
           confidence: target.confidence,
-          current: hopNames[Math.max(0, hopNames.length - 2)] ?? hopNames[0],
-          next: hopNames[hopNames.length - 1] ?? hopNames[0],
+          current: routeNames[Math.max(0, routeNames.length - 2)] ?? routeNames[0],
+          next: routeNames[routeNames.length - 1] ?? routeNames[0],
           blindSpot: target.blindSpot,
-          route: hopNames.join(" → "),
-          color: index === 0 ? MAP_COLORS.red : index === 1 ? MAP_COLORS.orange : MAP_COLORS.blue,
+          route: routeNames.join(" → "),
+          color: target.blindSpot ? MAP_COLORS.orange : index % 2 === 0 ? MAP_COLORS.red : MAP_COLORS.blue,
         };
       }),
-    [locations, trackedTargets],
+    [telemetryRows, trackedTargets],
   );
   const trackedTargetLines = useMemo(
     () => ({
@@ -594,7 +696,7 @@ function LiveMap() {
           },
           properties: {
             id: target.id,
-            blindspot: (segmentIndex + targetIndex) % 3 === 1 ? 1 : 0,
+            blindspot: (segmentIndex + targetIndex) % 2 === 1 || target.blindSpot ? 1 : 0,
             active: target.id === trackedTargets[0]?.id ? 1 : 0,
             confidence: target.confidence,
           },
@@ -612,15 +714,16 @@ function LiveMap() {
           type: "Point" as const,
           coordinates: target.position,
         },
-        properties: {
-          id: target.id,
-          label: target.label,
-          blindspot: target.blindSpot ? 1 : 0,
-          handoff: target.handoff ? 1 : 0,
-          confidence: target.confidence,
-          routeNote: target.routeNote,
-        },
-      })),
+          properties: {
+            id: target.id,
+            label: target.label,
+            blindspot: target.blindSpot ? 1 : 0,
+            handoff: target.handoff ? 1 : 0,
+            confidence: target.confidence,
+            routeNote: target.routeNote,
+            lastSeen: target.lastSeen,
+          },
+        })),
     }),
     [trackedTargets],
   );

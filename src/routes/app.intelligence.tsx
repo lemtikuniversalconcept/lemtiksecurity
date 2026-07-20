@@ -7,7 +7,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { supabase } from "@/integrations/supabase/client";
 import { listIncidents } from "@/lib/incidents.functions";
 import { getMapboxToken } from "@/lib/config.functions";
-import { getBriefs, generateBrief as generateBriefReport } from "@/lib/intelligence.functions";
+import { getBriefings, generateBriefing } from "@/lib/intelligence.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { incidents as fallbackIncidents, zoneRisk, type IncidentType } from "@/lib/mockData";
@@ -76,8 +76,8 @@ function IntelligenceFeedPage() {
   const canManage = appAccess.specRole === "security_manager";
   const list = useServerFn(listIncidents);
   const tokenFn = useServerFn(getMapboxToken);
-  const loadBriefs = useServerFn(getBriefs);
-  const createBrief = useServerFn(generateBriefReport);
+  const loadBriefs = useServerFn(getBriefings);
+  const createBrief = useServerFn(generateBriefing);
   const { data: incidents = [], isLoading } = useQuery({
     queryKey: ["intelligence-feed"],
     queryFn: () => list() as Promise<any[]>,

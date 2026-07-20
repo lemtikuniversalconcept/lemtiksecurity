@@ -8,6 +8,8 @@ import { listPatrols } from "@/lib/patrols.functions";
 import { listIncidents } from "@/lib/incidents.functions";
 import {
   listActiveAlerts,
+  getInventory,
+  addInventoryItem,
   updateFuelReserve,
   updateOfficerInventory,
   updateVehicleInventory,
@@ -130,6 +132,8 @@ function InventoryPage() {
   const listPat = useServerFn(listPatrols);
   const listInc = useServerFn(listIncidents);
   const listAlerts = useServerFn(listActiveAlerts);
+  const loadInventory = useServerFn(getInventory);
+  const addInventory = useServerFn(addInventoryItem);
   const saveOfficerFn = useServerFn(updateOfficerInventory);
   const saveVehicleFn = useServerFn(updateVehicleInventory);
   const saveWeaponFn = useServerFn(updateWeaponInventory);
@@ -153,16 +157,76 @@ function InventoryPage() {
     queryKey: ["inventory-remote-vehicles", appAccess.orgId],
     queryFn: () => getVehicles(),
   });
+  const { data: inventorySnapshot = null, isLoading: inventorySnapshotLoading } = useQuery({
+    queryKey: ["inventory-snapshot", appAccess.orgId],
+    queryFn: () => loadInventory({ data: { org_id: appAccess.orgId, scope: "overview" } }),
+  });
 
   useRealtimeInvalidate("organisation_members", [["inventory-members"]]);
   useRealtimeInvalidate("organisation_locations", [["inventory-locations"]]);
   useRealtimeInvalidate("patrols", [["inventory-patrols"]]);
   useRealtimeInvalidate("incidents", [["inventory-incidents"]]);
 
-  const dataReady = !membersLoading && !locationsLoading && !patrolsLoading && !incidentsLoading && !alertsLoading && !remoteOfficersLoading && !remoteVehiclesLoading;
+  const dataReady = !membersLoading && !locationsLoading && !patrolsLoading && !incidentsLoading && !alertsLoading && !remoteOfficersLoading && !remoteVehiclesLoading && !inventorySnapshotLoading;
 
   const baseState = useMemo(() => {
     const fallbackState = buildInventoryState(members as any[], locations as any[], patrols as any[], incidents as any[]);
+    if (inventorySnapshot) {
+      const snapshot = inventorySnapshot as Partial<InventoryState> & {
+        officers?: any[];
+        vehicles?: any[];
+        weapons?: any[];
+        ammo?: any[];
+        equipment?: any[];
+        fuelLogs?: any[];
+        alerts?: any[];
+      };
+      if (Array.isArray(snapshot.officers) && snapshot.officers.length > 0) {
+        fallbackState.officers = snapshot.officers.map((officer: any, index: number) => ({
+          id: officer.id ?? officer.user_id ?? `off-${index + 1}`,
+          user_id: officer.user_id ?? officer.id ?? `off-${index + 1}`,
+          name: officer.name ?? officer.display_name ?? `Officer ${index + 1}`,
+          badge: officer.badge ?? `BDG-${String(index + 1).padStart(3, "0")}`,
+          status: officer.status ?? "off-duty",
+          armed: Boolean(officer.armed),
+          location: officer.location ?? officer.zone ?? "Main site",
+          zone: officer.zone ?? officer.location ?? "Main site",
+          shift: officer.shift ?? "06:00 – 18:00",
+          certifications: officer.certifications ?? [],
+          contact: officer.contact ?? "App contact",
+        }));
+      }
+      if (Array.isArray(snapshot.vehicles) && snapshot.vehicles.length > 0) {
+        fallbackState.vehicles = snapshot.vehicles.map((vehicle: any, index: number) => ({
+          id: vehicle.id ?? vehicle.vehicleId ?? `veh-${index + 1}`,
+          vehicleId: vehicle.vehicleId ?? vehicle.vehicle_id ?? `VEH-${String(index + 1).padStart(3, "0")}`,
+          type: vehicle.type ?? "SUV",
+          status: vehicle.status ?? "available",
+          fuel: Number(vehicle.fuel ?? vehicle.fuel_percentage ?? 80),
+          condition: vehicle.condition ?? "Roadworthy",
+          driver: vehicle.driver ?? "Unassigned",
+          zone: vehicle.zone ?? "Main site",
+          location: vehicle.location ?? "Main site",
+          history: Array.isArray(vehicle.history) ? vehicle.history : [Number(vehicle.fuel ?? 80)],
+        }));
+      }
+      if (Array.isArray(snapshot.weapons) && snapshot.weapons.length > 0) {
+        fallbackState.weapons = snapshot.weapons.map((weapon: any, index: number) => ({
+          id: weapon.id ?? `wp-${index + 1}`,
+          weaponId: weapon.weaponId ?? weapon.weapon_id ?? `ARM-${String(index + 1).padStart(3, "0")}`,
+          type: weapon.type ?? "Pistol",
+          status: weapon.status ?? "available",
+          issuedTo: weapon.issuedTo ?? weapon.issued_to ?? null,
+          notes: weapon.notes ?? "",
+        }));
+      }
+      if (Array.isArray(snapshot.ammo) && snapshot.ammo.length > 0) fallbackState.ammo = snapshot.ammo as AmmoRow[];
+      if (Array.isArray(snapshot.equipment) && snapshot.equipment.length > 0) fallbackState.equipment = snapshot.equipment as EquipmentRow[];
+      if (typeof snapshot.fuelReserve === "number") fallbackState.fuelReserve = snapshot.fuelReserve;
+      if (typeof snapshot.fuelThreshold === "number") fallbackState.fuelThreshold = snapshot.fuelThreshold;
+      if (Array.isArray(snapshot.fuelLogs) && snapshot.fuelLogs.length > 0) fallbackState.fuelLogs = snapshot.fuelLogs as FuelLog[];
+      if (Array.isArray(snapshot.alerts) && snapshot.alerts.length > 0) fallbackState.alerts = snapshot.alerts as InventoryAlert[];
+    }
     if (remoteOfficers && remoteOfficers.length > 0) {
       fallbackState.officers = remoteOfficers.map((ro: any) => {
         return {
@@ -199,7 +263,7 @@ function InventoryPage() {
       });
     }
     return fallbackState;
-  }, [members, locations, patrols, incidents, remoteOfficers, remoteVehicles]);
+  }, [inventorySnapshot, members, locations, patrols, incidents, remoteOfficers, remoteVehicles]);
   const [state, setState] = useState<InventoryState | null>(null);
   const [tab, setTab] = useState<Tab>("officers");
   const [search, setSearch] = useState("");
@@ -282,6 +346,18 @@ function InventoryPage() {
   };
   const rosterCommit = async () => {
     if (!editingOfficer) return;
+    const exists = inventory.officers.some((o) => o.id === editingOfficer.id);
+    if (!exists) {
+      await addInventory({
+        data: {
+          id: editingOfficer.id,
+          type: "officer",
+          action: "add",
+          org_id: appAccess.orgId,
+          payload: editingOfficer,
+        },
+      });
+    }
     await rosterSave(editingOfficer);
     updateState((prev) => {
       const exists = prev.officers.some((o) => o.id === editingOfficer.id);

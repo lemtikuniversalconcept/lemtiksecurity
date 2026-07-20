@@ -64,3 +64,5 @@ export const generateBrief = createServerFn({ method: "POST" })
     };
   });
 
+export const getBriefings = getBriefs;
+export const generateBriefing = generateBrief;

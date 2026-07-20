@@ -11,6 +11,7 @@ import {
   ShieldHalf,
   Search,
   Radio,
+  Video,
   LogOut,
   History,
   Building2,
@@ -31,6 +32,7 @@ import type { AppAccess, SpecRole } from "@/lib/rbac";
 const nav = [
   { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
   { to: "/app/map", label: "Live Map", icon: Map, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
+  { to: "/app/cctv", label: "CCTV Room", icon: Video, allowed: ["security_manager", "operator"] as SpecRole[] },
   { to: "/app/incidents", label: "Incidents", icon: AlertTriangle, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
   { to: "/app/patrols", label: "Patrols", icon: Radar, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
   { to: "/app/intelligence", label: "Intelligence", icon: ShieldAlert, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },

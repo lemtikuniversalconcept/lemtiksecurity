@@ -35,6 +35,7 @@ import { Route as AppLocationsRouteImport } from './routes/app.locations'
 import { Route as AppInventoryRouteImport } from './routes/app.inventory'
 import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
 import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
+import { Route as AppCctvRouteImport } from './routes/app.cctv'
 import { Route as AppAuditRouteImport } from './routes/app.audit'
 import { Route as AppAlertsRouteImport } from './routes/app.alerts'
 import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
@@ -178,6 +179,11 @@ const AppIncidentsRoute = AppIncidentsRouteImport.update({
   path: '/incidents',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCctvRoute = AppCctvRouteImport.update({
+  id: '/cctv',
+  path: '/cctv',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
@@ -249,6 +255,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/cctv': typeof AppCctvRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
@@ -287,6 +294,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/cctv': typeof AppCctvRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
@@ -328,6 +336,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/cctv': typeof AppCctvRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
@@ -370,6 +379,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
+    | '/app/cctv'
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
@@ -408,6 +418,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
+    | '/app/cctv'
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
@@ -448,6 +459,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
+    | '/app/cctv'
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
@@ -673,6 +685,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIncidentsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/cctv': {
+      id: '/app/cctv'
+      path: '/cctv'
+      fullPath: '/app/cctv'
+      preLoaderRoute: typeof AppCctvRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/audit': {
       id: '/app/audit'
       path: '/audit'
@@ -812,6 +831,7 @@ const AppAdminOrganisationsRouteWithChildren =
 interface AppRouteChildren {
   AppAlertsRoute: typeof AppAlertsRoute
   AppAuditRoute: typeof AppAuditRoute
+  AppCctvRoute: typeof AppCctvRoute
   AppIncidentsRoute: typeof AppIncidentsRouteWithChildren
   AppIntelligenceRoute: typeof AppIntelligenceRoute
   AppInventoryRoute: typeof AppInventoryRoute
@@ -832,6 +852,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAlertsRoute: AppAlertsRoute,
   AppAuditRoute: AppAuditRoute,
+  AppCctvRoute: AppCctvRoute,
   AppIncidentsRoute: AppIncidentsRouteWithChildren,
   AppIntelligenceRoute: AppIntelligenceRoute,
   AppInventoryRoute: AppInventoryRoute,
@@ -892,3 +913,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
