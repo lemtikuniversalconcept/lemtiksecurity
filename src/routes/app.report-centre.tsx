@@ -9,6 +9,7 @@ import { generateReportSummary, sendReportDelivery } from "@/lib/reports.functio
 import { getActiveOrg, getSettings } from "@/lib/orgs.functions";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { type IncidentType, typeMeta } from "@/lib/mockData";
+import { Textarea } from "@/components/ui/textarea";
 import {
   CalendarDays,
   CheckCircle2,
