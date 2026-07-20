@@ -6,7 +6,7 @@ import { requestRelationshipApi } from "@/lib/relationship-api";
 import type { CameraRecord } from "@/lib/cameras.functions";
 
 const commonFrameInput = z.object({
-  camera_id: z.string().min(1),
+  camera_id: z.string().min(1).optional(),
   frame_data: z.string().min(1).optional(),
   image_data_url: z.string().min(1).optional(),
   voice_transcript: z.string().max(2000).optional(),
