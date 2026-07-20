@@ -6,6 +6,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
 import { listPatrols } from "@/lib/patrols.functions";
 import { listIncidents } from "@/lib/incidents.functions";
+import {
+  listActiveAlerts,
+  updateFuelReserve,
+  updateOfficerInventory,
+  updateVehicleInventory,
+  updateWeaponInventory,
+  listInventoryOfficers,
+  listInventoryVehicles,
+} from "@/lib/inventory.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { severityMeta } from "@/lib/mockData";
@@ -120,21 +129,77 @@ function InventoryPage() {
   const listLoc = useServerFn(listLocations);
   const listPat = useServerFn(listPatrols);
   const listInc = useServerFn(listIncidents);
+  const listAlerts = useServerFn(listActiveAlerts);
+  const saveOfficerFn = useServerFn(updateOfficerInventory);
+  const saveVehicleFn = useServerFn(updateVehicleInventory);
+  const saveWeaponFn = useServerFn(updateWeaponInventory);
+  const saveFuelFn = useServerFn(updateFuelReserve);
+  const getOfficers = useServerFn(listInventoryOfficers);
+  const getVehicles = useServerFn(listInventoryVehicles);
 
   const { data: members = [], isLoading: membersLoading } = useQuery({ queryKey: ["inventory-members"], queryFn: () => listMem() });
   const { data: locations = [], isLoading: locationsLoading } = useQuery({ queryKey: ["inventory-locations"], queryFn: () => listLoc() });
   const { data: patrols = [], isLoading: patrolsLoading } = useQuery({ queryKey: ["inventory-patrols"], queryFn: () => listPat() });
   const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["inventory-incidents"], queryFn: () => listInc() });
+  const { data: remoteAlerts = [], isLoading: alertsLoading } = useQuery({
+    queryKey: ["inventory-active-alerts", appAccess.orgId],
+    queryFn: () => listAlerts(),
+  });
+  const { data: remoteOfficers = [], isLoading: remoteOfficersLoading } = useQuery({
+    queryKey: ["inventory-remote-officers", appAccess.orgId],
+    queryFn: () => getOfficers(),
+  });
+  const { data: remoteVehicles = [], isLoading: remoteVehiclesLoading } = useQuery({
+    queryKey: ["inventory-remote-vehicles", appAccess.orgId],
+    queryFn: () => getVehicles(),
+  });
 
   useRealtimeInvalidate("organisation_members", [["inventory-members"]]);
   useRealtimeInvalidate("organisation_locations", [["inventory-locations"]]);
   useRealtimeInvalidate("patrols", [["inventory-patrols"]]);
   useRealtimeInvalidate("incidents", [["inventory-incidents"]]);
 
-  const storageKey = `inventory-state:${appAccess.orgId || "platform"}`;
-  const dataReady = !membersLoading && !locationsLoading && !patrolsLoading && !incidentsLoading;
+  const dataReady = !membersLoading && !locationsLoading && !patrolsLoading && !incidentsLoading && !alertsLoading && !remoteOfficersLoading && !remoteVehiclesLoading;
 
-  const baseState = useMemo(() => buildInventoryState(members as any[], locations as any[], patrols as any[], incidents as any[]), [members, locations, patrols, incidents]);
+  const baseState = useMemo(() => {
+    const fallbackState = buildInventoryState(members as any[], locations as any[], patrols as any[], incidents as any[]);
+    if (remoteOfficers && remoteOfficers.length > 0) {
+      fallbackState.officers = remoteOfficers.map((ro: any) => {
+        return {
+          id: ro.officer_id || ro.id,
+          user_id: ro.user_id || ro.officer_id,
+          name: ro.name || ro.officer_id,
+          badge: ro.badge || `BDG-${ro.officer_id}`,
+          status: ro.status || "off-duty",
+          armed: Boolean(ro.armed),
+          location: typeof ro.location === 'object' ? ro.location?.zone || ro.location?.name || 'Main site' : ro.location || 'Main site',
+          zone: ro.zone || 'Main site',
+          shift: ro.shift || "06:00 – 18:00",
+          certifications: ro.certifications || [],
+          contact: ro.contact || 'App contact',
+        };
+      });
+    }
+    if (remoteVehicles && remoteVehicles.length > 0) {
+      fallbackState.vehicles = remoteVehicles.map((rv: any) => {
+        return {
+          id: rv.vehicle_id || rv.id,
+          vehicleId: rv.vehicle_id,
+          type: rv.type || 'SUV',
+          status: rv.status || 'available',
+          fuel: rv.fuel_percentage ?? 80,
+          condition: rv.condition || 'Roadworthy',
+          driver: rv.driver || 'Unassigned',
+          zone: rv.zone || 'Main site',
+          location: typeof rv.location === 'object' ? rv.location?.name || 'Main site' : rv.location || 'Main site',
+          history: rv.history || [
+            { id: `h-${rv.vehicle_id}`, timestamp: new Date().toISOString(), type: "status_changed", message: `Vehicle initialized as ${rv.status || 'available'}` }
+          ],
+        };
+      });
+    }
+    return fallbackState;
+  }, [members, locations, patrols, incidents, remoteOfficers, remoteVehicles]);
   const [state, setState] = useState<InventoryState | null>(null);
   const [tab, setTab] = useState<Tab>("officers");
   const [search, setSearch] = useState("");
@@ -149,35 +214,19 @@ function InventoryPage() {
   const [editingVehicle, setEditingVehicle] = useState<VehicleRow | null>(null);
   const [fuelLogNote, setFuelLogNote] = useState("");
   const [deliveryLitres, setDeliveryLitres] = useState(500);
-  const [dashboardResolved, setDashboardResolved] = useState(false);
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!dataReady || state) return;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        setState(JSON.parse(raw));
-      } else {
-        setState(baseState);
-      }
-    } catch {
+    if (dataReady && !state) {
       setState(baseState);
-    } finally {
-      setDashboardResolved(true);
     }
-  }, [baseState, dataReady, state, storageKey]);
-
-  useEffect(() => {
-    if (!state || !dashboardResolved) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(state));
-    } catch {
-      // ignore storage quota issues
-    }
-  }, [dashboardResolved, state, storageKey]);
+  }, [baseState, dataReady, state]);
 
   const inventory = state ?? baseState;
-  const activeAlerts = useMemo(() => inventory.alerts.filter((a) => !a.resolved), [inventory.alerts]);
+  const activeAlerts = useMemo(
+    () => (remoteAlerts as InventoryAlert[]).filter((a) => !dismissedAlertIds.includes(a.id)),
+    [dismissedAlertIds, remoteAlerts],
+  );
   const filteredOfficers = useMemo(() => {
     const q = search.trim().toLowerCase();
     return inventory.officers.filter((o) => {
@@ -202,21 +251,38 @@ function InventoryPage() {
   }, [inventory]);
 
   const fuelReservePct = Math.round((inventory.fuelReserve / 5000) * 100);
-  const showLoading = membersLoading || locationsLoading || patrolsLoading || incidentsLoading;
+  const showLoading = membersLoading || locationsLoading || patrolsLoading || incidentsLoading || alertsLoading || remoteOfficersLoading || remoteVehiclesLoading;
 
-  const resolveAlert = (id: string) => setState((prev) => prev ? { ...prev, alerts: prev.alerts.map((a) => a.id === id ? { ...a, resolved: true } : a) } : prev);
+  const resolveAlert = (id: string) => setDismissedAlertIds((current) => (current.includes(id) ? current : [...current, id]));
   const updateState = (updater: (prev: InventoryState) => InventoryState) => setState((prev) => (prev ? updater(prev) : prev));
 
-  const rosterSave = (row: OfficerRow) => updateState((prev) => ({
-    ...prev,
-    officers: prev.officers.map((o) => (o.id === row.id ? row : o)),
-  }));
+  const rosterSave = async (row: OfficerRow) => {
+    await saveOfficerFn({
+      data: {
+        id: row.id,
+        name: row.name,
+        badge: row.badge,
+        status: row.status,
+        armed: row.armed,
+        location: row.location,
+        zone: row.zone,
+        shift: row.shift,
+        certifications: row.certifications,
+        contact: row.contact,
+      },
+    });
+    updateState((prev) => ({
+      ...prev,
+      officers: prev.officers.map((o) => (o.id === row.id ? row : o)),
+    }));
+  };
   const rosterAdd = () => {
     const next = newOfficer(inventory.officers.length + 1);
     setEditingOfficer(next);
   };
-  const rosterCommit = () => {
+  const rosterCommit = async () => {
     if (!editingOfficer) return;
+    await rosterSave(editingOfficer);
     updateState((prev) => {
       const exists = prev.officers.some((o) => o.id === editingOfficer.id);
       return {
@@ -229,8 +295,21 @@ function InventoryPage() {
     setEditingOfficer(null);
   };
 
-  const vehicleCommit = () => {
+  const vehicleCommit = async () => {
     if (!editingVehicle) return;
+    await saveVehicleFn({
+      data: {
+        id: editingVehicle.id,
+        vehicleId: editingVehicle.vehicleId,
+        type: editingVehicle.type,
+        status: editingVehicle.status,
+        fuel: editingVehicle.fuel,
+        condition: editingVehicle.condition,
+        driver: editingVehicle.driver,
+        zone: editingVehicle.zone,
+        location: editingVehicle.location,
+      },
+    });
     updateState((prev) => ({
       ...prev,
       vehicles: prev.vehicles.map((v) => (v.id === editingVehicle.id ? editingVehicle : v)),
@@ -253,16 +332,44 @@ function InventoryPage() {
   const issueWeapon = (weaponId: string) => updateState((prev) => {
     const targetOfficer = prev.officers.find((o) => o.status === "on-duty" && !o.armed) ?? prev.officers[0];
     if (!targetOfficer) return prev;
+    const source = prev.weapons.find((w) => w.id === weaponId);
+    if (source) {
+      void saveWeaponFn({
+        data: {
+          id: source.id,
+          weaponId: source.weaponId,
+          type: source.type,
+          status: "issued",
+          issuedTo: targetOfficer.name,
+          notes: source.notes,
+        },
+      });
+    }
     return {
       ...prev,
       officers: prev.officers.map((o) => o.id === targetOfficer.id ? { ...o, armed: true } : o),
       weapons: prev.weapons.map((w) => w.id === weaponId ? { ...w, status: "issued", issuedTo: targetOfficer.name } : w),
     };
   });
-  const returnWeapon = (weaponId: string) => updateState((prev) => ({
-    ...prev,
-    weapons: prev.weapons.map((w) => w.id === weaponId ? { ...w, status: "available", issuedTo: null } : w),
-  }));
+  const returnWeapon = (weaponId: string) => updateState((prev) => {
+    const weapon = prev.weapons.find((w) => w.id === weaponId);
+    if (weapon) {
+      void saveWeaponFn({
+        data: {
+          id: weapon.id,
+          weaponId: weapon.weaponId,
+          type: weapon.type,
+          status: "available",
+          issuedTo: null,
+          notes: weapon.notes,
+        },
+      });
+    }
+    return {
+      ...prev,
+      weapons: prev.weapons.map((w) => w.id === weaponId ? { ...w, status: "available", issuedTo: null } : w),
+    };
+  });
   const equipmentCheckout = (category: string) => updateState((prev) => ({
     ...prev,
     equipment: prev.equipment.map((e) => e.category === category && e.available > 0 ? { ...e, available: e.available - 1, inUse: e.inUse + 1 } : e),
@@ -275,6 +382,14 @@ function InventoryPage() {
     updateState((prev) => {
       const litres = Math.max(100, Number(deliveryLitres) || 0);
       const reserve = Math.min(5000, prev.fuelReserve + litres);
+      void saveFuelFn({
+        data: {
+          fuelReserve: reserve,
+          fuelThreshold: prev.fuelThreshold,
+          litresAdded: litres,
+          note: fuelLogNote || "Fuel delivery logged",
+        },
+      });
       return {
         ...prev,
         fuelReserve: reserve,
@@ -297,7 +412,7 @@ function InventoryPage() {
   const zones = useMemo(() => Array.from(new Set(inventory.officers.map((o) => o.zone))).sort(), [inventory.officers]);
   const certifications = useMemo(() => Array.from(new Set(inventory.officers.flatMap((o) => o.certifications))).sort(), [inventory.officers]);
 
-  if (showLoading || !dashboardResolved || !state) {
+  if (showLoading || !state) {
     return <div className="rounded-lg border border-border bg-card p-6 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading inventory…</div>;
   }
 

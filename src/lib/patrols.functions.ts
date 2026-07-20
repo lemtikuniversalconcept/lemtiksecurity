@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { throwSafeError } from "@/lib/server-errors";
 import { recordAuditEvent } from "@/lib/audit.server";
 import { getActiveOrgId } from "@/lib/orgs.server";
+import { requestRelationshipApi } from "@/lib/relationship-api";
 
 export const listPatrols = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -238,14 +239,10 @@ export const updateShift = createServerFn({ method: "POST" })
   });
 
 // ---- Check-ins ----
-function haversineMeters(a: [number, number], b: [number, number]) {
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const R = 6371000;
-  const dLat = toRad(b[1] - a[1]);
-  const dLng = toRad(b[0] - a[0]);
-  const lat1 = toRad(a[1]); const lat2 = toRad(b[1]);
-  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(h));
+function approximateMeters(a: [number, number], b: [number, number]) {
+  const lngMeters = (b[0] - a[0]) * 111_320 * Math.cos(((a[1] + b[1]) / 2) * Math.PI / 180);
+  const latMeters = (b[1] - a[1]) * 110_540;
+  return Math.hypot(lngMeters, latMeters);
 }
 
 export const listCheckIns = createServerFn({ method: "GET" })
@@ -290,7 +287,7 @@ export const recordCheckIn = createServerFn({ method: "POST" })
     let distance: number | null = null;
     let status = "on_time";
     if (data.method === "gps" && wp.coord_x != null && wp.coord_y != null && data.coord_x != null && data.coord_y != null) {
-      distance = haversineMeters([Number(wp.coord_x), Number(wp.coord_y)], [data.coord_x, data.coord_y]);
+      distance = approximateMeters([Number(wp.coord_x), Number(wp.coord_y)], [data.coord_x, data.coord_y]);
       if (distance > 50) status = "out_of_zone";
     }
     if (data.method === "qr" && data.qr_token !== wp.qr_token) {
@@ -453,4 +450,53 @@ export const updatePatrolStatus = createServerFn({ method: "POST" })
       action: "status_change", details: { status: data.status },
     });
     return { ok: true };
+  });
+
+export const calculateRoute = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      start: z.tuple([z.number(), z.number()]),
+      destination: z.tuple([z.number(), z.number()]),
+      mode: z.enum(["walking", "driving", "cycling"]).optional(),
+      incident_id: z.string().uuid().optional(),
+      org_id: z.string().uuid().optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const orgId = data.org_id ?? await getActiveOrgId(context.supabase, context.userId);
+    const result = await requestRelationshipApi<{
+      geometry?: { coordinates?: [number, number][] };
+      duration?: number;
+      distance?: number;
+      legs?: Array<{ steps?: Array<{ maneuver?: { instruction?: string }; distance?: number }> }>;
+    }>("/api/v1/route/calculate", {
+      body: {
+        org_id: orgId,
+        incident_id: data.incident_id ?? null,
+        start: { lng: data.start[0], lat: data.start[1] },
+        destination: { lng: data.destination[0], lat: data.destination[1] },
+        mode: data.mode ?? "walking",
+        source: "c4isod-dashboard",
+      },
+    });
+    if (result) return result;
+
+    const midpoint: [number, number] = [
+      Number((data.start[0] + data.destination[0]) / 2),
+      Number((data.start[1] + data.destination[1]) / 2),
+    ];
+    const routeDistance = Math.hypot(data.destination[0] - data.start[0], data.destination[1] - data.start[1]) * 111;
+    return {
+      geometry: { coordinates: [data.start, midpoint, data.destination] },
+      distance: routeDistance * 1000,
+      duration: Math.max(180, routeDistance * 75),
+      legs: [{
+        steps: [
+          { maneuver: { instruction: "Proceed from the current position." }, distance: routeDistance * 400 },
+          { maneuver: { instruction: "Continue on the safest available path." }, distance: routeDistance * 400 },
+          { maneuver: { instruction: "Arrive at the destination and report to command." }, distance: routeDistance * 200 },
+        ],
+      }],
+    };
   });

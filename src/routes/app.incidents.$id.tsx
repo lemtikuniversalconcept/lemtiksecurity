@@ -16,6 +16,7 @@ import {
   updateIncidentEvidence,
 } from "@/lib/incidentDetail.functions";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
+import { findProximityMembers } from "@/lib/orgs.functions";
 import { listPatrols } from "@/lib/patrols.functions";
 import { createDispatchAlert } from "@/lib/alerts.functions";
 import {
@@ -155,36 +156,6 @@ function isArmedIncident(incident: any) {
   return /armed|weapon|gun|knife|firearm|machete|hostage|gunshot/.test(blob);
 }
 
-function haversineMeters(a: [number, number], b: [number, number]) {
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const R = 6371000;
-  const dLat = toRad(b[1] - a[1]);
-  const dLng = toRad(b[0] - a[0]);
-  const lat1 = toRad(a[1]);
-  const lat2 = toRad(b[1]);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-function pointFromLocationLocations(locs: any[], ids: string[] | undefined) {
-  const matches = (ids ?? [])
-    .map((id) => locs.find((loc) => loc.id === id))
-    .filter((loc): loc is any => !!loc && loc.coord_x != null && loc.coord_y != null);
-  if (!matches.length) return null;
-  const lng = matches.reduce((acc, loc) => acc + Number(loc.coord_x), 0) / matches.length;
-  const lat = matches.reduce((acc, loc) => acc + Number(loc.coord_y), 0) / matches.length;
-  return [lng, lat] as [number, number];
-}
-
-function hashToOffset(seed: string) {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  return [
-    ((hash % 1000) / 1000 - 0.5) * 0.02,
-    ((((hash / 1000) | 0) % 1000) / 1000 - 0.5) * 0.02,
-  ] as [number, number];
-}
-
 function IncidentDetailPage() {
   const { id } = Route.useParams();
   const { appAccess } = Route.useRouteContext();
@@ -205,6 +176,7 @@ function IncidentDetailPage() {
   const fetchMembers = useServerFn(listMembers);
   const fetchLocations = useServerFn(listLocations);
   const fetchPatrols = useServerFn(listPatrols);
+  const fetchProximity = useServerFn(findProximityMembers);
 
   useRealtimeInvalidate("incidents", [["incident", id]]);
   useRealtimeInvalidate("incident_activity", [["incident", id]]);
@@ -281,41 +253,30 @@ function IncidentDetailPage() {
     return [3.4219, 6.4281];
   })();
 
-  const proximity = (() => {
-    const candidates = members.map((m: any) => {
-      const assigned = pointFromLocationLocations(locations, m.profile?.assigned_location_ids);
-      const zoneMatch = locations.find(
-        (loc: any) =>
-          loc.name?.toLowerCase() === String(m.profile?.zone ?? "").toLowerCase() &&
-          loc.coord_x != null &&
-          loc.coord_y != null,
-      );
-      const base =
-        assigned ??
-        (zoneMatch
-          ? ([Number(zoneMatch.coord_x), Number(zoneMatch.coord_y)] as [number, number])
-          : null);
-      const fallback =
-        base ??
-        ([
-          incidentPoint[0] +
-            hashToOffset(`${m.user_id}:${m.profile?.display_name ?? m.user_id}`)[0],
-          incidentPoint[1] +
-            hashToOffset(`${m.user_id}:${m.profile?.display_name ?? m.user_id}`)[1],
-        ] as [number, number]);
-      return {
-        id: m.user_id,
-        name: m.profile?.display_name || "Member",
-        role: m.role,
-        zone: m.profile?.zone || "Unassigned",
-        status: m.profile?.status || "unknown",
-        coordinates: fallback,
-        source: base ? (assigned ? "assigned locations" : "zone match") : "derived standby grid",
-        distance: haversineMeters(incidentPoint, fallback),
-      };
-    });
-    return candidates.sort((a, b) => a.distance - b.distance).slice(0, 3);
-  })();
+  const { data: proximity = [] } = useQuery({
+    queryKey: ["incident-proximity", id, incidentPoint[0], incidentPoint[1]],
+    queryFn: () =>
+      fetchProximity({
+        data: {
+          coord_x: incidentPoint[0],
+          coord_y: incidentPoint[1],
+          incident_id: id,
+          org_id: appAccess.orgId,
+          limit: 6,
+        },
+      }) as Promise<Array<{
+        id: string;
+        user_id: string;
+        name: string;
+        role: string;
+        zone: string;
+        status: string;
+        coordinates: [number, number];
+        distance: number;
+        source: string;
+      }>>,
+    enabled: true,
+  });
 
   const activityRows = data.activity as any[];
   const escalationRows = data.escalations as any[];
@@ -355,14 +316,14 @@ function IncidentDetailPage() {
     };
   })();
 
-  const recommendedOfficers = proximity.map((officer, idx) => {
+  const recommendedOfficers = proximity.map((officer: any, idx) => {
     const routeSegments = [
       inc.zone,
       inc.location,
       officer.zone,
       idx === 0 ? "fastest responder path" : "secondary coverage lane",
     ].filter(Boolean);
-    const etaMinutes = Math.max(1, Math.round(officer.distance / 95));
+    const etaMinutes = Math.max(1, Math.round(Number(officer.distance ?? 0) / 95));
     return {
       ...officer,
       eta: `${Math.floor(etaMinutes / 60) ? `${Math.floor(etaMinutes / 60)}h ` : ""}${etaMinutes % 60 || etaMinutes}m`,

@@ -7,11 +7,14 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { listIncidents, assignIncidentToMe, updateIncidentStatus } from "@/lib/incidents.functions";
 import { listPatrols } from "@/lib/patrols.functions";
 import { listLocations, listMembers } from "@/lib/orgs.functions";
+import { listCameras, type CameraRecord } from "@/lib/cameras.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { severityMeta, typeMeta, statusMeta, type Severity, type IncidentType, type IncidentStatus, zoneRisk } from "@/lib/mockData";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { cn } from "@/lib/utils";
+import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 import {
   MapPin, Loader2, Layers, Flame, Pin, Radar, ChevronRight, Wifi, WifiOff,
   UserPlus, ExternalLink, ChevronsUpDown, Search, LocateFixed, Maximize2, MapPinned,
@@ -44,6 +47,7 @@ const WINDOWS: { value: Window; label: string; ms: number }[] = [
 ];
 const TYPE_OPTS: (IncidentType | "all")[] = ["all", "intrusion", "theft", "medical", "fire", "suspicious", "civil_unrest", "other"];
 const SMART_DEVICE_TYPES = ["Camera", "Door Sensor", "Barrier", "Radar"] as const;
+const TRACKED_TARGET_IDS = ["REID-2048", "REID-3071", "REID-4816"] as const;
 const MAP_COLORS = {
   red: "#f43f5e",
   orange: "#fb923c",
@@ -100,10 +104,10 @@ function deriveRisk(zoneName: string, incidents: any[], patrols: any[]) {
 }
 
 function riskColor(risk: number) {
-  if (risk >= 80) return "hsl(0 84% 60%)";
-  if (risk >= 65) return "hsl(24 95% 58%)";
-  if (risk >= 45) return "hsl(38 92% 55%)";
-  return "hsl(142 71% 45%)";
+  if (risk >= 80) return MAP_COLORS.red;
+  if (risk >= 65) return MAP_COLORS.orange;
+  if (risk >= 45) return MAP_COLORS.amber;
+  return MAP_COLORS.green;
 }
 
 // Severity → CSS color (resolves design tokens to literal colors for mapbox paint)
@@ -116,6 +120,37 @@ function severityColor(s: number): string {
     1: MAP_COLORS.slate,    // info / grey
   };
   return map[s] ?? map[3];
+}
+
+type TargetTrack = {
+  id: string;
+  label: string;
+  path: [number, number][];
+  position: [number, number];
+  blindSpot: boolean;
+  handoff: boolean;
+  confidence: number;
+  lastSeen: string;
+  routeNote: string;
+};
+
+function lerp(start: number, end: number, ratio: number) {
+  return start + (end - start) * ratio;
+}
+
+function buildTargetPath(seed: number, base: [number, number], locations: { coord_x?: number | null; coord_y?: number | null; name?: string }[]) {
+  const anchors = locations
+    .filter((location) => location.coord_x != null && location.coord_y != null)
+    .slice(0, 4)
+    .map((location) => [Number(location.coord_x), Number(location.coord_y)] as [number, number]);
+  const fallback = [
+    [base[0] + 0.006 * (seed % 3 === 0 ? 1 : -1), base[1] + 0.004 * (seed % 2 === 0 ? 1 : -1)],
+    [base[0] + 0.012 * (seed % 2 === 0 ? 1 : -1), base[1] - 0.008],
+    [base[0] - 0.01, base[1] + 0.01 * (seed % 3 === 0 ? 1 : -1)],
+    [base[0] + 0.015, base[1] + 0.006],
+  ] as [number, number][];
+  const points = [...anchors, ...fallback].slice(0, 5);
+  return points.length >= 2 ? points : [base, [base[0] + 0.01, base[1] + 0.01]];
 }
 
 function toGeoJsonFeature(value: unknown) {
@@ -139,6 +174,7 @@ function LiveMap() {
   const listPat = useServerFn(listPatrols);
   const listLoc = useServerFn(listLocations);
   const listMem = useServerFn(listMembers);
+  const listCam = useServerFn(listCameras);
   const getToken = useServerFn(getMapboxToken);
   const assignFn = useServerFn(assignIncidentToMe);
   const statusFn = useServerFn(updateIncidentStatus);
@@ -147,6 +183,7 @@ function LiveMap() {
   const { data: patrols = [] } = useQuery({ queryKey: ["patrols"], queryFn: () => listPat() });
   const { data: locations = [] } = useQuery({ queryKey: ["locations"], queryFn: () => listLoc() });
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: () => listMem() });
+  const { data: cameras = [] } = useQuery({ queryKey: ["cameras"], queryFn: () => listCam() as Promise<CameraRecord[]>, refetchInterval: 60_000 });
   const { data: tokenData } = useQuery({ queryKey: ["mapbox_token"], queryFn: () => getToken(), staleTime: Infinity });
 
   // ---- UI state ----
@@ -478,6 +515,113 @@ function LiveMap() {
     }),
     [canViewSmartInfra, incidents, locations, patrols],
   );
+  const [targetTick, setTargetTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTargetTick((value) => value + 1), 1800);
+    return () => window.clearInterval(id);
+  }, []);
+  const trackedTargets = useMemo<TargetTrack[]>(() => {
+    return TRACKED_TARGET_IDS.map((id, index) => {
+      const sourceLocation = locations[(index * 2 + incidents.length) % Math.max(locations.length, 1)];
+      const base: [number, number] = sourceLocation?.coord_x != null && sourceLocation?.coord_y != null
+        ? [Number(sourceLocation.coord_x), Number(sourceLocation.coord_y)]
+        : [LAGOS[0] + 0.004 * (index + 1), LAGOS[1] - 0.003 * (index + 1)];
+      const path = buildTargetPath(index + incidents.length, base, locations);
+      const cycleLength = Math.max(1, (path.length - 1) * 4);
+      const phase = (targetTick + index * 3) % cycleLength;
+      const segment = Math.min(path.length - 2, Math.floor(phase / 4));
+      const ratio = (phase % 4) / 4;
+      const start = path[segment];
+      const end = path[segment + 1];
+      const blindSpot = (segment + index) % 3 === 1;
+      const handoff = segment === path.length - 2 && ratio > 0.5;
+      const position: [number, number] = [
+        Number(lerp(start[0], end[0], ratio).toFixed(6)),
+        Number(lerp(start[1], end[1], ratio).toFixed(6)),
+      ];
+      return {
+        id,
+        label: `Target ${id}`,
+        path,
+        position,
+        blindSpot,
+        handoff,
+        confidence: Math.max(68, 91 - index * 4 - (blindSpot ? 8 : 0)),
+        lastSeen: new Date(Date.now() - (index + 1) * 90_000).toISOString(),
+        routeNote: blindSpot
+          ? "Entering blind spot corridor"
+          : handoff
+            ? "Exiting blind spot transition"
+            : "Tracked across visible segment",
+      };
+    });
+  }, [incidents.length, locations, targetTick]);
+  const mcmotTransitions = useMemo(
+    () =>
+      trackedTargets.map((target, index) => {
+        const hopNames = target.path.map((point, hopIndex) => {
+          const nearestLocation = locations.find((location) => {
+            if (location.coord_x == null || location.coord_y == null) return false;
+            const lngDelta = Math.abs(Number(location.coord_x) - point[0]);
+            const latDelta = Math.abs(Number(location.coord_y) - point[1]);
+            return lngDelta < 0.01 && latDelta < 0.01;
+          });
+          return nearestLocation?.name ?? `Camera ${hopIndex + 1}`;
+        });
+        return {
+          id: target.id,
+          confidence: target.confidence,
+          current: hopNames[Math.max(0, hopNames.length - 2)] ?? hopNames[0],
+          next: hopNames[hopNames.length - 1] ?? hopNames[0],
+          blindSpot: target.blindSpot,
+          route: hopNames.join(" → "),
+          color: index === 0 ? MAP_COLORS.red : index === 1 ? MAP_COLORS.orange : MAP_COLORS.blue,
+        };
+      }),
+    [locations, trackedTargets],
+  );
+  const trackedTargetLines = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: trackedTargets.flatMap((target, targetIndex) =>
+        target.path.slice(0, -1).map((point, segmentIndex) => ({
+          type: "Feature" as const,
+          geometry: {
+            type: "LineString" as const,
+            coordinates: [point, target.path[segmentIndex + 1]],
+          },
+          properties: {
+            id: target.id,
+            blindspot: (segmentIndex + targetIndex) % 3 === 1 ? 1 : 0,
+            active: target.id === trackedTargets[0]?.id ? 1 : 0,
+            confidence: target.confidence,
+          },
+        })),
+      ),
+    }),
+    [trackedTargets],
+  );
+  const trackedTargetPoints = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: trackedTargets.map((target) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: target.position,
+        },
+        properties: {
+          id: target.id,
+          label: target.label,
+          blindspot: target.blindSpot ? 1 : 0,
+          handoff: target.handoff ? 1 : 0,
+          confidence: target.confidence,
+          routeNote: target.routeNote,
+        },
+      })),
+    }),
+    [trackedTargets],
+  );
 
   // ---- Map ----
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -766,6 +910,8 @@ function LiveMap() {
     ensureSource("command-patrol-lines", patrolLineGeo);
     ensureSource("command-patrol-waypoints", patrolWaypointGeo);
     ensureSource("command-smart", smartGeo);
+    ensureSource("command-target-lines", trackedTargetLines);
+    ensureSource("command-target-points", trackedTargetPoints);
 
     if (!map.getLayer("command-osint-diamond")) {
       map.addLayer({
@@ -786,6 +932,73 @@ function LiveMap() {
             3, MAP_COLORS.amber,
             MAP_COLORS.yellow,
           ],
+        },
+      });
+    }
+    if (!map.getLayer("command-target-lines")) {
+      map.addLayer({
+        id: "command-target-lines",
+        type: "line",
+        source: "command-target-lines",
+        paint: {
+          "line-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "confidence"],
+            68, MAP_COLORS.slate,
+            76, MAP_COLORS.blue,
+            84, MAP_COLORS.orange,
+            92, MAP_COLORS.red,
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["get", "confidence"],
+            68, 1.8,
+            80, 2.8,
+            92, 4.2,
+          ],
+          "line-opacity": 0.7,
+          "line-dasharray": [2, 1.6],
+        },
+      });
+    }
+    if (!map.getLayer("command-target-points")) {
+      map.addLayer({
+        id: "command-target-points",
+        type: "circle",
+        source: "command-target-points",
+        paint: {
+          "circle-color": [
+            "case",
+            ["==", ["get", "blindspot"], 1], MAP_COLORS.orange,
+            ["==", ["get", "handoff"], 1], MAP_COLORS.red,
+            MAP_COLORS.green,
+          ],
+          "circle-radius": [
+            "case",
+            ["==", ["get", "handoff"], 1], 8,
+            ["==", ["get", "blindspot"], 1], 7,
+            6,
+          ],
+          "circle-stroke-width": 2,
+          "circle-stroke-color": MAP_COLORS.ink,
+        },
+      });
+      map.addLayer({
+        id: "command-target-labels",
+        type: "symbol",
+        source: "command-target-points",
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 10,
+          "text-offset": [0, 1.2],
+          "text-allow-overlap": true,
+        },
+        paint: {
+          "text-color": "#fff",
+          "text-halo-color": MAP_COLORS.ink,
+          "text-halo-width": 1.2,
         },
       });
     }
@@ -929,6 +1142,8 @@ function LiveMap() {
       map.on("mouseleave", "command-patrol-line", () => setHover(""));
       map.on("mouseenter", "command-smart-symbol", () => setHover("pointer"));
       map.on("mouseleave", "command-smart-symbol", () => setHover(""));
+      map.on("mouseenter", "command-target-points", () => setHover("pointer"));
+      map.on("mouseleave", "command-target-points", () => setHover(""));
 
       map.on("click", "command-osint-diamond", (e) => {
         const feature = e.features?.[0];
@@ -950,6 +1165,17 @@ function LiveMap() {
         const [lng, lat] = (feature.geometry as any).coordinates as [number, number];
         setAreaIntel({ lng, lat, label: String(feature.properties?.name ?? "Smart device") });
         map.easeTo({ center: [lng, lat], zoom: 14, duration: 500 });
+      });
+      map.on("click", "command-target-points", (e) => {
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const [lng, lat] = (feature.geometry as any).coordinates as [number, number];
+        setAreaIntel({
+          lng,
+          lat,
+          label: `${String(feature.properties?.label ?? "REID target")} · ${String(feature.properties?.routeNote ?? "Tracked movement")}`,
+        });
+        map.easeTo({ center: [lng, lat], zoom: 15, duration: 600 });
       });
       listenersBoundRef.current = true;
     }
@@ -975,6 +1201,8 @@ function LiveMap() {
     showSmartInfra,
     showZones,
     smartGeo,
+    trackedTargetLines,
+    trackedTargetPoints,
     zoneGeo,
   ]);
 
@@ -1232,6 +1460,55 @@ function LiveMap() {
                 >
                   Approve & Execute Overrides
                 </button>
+              </div>
+              <div className="rounded-lg border border-border bg-card p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">MCMOT Transition Map</div>
+                    <div className="text-sm font-semibold">REID movement across camera hops</div>
+                  </div>
+                  <Radar className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="mt-3 space-y-2">
+                  {mcmotTransitions.map((target) => (
+                    <div key={target.id} className={cn("rounded-xl border p-3 transition", target.blindSpot ? "border-high/30 bg-high/10" : "border-border bg-surface")}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-foreground">{target.id}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{target.route}</div>
+                        </div>
+                        <span className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                          {target.confidence}%
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                        <span className="rounded-full border border-border px-2 py-1">{target.current}</span>
+                        <span className="rounded-full border border-border px-2 py-1">{target.next}</span>
+                        <span className="rounded-full border border-border px-2 py-1">{target.blindSpot ? "Blind spot" : "Visible"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-card p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Camera Registry</div>
+                    <div className="text-sm font-semibold">Live feeds and stream start control</div>
+                  </div>
+                  <Radio className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="mt-3 space-y-3">
+                  {cameras.length ? (
+                    cameras.slice(0, 1).map((camera) => (
+                      <CameraStreamPlayer key={camera.id} camera={camera} />
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-border bg-surface px-4 py-5 text-xs text-muted-foreground">
+                      No camera list returned by the Relationship API yet.
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-between gap-2">
                 <SeverityBadge severity={sel.severity as Severity} />

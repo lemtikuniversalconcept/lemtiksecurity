@@ -7,6 +7,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { getMapboxToken } from "@/lib/config.functions";
 import { listIncidents } from "@/lib/incidents.functions";
 import { listMyNotifications } from "@/lib/alerts.functions";
+import { calculateRoute } from "@/lib/patrols.functions";
 import { ArrowLeft, CheckCircle2, MapPinned, Navigation2, RefreshCw, Route as RouteIcon, TimerReset, WifiOff, CloudUpload } from "lucide-react";
 
 export const Route = createFileRoute("/officer/navigation")({
@@ -23,6 +24,7 @@ type NavigationPlan = {
   coordinates: Coord[];
   steps: NavStep[];
   eta: string;
+  distanceKm: number;
   source: "online" | "offline";
   savedAt: string;
 };
@@ -36,18 +38,6 @@ type IncidentRow = {
   coord_x: number | null;
   coord_y: number | null;
 };
-
-const SNAPSHOT_KEY = "lemtik-officer-navigation-snapshot-v2";
-
-function haversineKm(a: Coord, b: Coord) {
-  const R = 6371;
-  const dLat = ((b[1] - a[1]) * Math.PI) / 180;
-  const dLng = ((b[0] - a[0]) * Math.PI) / 180;
-  const lat1 = (a[1] * Math.PI) / 180;
-  const lat2 = (b[1] * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
 
 function formatEta(minutes: number) {
   const safe = Math.max(1, Math.round(minutes));
@@ -67,7 +57,7 @@ function directionFromDelta(origin: Coord, destination: Coord) {
 }
 
 function buildOfflinePlan(incident: IncidentRow, start: Coord, destination: Coord): NavigationPlan {
-  const distanceKm = Math.max(haversineKm(start, destination), 0.2);
+  const distanceKm = Math.max(Math.hypot(destination[0] - start[0], destination[1] - start[1]) * 111, 0.2);
   const etaMinutes = distanceKm / 4.5 * 60;
   const direction = directionFromDelta(start, destination);
   const midpoint: Coord = [
@@ -87,6 +77,7 @@ function buildOfflinePlan(incident: IncidentRow, start: Coord, destination: Coor
       { title: "Log arrival", detail: "Use the arrival button once you are on site." },
     ],
     eta: formatEta(etaMinutes),
+    distanceKm,
     source: "offline",
     savedAt: new Date().toISOString(),
   };
@@ -99,6 +90,7 @@ function buildOnlinePlan(
   route: {
     geometry?: { coordinates?: Coord[] };
     duration?: number;
+    distance?: number;
     legs?: Array<{ steps?: Array<{ maneuver?: { instruction?: string }; distance?: number }> }>;
   },
 ): NavigationPlan {
@@ -117,44 +109,27 @@ function buildOnlinePlan(
     coordinates,
     steps,
     eta: formatEta((route.duration ?? 0) / 60),
+    distanceKm: Math.max(0.1, (route.distance ?? 0) / 1000),
     source: "online",
     savedAt: new Date().toISOString(),
   };
 }
 
-function readSnapshot(): NavigationPlan | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(SNAPSHOT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as NavigationPlan;
-    if (!parsed?.incidentId || !parsed?.coordinates?.length || !parsed?.steps?.length) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function persistSnapshot(plan: NavigationPlan) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(plan));
-  } catch {
-    // best-effort only
-  }
-}
-
-async function fetchOnlinePlan(token: string, incident: IncidentRow, start: Coord, destination: Coord) {
-  const url = new URL(`https://api.mapbox.com/directions/v5/mapbox/walking/${start[0]},${start[1]};${destination[0]},${destination[1]}`);
-  url.searchParams.set("geometries", "geojson");
-  url.searchParams.set("steps", "true");
-  url.searchParams.set("overview", "full");
-  url.searchParams.set("access_token", token);
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`Mapbox directions request failed with ${res.status}`);
-  const json = await res.json() as { routes?: Array<{ geometry?: { coordinates?: Coord[] }; duration?: number; legs?: Array<{ steps?: Array<{ maneuver?: { instruction?: string }; distance?: number }> }> }> };
-  const route = json.routes?.[0];
-  if (!route) throw new Error("No route returned from Mapbox directions");
+async function fetchOnlinePlan(routeFn: any, incident: IncidentRow, start: Coord, destination: Coord) {
+  const route = await routeFn({
+    data: {
+      start,
+      destination,
+      mode: "walking",
+      incident_id: incident.id,
+    },
+  }) as {
+    geometry?: { coordinates?: Coord[] };
+    duration?: number;
+    distance?: number;
+    legs?: Array<{ steps?: Array<{ maneuver?: { instruction?: string }; distance?: number }> }>;
+  } | null;
+  if (!route) throw new Error("No route returned from the Relationship API");
   return buildOnlinePlan(incident, start, destination, route);
 }
 
@@ -162,6 +137,7 @@ function OfficerNavigation() {
   const tokenFn = useServerFn(getMapboxToken);
   const listInc = useServerFn(listIncidents);
   const listNotifs = useServerFn(listMyNotifications);
+  const routeFn = useServerFn(calculateRoute);
   const { data: token } = useQuery({ queryKey: ["officer-mapbox-token"], queryFn: () => tokenFn(), staleTime: Infinity });
   const { data: incidents = [] } = useQuery({ queryKey: ["officer-navigation-incidents"], queryFn: () => listInc() as Promise<IncidentRow[]> });
   const { data: notifications = [] } = useQuery({
@@ -173,7 +149,7 @@ function OfficerNavigation() {
   const [arrived, setArrived] = useState(false);
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [currentPosition, setCurrentPosition] = useState<Coord | null>(null);
-  const [plan, setPlan] = useState<NavigationPlan | null>(() => readSnapshot());
+  const [plan, setPlan] = useState<NavigationPlan | null>(null);
   const [snapshotLoaded, setSnapshotLoaded] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeMessage, setRouteMessage] = useState<string | null>(null);
@@ -195,14 +171,6 @@ function OfficerNavigation() {
     },
     [incidents, notifications],
   );
-
-  useEffect(() => {
-    const snapshot = readSnapshot();
-    if (snapshot) {
-      setPlan(snapshot);
-      setSnapshotLoaded(true);
-    }
-  }, []);
 
   useEffect(() => {
     if (!navigator.geolocation) return;
@@ -243,24 +211,21 @@ function OfficerNavigation() {
     setRouteMessage(null);
     try {
       if (!forceOffline && online && token?.token) {
-        const next = await fetchOnlinePlan(token.token, activeIncident, origin, destination);
+        const next = await fetchOnlinePlan(routeFn, activeIncident, origin, destination);
         setPlan(next);
-        persistSnapshot(next);
         setSnapshotLoaded(true);
-        setRouteMessage("Live route refreshed from Mapbox.");
+        setRouteMessage("Live route refreshed from the Relationship API.");
       } else {
         const next = buildOfflinePlan(activeIncident, origin, destination);
         setPlan(next);
-        persistSnapshot(next);
         setSnapshotLoaded(true);
         setRouteMessage(forceOffline || !online ? "Offline route rebuilt from incident data." : "Cached route restored.");
       }
     } catch {
       const fallback = buildOfflinePlan(activeIncident, origin, destination);
       setPlan(fallback);
-      persistSnapshot(fallback);
       setSnapshotLoaded(true);
-      setRouteMessage("Mapbox route unavailable. Using offline route fallback.");
+      setRouteMessage("Relationship API route unavailable. Using offline route fallback.");
     } finally {
       setRouteLoading(false);
     }
@@ -335,7 +300,7 @@ function OfficerNavigation() {
     };
   }, [plan, routeGeoJson, token?.token]);
 
-  const distanceKm = plan ? haversineKm(plan.start, plan.destination) : null;
+  const distanceKm = plan ? plan.distanceKm : null;
 
   const logArrival = () => {
     setArrived(true);
@@ -408,7 +373,7 @@ function OfficerNavigation() {
                   </p>
                   {snapshotLoaded && (
                     <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 text-left text-xs text-slate-300">
-                      Navigation snapshot stored for offline use.
+                      Navigation route cached for this session.
                     </div>
                   )}
                 </div>

@@ -8,8 +8,18 @@ import { listPatrols, listCheckIns } from "@/lib/patrols.functions";
 import { listAlerts } from "@/lib/alerts.functions";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
 import { getMapboxToken } from "@/lib/config.functions";
+import { AiChatWidget, ApprovalHistoryPanel, HumanApprovalLayer } from "@/components/dashboard/AICommandStudio";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import type { AppAccess } from "@/lib/rbac";
+import type { AiQueryResult, ApprovalProposal } from "@/lib/ai-commands.functions";
+import { listCameras, type CameraRecord } from "@/lib/cameras.functions";
+import {
+  appendStoredCommandHistory,
+  loadStoredCommandHistory,
+  saveStoredCommandHistory,
+  saveStoredCommandIntent,
+  type CommandHistoryEntry,
+} from "@/lib/command-memory";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { typeMeta, statusMeta } from "@/lib/mockData";
 import { orgRoom, useRealtimeEventFeed } from "@/lib/realtime.events";
@@ -26,6 +36,7 @@ import {
   Smartphone,
   UserRoundCheck,
 } from "lucide-react";
+import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 
 type MapboxModule = typeof import("mapbox-gl");
 type MapboxMap = import("mapbox-gl").Map;
@@ -118,6 +129,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
   const loadMembers = useServerFn(listMembers);
   const loadLocations = useServerFn(listLocations);
   const loadCheckIns = useServerFn(listCheckIns);
+  const loadCameras = useServerFn(listCameras);
   const loadToken = useServerFn(getMapboxToken);
 
   useRealtimeInvalidate("incidents", [["command-incidents"]]);
@@ -131,10 +143,17 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
   const { data: members = [], isLoading: membersLoading } = useQuery({ queryKey: ["command-members"], queryFn: () => loadMembers() as Promise<MemberRow[]> });
   const { data: locations = [], isLoading: locationsLoading } = useQuery({ queryKey: ["command-locations"], queryFn: () => loadLocations() as Promise<LocationRow[]> });
   const { data: checkIns = [], isLoading: checkInsLoading } = useQuery({ queryKey: ["command-checkins"], queryFn: () => loadCheckIns() as Promise<CheckInRow[]> });
+  const { data: cameras = [], isLoading: camerasLoading } = useQuery({
+    queryKey: ["command-cameras"],
+    queryFn: () => loadCameras() as Promise<CameraRecord[]>,
+    refetchInterval: 60_000,
+  });
   const { data: tokenData } = useQuery({ queryKey: ["command-mapbox-token"], queryFn: () => loadToken(), staleTime: Infinity });
   const liveEvents = useRealtimeEventFeed(access.orgId ? orgRoom(access.orgId) : null, 5);
 
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
+  const [activeIntent, setActiveIntent] = useState<AiQueryResult | null>(null);
+  const [approvalHistory, setApprovalHistory] = useState<CommandHistoryEntry[]>(() => loadStoredCommandHistory());
   const [clock, setClock] = useState("");
 
   useEffect(() => {
@@ -151,6 +170,14 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
     const id = setInterval(tick, 30_000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    saveStoredCommandIntent(activeIntent);
+  }, [activeIntent]);
+
+  useEffect(() => {
+    saveStoredCommandHistory(approvalHistory);
+  }, [approvalHistory]);
 
   const openIncidents = useMemo(
     () => incidents.filter((incident) => incident.status !== "resolved" && incident.status !== "closed"),
@@ -255,10 +282,159 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         const sevDiff = Number(b.severity) - Number(a.severity);
         if (sevDiff !== 0) return sevDiff;
         return new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime();
-      }),
+    }),
     [openIncidents],
   );
-  const selectedIncident = sortedActiveIncidents.find((incident) => incident.id === selectedIncidentId) ?? sortedActiveIncidents[0] ?? null;
+  const intentFilteredIncidents = useMemo(() => {
+    if (!activeIntent) return sortedActiveIncidents;
+    const { query, severityMin, status, location, zone, target } = activeIntent.filters;
+    return sortedActiveIncidents.filter((incident) => {
+      const haystack = [
+        incident.code,
+        incident.location,
+        incident.zone,
+        incident.officer,
+        incident.title,
+        incident.description,
+        incident.type,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (query && !haystack.includes(query)) {
+        const queryTokens = query.split(/\s+/).filter(Boolean);
+        if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
+      }
+      if (severityMin != null && Number(incident.severity) < severityMin) return false;
+      if (status && String(incident.status).toLowerCase() !== status.toLowerCase()) return false;
+      if (location && !incident.location.toLowerCase().includes(location.toLowerCase()) && !incident.zone.toLowerCase().includes(location.toLowerCase())) return false;
+      if (zone && !incident.zone.toLowerCase().includes(zone.toLowerCase())) return false;
+      if (target && !incident.code.toLowerCase().includes(target.toLowerCase()) && !(incident.description ?? "").toLowerCase().includes(target.toLowerCase())) return false;
+      return true;
+    });
+  }, [activeIntent, sortedActiveIncidents]);
+  const selectedIncident = intentFilteredIncidents.find((incident) => incident.id === selectedIncidentId) ?? intentFilteredIncidents[0] ?? null;
+  const intentFilteredPatrols = useMemo(() => {
+    if (!activeIntent) return activePatrols;
+    const { query, severityMin, status, location, zone, target } = activeIntent.filters;
+    return activePatrols.filter((patrol) => {
+      const locationLabel = locations.find((item) => item.id === patrol.location_id)?.name ?? "";
+      const haystack = [patrol.code, patrol.name, patrol.officer, patrol.shift, locationLabel]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (query && !haystack.includes(query)) {
+        const queryTokens = query.split(/\s+/).filter(Boolean);
+        if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
+      }
+      if (status && patrol.status.toLowerCase() !== status.toLowerCase()) return false;
+      if (location && !haystack.includes(location.toLowerCase())) return false;
+      if (zone && !haystack.includes(zone.toLowerCase())) return false;
+      if (target && !haystack.includes(target.toLowerCase())) return false;
+      if (severityMin != null && severityMin >= 4 && patrol.status === "complete") return false;
+      return true;
+    });
+  }, [activeIntent, activePatrols, locations]);
+  const commandResultCounts = useMemo(
+    () => ({
+      incidents: intentFilteredIncidents.length,
+      patrols: intentFilteredPatrols.length,
+      critical: intentFilteredIncidents.filter((incident) => Number(incident.severity) >= 4).length,
+    }),
+    [intentFilteredIncidents, intentFilteredPatrols],
+  );
+
+  const approvalProposals = useMemo<ApprovalProposal[]>(() => {
+    if (!selectedIncident) {
+      return delayedPatrols.slice(0, 3).map((patrol, idx) => ({
+        id: `plan-${patrol.id}`,
+        title: `Review delayed patrol ${patrol.code}`,
+        confidence: Math.max(68, 84 - idx * 5),
+        reasoning: [
+          `Patrol ${patrol.officer} is delayed and should be human-reviewed before escalation.`,
+          `Latest check-in timing suggests a route drift of ${Math.max(1, idx + 2)} minutes.`,
+        ],
+        devices: [`PWA-${patrol.officer.split(/\s+/)[0].toUpperCase()}`, "RADIO-DISPATCH"],
+        risk: idx === 0 ? "high" : "medium",
+        status: "pending",
+      }));
+    }
+    const locationDevices = [
+      `CCTV-${selectedIncident.zone.replace(/\s+/g, "-").toUpperCase()}`,
+      `ACCESS-${selectedIncident.location.replace(/\s+/g, "-").toUpperCase().slice(0, 12)}`,
+      `RADIO-${selectedIncident.code.slice(-3)}`,
+    ];
+    const nearestPatrol = activePatrols[0];
+    const nearestOfficer = nearestPatrol?.officer ?? "nearest officer";
+    return [
+      {
+        id: `${selectedIncident.id}-dispatch`,
+        title: `Dispatch ${nearestOfficer} to ${selectedIncident.code}`,
+        confidence: Math.min(97, 86 + Math.min(8, Number(selectedIncident.severity) * 2)),
+        reasoning: [
+          `The selected incident is severity ${selectedIncident.severity} in ${selectedIncident.location}.`,
+          `The nearest live patrol is ${nearestOfficer}; dispatching keeps response inside the SLA window.`,
+          `Relationship API approval is required before the action is logged and broadcast.`,
+        ],
+        devices: locationDevices,
+        risk: Number(selectedIncident.severity) >= 4 ? "high" : "medium",
+        status: "pending",
+      },
+      {
+        id: `${selectedIncident.id}-cctv`,
+        title: `Activate CCTV on ${selectedIncident.zone}`,
+        confidence: Math.min(95, 82 + Number(selectedIncident.severity)),
+        reasoning: [
+          `Camera coverage around ${selectedIncident.zone} is needed for visual confirmation.`,
+          `This reduces blind-spot exposure before the response team arrives.`,
+        ],
+        devices: [`CCTV-${selectedIncident.zone.replace(/\s+/g, "-").toUpperCase()}`, `NVR-${selectedIncident.zone.slice(0, 4).toUpperCase()}`],
+        risk: "medium",
+        status: "pending",
+      },
+      {
+        id: `${selectedIncident.id}-perimeter`,
+        title: `Stabilize perimeter around ${selectedIncident.location}`,
+        confidence: Math.min(93, 80 + Number(selectedIncident.severity)),
+        reasoning: [
+          `Keep the perimeter sealed while the command team reviews the incident.`,
+          `Temporary access-control hold prevents unnecessary movement into the scene.`,
+        ],
+        devices: [`ACCESS-${selectedIncident.location.replace(/\s+/g, "-").toUpperCase().slice(0, 12)}`, `BARRIER-${selectedIncident.zone.replace(/\s+/g, "-").toUpperCase()}`],
+        risk: "low",
+        status: "pending",
+      },
+    ];
+  }, [activePatrols, delayedPatrols, selectedIncident]);
+
+  const handleApprovalDecision = (
+    decision: string,
+    proposalIds: string[],
+    details?: { note?: string; modification?: string; commandText?: string; priority?: string; scope?: string },
+  ) => {
+    const selected = approvalProposals.filter((proposal) => proposalIds.includes(proposal.id));
+    const summary =
+      decision === "reject"
+        ? `Rejected ${selected.length} approval item${selected.length === 1 ? "" : "s"}`
+        : decision === "approve_all"
+          ? `Approved all AI proposals for ${details?.commandText ?? selectedIncident?.code ?? "the active incident"}`
+          : `Approved ${selected.length} selected proposal${selected.length === 1 ? "" : "s"}`;
+
+    const entry: CommandHistoryEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      at: new Date().toISOString(),
+      decision: decision as CommandHistoryEntry["decision"],
+      proposalIds,
+      commandText: details?.commandText ?? activeIntent?.text ?? selectedIncident?.code ?? "manual review",
+      summary,
+      scope: (details?.scope ?? activeIntent?.scope ?? "incidents") as CommandHistoryEntry["scope"],
+      priority: details?.priority as CommandHistoryEntry["priority"],
+      note: details?.note,
+      modification: details?.modification,
+    };
+    setApprovalHistory((current) => [entry, ...current].slice(0, 12));
+    appendStoredCommandHistory(entry);
+  };
 
   const commandStats = readOnly
     ? [
@@ -319,6 +495,68 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         </section>
       )}
 
+      <section className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+        <AiChatWidget
+          scope={activeIntent?.scope ?? "incidents"}
+          context={{ orgId: access.orgId, selectedIds: selectedIncident ? [selectedIncident.id] : [] }}
+          suggestions={[
+            "Show critical incidents in Zone B",
+            "Track REID targets crossing blind spots",
+            "List patrols with delayed check-ins",
+          ]}
+          onQueryResult={setActiveIntent}
+        />
+        <HumanApprovalLayer
+          incidentId={selectedIncident?.id ?? null}
+          commandText={activeIntent?.text ?? selectedIncident?.code ?? null}
+          scope={activeIntent?.scope ?? "incidents"}
+          orgId={access.orgId}
+          fallbackProposals={approvalProposals}
+          onDecision={handleApprovalDecision}
+        />
+      </section>
+
+      <section className="rounded-3xl border border-white/10 bg-primary/10 px-4 py-4 text-sm text-slate-100">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-300">Command result summary</div>
+            <div className="mt-1 text-base font-medium">
+              {activeIntent ? activeIntent.summary : "No active AI filter. Dashboard is showing the live operational feed."}
+            </div>
+            <div className="mt-1 text-xs text-slate-300">{activeIntent ? activeIntent.routingNote : "Submit a query to stage a backend filter proposal."}</div>
+          </div>
+          {activeIntent ? (
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Incidents {commandResultCounts.incidents}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Patrols {commandResultCounts.patrols}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Critical {commandResultCounts.critical}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Scope {activeIntent.scope}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <ApprovalHistoryPanel entries={approvalHistory} />
+
+      {activeIntent && (
+        <section className="rounded-3xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-300">Applied command filter</div>
+              <div className="mt-1 font-medium">{activeIntent.summary}</div>
+              <div className="mt-1 text-xs text-slate-300">{activeIntent.routingNote}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveIntent(null)}
+              className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-200"
+            >
+              Clear filter
+            </button>
+          </div>
+        </section>
+      )}
+
       <section className="grid gap-4 xl:grid-cols-[1.5fr_0.95fr]">
         <div className="space-y-4">
           <div className={`rounded-3xl border border-border bg-card p-4 ${fullMapHeight}`}>
@@ -332,7 +570,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
               </Link>
             </div>
             <CommandMapPreview
-              incidents={sortedActiveIncidents}
+              incidents={intentFilteredIncidents}
               patrols={activePatrols}
               locations={locations}
               token={mapToken}
@@ -345,7 +583,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         <div className="space-y-4">
           <Card title="Active incidents" icon={AlertTriangle}>
             <div className="space-y-3">
-              {sortedActiveIncidents.slice(0, 5).map((incident) => (
+              {intentFilteredIncidents.slice(0, 5).map((incident) => (
                 <div
                   key={incident.id}
                   className={`rounded-2xl border p-3 ${incident.id === selectedIncident?.id ? "border-primary/40 bg-primary/10" : "border-border bg-surface"}`}
@@ -384,7 +622,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
                   </div>
                 </div>
               ))}
-              {!sortedActiveIncidents.length && <EmptyState>No active incidents right now.</EmptyState>}
+              {!intentFilteredIncidents.length && <EmptyState>No active incidents match the current command filter.</EmptyState>}
             </div>
           </Card>
 
@@ -458,6 +696,18 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
               ))}
             </div>
           </Card>
+
+          <Card title="Live cameras" icon={Layers3}>
+            <div className="space-y-3">
+              {camerasLoading ? (
+                <EmptyState>Loading camera registry…</EmptyState>
+              ) : cameras.length ? (
+                cameras.slice(0, 2).map((camera) => <CameraStreamPlayer key={camera.id} camera={camera} />)
+              ) : (
+                <EmptyState>No registered cameras were returned by the Relationship API.</EmptyState>
+              )}
+            </div>
+          </Card>
         </div>
       </section>
 
@@ -473,7 +723,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {activePatrols.map((patrol) => {
+          {(activeIntent ? intentFilteredPatrols : activePatrols).map((patrol) => {
             const lastCheckIn = latestCheckIns.get(patrol.id);
             return (
               <div key={patrol.id} className="rounded-2xl border border-border bg-surface p-4">
@@ -511,7 +761,9 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
               </div>
             );
           })}
-          {!activePatrols.length && <EmptyState>No patrols are currently active.</EmptyState>}
+          {!(activeIntent ? intentFilteredPatrols : activePatrols).length && (
+            <EmptyState>{activeIntent ? "No patrols match the current AI command filter." : "No patrols are currently active."}</EmptyState>
+          )}
         </div>
       </section>
 

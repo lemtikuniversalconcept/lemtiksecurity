@@ -7,6 +7,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { supabase } from "@/integrations/supabase/client";
 import { listIncidents } from "@/lib/incidents.functions";
 import { getMapboxToken } from "@/lib/config.functions";
+import { getBriefs, generateBrief as generateBriefReport } from "@/lib/intelligence.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { incidents as fallbackIncidents, zoneRisk, type IncidentType } from "@/lib/mockData";
@@ -75,6 +76,8 @@ function IntelligenceFeedPage() {
   const canManage = appAccess.specRole === "security_manager";
   const list = useServerFn(listIncidents);
   const tokenFn = useServerFn(getMapboxToken);
+  const loadBriefs = useServerFn(getBriefs);
+  const createBrief = useServerFn(generateBriefReport);
   const { data: incidents = [], isLoading } = useQuery({
     queryKey: ["intelligence-feed"],
     queryFn: () => list() as Promise<any[]>,
@@ -83,6 +86,10 @@ function IntelligenceFeedPage() {
     queryKey: ["mapbox_token"],
     queryFn: () => tokenFn(),
     staleTime: Infinity,
+  });
+  const { data: serverBriefs = [], refetch: refetchBriefs } = useQuery({
+    queryKey: ["intelligence-briefs", appAccess.orgId],
+    queryFn: () => loadBriefs({ data: { org_id: appAccess.orgId } }) as Promise<BriefEntry[]>,
   });
 
   useRealtimeInvalidate("incidents", [["intelligence-feed"]]);
@@ -96,11 +103,9 @@ function IntelligenceFeedPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [feedFlags, setFeedFlags] = useState<Record<string, "relevant" | "dismissed">>({});
   const [briefHistory, setBriefHistory] = useState<BriefEntry[]>([]);
-  const [briefReady, setBriefReady] = useState(false);
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRefs = useRef<mapboxgl.Marker[]>([]);
-  const sourceKey = `lemtik-intelligence-briefs:${appAccess.orgId || "platform"}`;
 
   const liveItems = useMemo(() => {
     const source = incidents.length > 0 ? incidents : fallbackIncidents.map((i) => ({
@@ -174,30 +179,8 @@ function IntelligenceFeedPage() {
   const currentBrief = useMemo(() => buildBrief(filteredItems, currentAreaRisk.zone, rangeFilter), [filteredItems, currentAreaRisk.zone, rangeFilter]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(sourceKey);
-      if (raw) {
-        setBriefHistory(JSON.parse(raw));
-      } else {
-        setBriefHistory([currentBrief]);
-      }
-    } catch {
-      setBriefHistory([currentBrief]);
-    } finally {
-      setBriefReady(true);
-    }
-    // seed once per org
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceKey]);
-
-  useEffect(() => {
-    if (!briefReady) return;
-    try {
-      localStorage.setItem(sourceKey, JSON.stringify(briefHistory.slice(0, 12)));
-    } catch {
-      // ignore storage failure
-    }
-  }, [briefHistory, briefReady, sourceKey]);
+    setBriefHistory((serverBriefs.length ? serverBriefs : [currentBrief]).slice(0, 12));
+  }, [currentBrief, serverBriefs]);
 
   useEffect(() => {
     if (!tokenData?.token || !mapEl.current || mapRef.current) return;
@@ -248,9 +231,25 @@ function IntelligenceFeedPage() {
     });
   }, [filteredItems, mode]);
 
-  const generateBrief = () => {
-    const next = buildBrief(filteredItems, currentAreaRisk.zone, rangeFilter);
+  const generateBrief = async () => {
+    const next = (await createBrief({
+      data: {
+        title: currentBrief.title,
+        summary: currentBrief.summary,
+        highlights: currentBrief.highlights,
+        score: currentBrief.score,
+        windowLabel: currentBrief.windowLabel,
+        items: filteredItems,
+        context: {
+          zone: currentAreaRisk.zone,
+          range: rangeFilter,
+          areaRiskScore: currentAreaRisk.score,
+        },
+        org_id: appAccess.orgId,
+      },
+    })) as BriefEntry;
     setBriefHistory((prev) => [next, ...prev.filter((item) => item.id !== next.id)].slice(0, 12));
+    await refetchBriefs();
   };
 
   const markRelevant = (id: string) => setFeedFlags((prev) => ({ ...prev, [id]: "relevant" }));

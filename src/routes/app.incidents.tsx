@@ -1,5 +1,5 @@
 import { Outlet, createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,7 +14,9 @@ import { IncidentWizardForm } from "@/components/IncidentWizardForm";
 import { type IncidentSubmitPayload } from "@/components/IncidentReportForm";
 import * as offline from "@/lib/offlineQueue";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { loadStoredCommandIntent } from "@/lib/command-memory";
 import { Plus, Filter, Loader2, Download, WifiOff, CloudUpload, ArrowUpDown, Search, X, Eye, UserRoundPlus, ListChecks, BrainCircuit, ChevronLeft, ChevronRight } from "lucide-react";
+import type { AiQueryResult } from "@/lib/ai-commands.functions";
 
 type IncidentRow = {
   id: string;
@@ -82,6 +84,8 @@ function IncidentsList({ appAccess, navigate }: { appAccess: ReturnType<typeof R
   const { data: activeOrg } = useQuery({ queryKey: ["active-org"], queryFn: () => fetchActiveOrg() });
   const { data: locations = [] } = useQuery({ queryKey: ["org-locations"], queryFn: () => fetchLocations() });
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: () => fetchMembers() });
+  const [commandIntent, setCommandIntent] = useState<AiQueryResult | null>(() => loadStoredCommandIntent());
+  const appliedIntentRef = useRef<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
@@ -121,6 +125,22 @@ function IncidentsList({ appAccess, navigate }: { appAccess: ReturnType<typeof R
     const unsub = offline.subscribe(refreshPending);
     return () => { window.removeEventListener("offline", goOffline); window.removeEventListener("online", goOnline); unsub(); };
   }, [create, queryClient]);
+
+  useEffect(() => {
+    const stored = loadStoredCommandIntent();
+    if (!stored) return;
+    setCommandIntent(stored);
+  }, []);
+
+  useEffect(() => {
+    if (!commandIntent || appliedIntentRef.current === commandIntent.request_id) return;
+    appliedIntentRef.current = commandIntent.request_id;
+    setSearch((current) => current || commandIntent.filters.query);
+    if (commandIntent.filters.severityMin != null) setFilterSevMin((current) => Math.max(current, commandIntent.filters.severityMin ?? current));
+    if (commandIntent.filters.status) setFilterStatus((current) => current || (commandIntent.filters.status as IncidentStatus));
+    if (commandIntent.filters.location) setFilterLocation((current) => current || commandIntent.filters.location || "");
+    if (commandIntent.filters.zone) setFilterZone((current) => current || commandIntent.filters.zone || "");
+  }, [commandIntent]);
 
   useEffect(() => {
     try {
@@ -291,6 +311,23 @@ function IncidentsList({ appAccess, navigate }: { appAccess: ReturnType<typeof R
           )}
         </div>
       </div>
+
+      {commandIntent && (
+        <section className="rounded-lg border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Active AI command</div>
+              <div className="mt-1 font-medium">{commandIntent.summary}</div>
+              <div className="mt-1 text-xs text-slate-300">{commandIntent.routingNote}</div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em]">
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">Matches {filtered.length}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">Scope {commandIntent.scope}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">Confidence {commandIntent.confidence}%</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Search & toolbar */}
       <div className="flex flex-wrap items-center gap-2">

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { throwSafeError } from "@/lib/server-errors";
 import { getActiveOrgId } from "@/lib/orgs.server";
+import { requestRelationshipApi } from "@/lib/relationship-api";
 
 const orgType = z.enum(["estate", "corporate", "hotel", "government"]);
 // Subscription tier/status are intentionally not exposed in any user-facing
@@ -331,4 +332,40 @@ export const removeMember = createServerFn({ method: "POST" })
       .from("organisation_members").delete().eq("id", data.member_id);
     if (error) throwSafeError("orgs.members.remove", error, "Access denied or unable to remove member.");
     return { ok: true };
+  });
+
+export const findProximityMembers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      coord_x: z.number(),
+      coord_y: z.number(),
+      incident_id: z.string().uuid().optional(),
+      org_id: z.string().uuid().optional(),
+      limit: z.number().int().min(1).max(20).optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const orgId = data.org_id ?? await getActiveOrgId(context.supabase, context.userId);
+    const result = await requestRelationshipApi<Array<{
+      id: string;
+      user_id: string;
+      name: string;
+      role: string;
+      zone: string;
+      status: string;
+      coordinates: [number, number];
+      distance: number;
+      source: string;
+    }>>("/api/v1/proximity/find", {
+      body: {
+        org_id: orgId,
+        incident_id: data.incident_id ?? null,
+        coord_x: data.coord_x,
+        coord_y: data.coord_y,
+        limit: data.limit ?? 10,
+        source: "c4isod-dashboard",
+      },
+    });
+    return result ?? [];
   });

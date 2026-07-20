@@ -5,7 +5,7 @@ import { useMemo, useState, type ComponentType } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols } from "@/lib/patrols.functions";
-import { sendReportDelivery } from "@/lib/reports.functions";
+import { generateReportSummary, sendReportDelivery } from "@/lib/reports.functions";
 import { getActiveOrg, getSettings } from "@/lib/orgs.functions";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { type IncidentType, typeMeta } from "@/lib/mockData";
@@ -164,6 +164,7 @@ function ReportCentre() {
   const loadOrg = useServerFn(getActiveOrg);
   const loadSettings = useServerFn(getSettings);
   const sendReport = useServerFn(sendReportDelivery);
+  const summaryFn = useServerFn(generateReportSummary);
 
   const { data: incidents = [], isLoading: loadingIncidents } = useQuery({
     queryKey: ["report-centre-incidents", appAccess.orgId],
@@ -234,12 +235,31 @@ function ReportCentre() {
   };
 
   const sendSelectedReportEmail = async () => {
-    const summary = buildReportSummary(selectedTemplateData, model, customSections);
     const recipients = [currentOrg.billing_contact_email].filter(Boolean) as string[];
     if (!recipients.length) {
       toast.error("No email recipients configured for this organisation.");
       return;
     }
+
+    const summary = await summaryFn({
+      data: {
+        template_id: selectedTemplateData.id,
+        template_title: selectedTemplateData.title,
+        org_id: currentOrg.id,
+        stats: {
+          incidents_last_24h: model.last24hCount,
+          incidents_last_7d: model.last7dCount,
+          incidents_last_30d: model.last30dCount,
+          patrol_compliance: model.weeklyCompliance,
+          risk_index: model.monthlyRisk,
+          generated_this_month: model.thisMonthGenerated,
+          recipients: recipientCount,
+        },
+        sections: selectedTemplate === "custom" ? customSections : undefined,
+        range_label: selectedTemplateData.window,
+        commentary: customCommentary || undefined,
+      },
+    }) as string;
 
     const result = await sendReport({
       report_name: selectedTemplateData.title,
@@ -602,23 +622,6 @@ function buildReportCentreModel(incidents: IncidentRow[], patrols: PatrolRow[], 
     thisMonthGenerated,
     history,
   };
-}
-
-function buildReportSummary(template: ReportTemplate, model: ReturnType<typeof buildReportCentreModel>, customSections: string[]) {
-  switch (template.id) {
-    case "daily":
-      return `${model.last24hCount} incidents were logged in the last 24 hours. Patrol activity and operational issues are included in the daily incident log.`;
-    case "weekly":
-      return `${model.last7dCount} incidents were logged this week with ${model.weeklyCompliance}% patrol compliance. The summary includes incident trends, patrol status, and weekly recommendations.`;
-    case "monthly":
-      return `${model.last30dCount} incidents were logged in the last 30 days with a risk index of ${model.monthlyRisk}. The report includes month-over-month movement, response trends, and executive-level observations.`;
-    case "incident":
-      return `${model.criticalIncidents.length} critical incidents are available for case-ready export. The incident-specific report includes evidence, chronology, and escalation history.`;
-    case "custom":
-      return `Custom report export with ${customSections.length} selected sections: ${customSections.join(", ")}. Executive commentary and date-range filters are included where configured.`;
-    default:
-      return "Security report generated for delivery.";
-  }
 }
 
 function buildHistoryRows(incidents: IncidentRow[], patrols: PatrolRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {

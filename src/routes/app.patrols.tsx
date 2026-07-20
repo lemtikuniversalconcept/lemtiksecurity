@@ -10,6 +10,8 @@ import { listLocations } from "@/lib/orgs.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { loadStoredCommandIntent } from "@/lib/command-memory";
+import type { AiQueryResult } from "@/lib/ai-commands.functions";
 import {
   Activity,
   Archive,
@@ -103,6 +105,8 @@ function Patrols() {
     queryFn: () => mapboxTokenFn(),
     staleTime: Infinity,
   });
+  const [commandIntent, setCommandIntent] = useState<AiQueryResult | null>(() => loadStoredCommandIntent());
+  const appliedIntentRef = useRef<string | null>(null);
 
   const patrols = useMemo(
     () => (patrolRows as any[]).filter((patrol) => (showArchived ? !!patrol.archived_at : !patrol.archived_at)),
@@ -125,6 +129,23 @@ function Patrols() {
     () => patrols.filter((p) => p.status !== "complete"),
     [patrols],
   );
+  const commandFilteredPatrols = useMemo(() => {
+    if (!commandIntent) return activePatrols;
+    const { query, status, location, zone, target } = commandIntent.filters;
+    return activePatrols.filter((patrol) => {
+      const locationLabel = locationById.get(patrol.location_id ?? "")?.name ?? "";
+      const haystack = [patrol.code, patrol.name, patrol.officer, patrol.shift, locationLabel].filter(Boolean).join(" ").toLowerCase();
+      if (query && !haystack.includes(query)) {
+        const queryTokens = query.split(/\s+/).filter(Boolean);
+        if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
+      }
+      if (status && patrol.status.toLowerCase() !== status.toLowerCase()) return false;
+      if (location && !haystack.includes(location.toLowerCase())) return false;
+      if (zone && !haystack.includes(zone.toLowerCase())) return false;
+      if (target && !haystack.includes(target.toLowerCase())) return false;
+      return true;
+    });
+  }, [activePatrols, commandIntent, locationById]);
   const missedCount = patrols.filter((p) => p.status === "missed").length;
   const delayedCount = patrols.filter((p) => p.status === "delayed").length;
   const completeCount = patrols.filter((p) => p.status === "complete").length;
@@ -161,6 +182,17 @@ function Patrols() {
     const cutoff = Date.now() + 7 * 24 * 3600_000;
     return (shifts as any[]).filter((shift) => new Date(shift.scheduled_start).getTime() > cutoff);
   }, [shifts]);
+
+  useEffect(() => {
+    const stored = loadStoredCommandIntent();
+    if (!stored) return;
+    setCommandIntent(stored);
+  }, []);
+
+  useEffect(() => {
+    if (!commandIntent || appliedIntentRef.current === commandIntent.request_id) return;
+    appliedIntentRef.current = commandIntent.request_id;
+  }, [commandIntent]);
 
   const createRouteMut = useMutation({
     mutationFn: (data: { code: string; name: string; officer: string; shift: string; waypoints: number }) => createPat({ data }),
@@ -242,11 +274,28 @@ function Patrols() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Metric label="Routes visible" value={String(patrols.length)} icon={Radar} />
+        <Metric label="Routes visible" value={String(commandIntent ? commandFilteredPatrols.length : patrols.length)} icon={Radar} />
         <Metric label="Avg completion" value={`${avgCompletion}%`} icon={Activity} />
         <Metric label="Delayed / missed" value={`${delayedCount + missedCount}`} icon={ShieldAlert} tone="critical" />
         <Metric label="Complete routes" value={String(completeCount)} icon={Clock3} tone="resolved" />
       </div>
+
+      {commandIntent && (
+        <section className="rounded-lg border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-slate-100">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-300">Active AI command</div>
+              <div className="mt-1 font-medium">{commandIntent.summary}</div>
+              <div className="mt-1 text-xs text-slate-300">{commandIntent.routingNote}</div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em]">
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">Matches {commandFilteredPatrols.length}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">Scope {commandIntent.scope}</span>
+              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1">Confidence {commandIntent.confidence}%</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       {view === "live" && (
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
@@ -259,9 +308,9 @@ function Patrols() {
               <span className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">Live</span>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-[1.1fr_0.9fr]">
-              <LivePatrolMap activePatrols={activePatrols as any[]} locationById={locationById} token={tokenData?.token ?? ""} />
+              <LivePatrolMap activePatrols={(commandIntent ? commandFilteredPatrols : activePatrols) as any[]} locationById={locationById} token={tokenData?.token ?? ""} />
               <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
-                {activePatrols.slice(0, 8).map((patrol) => {
+                {(commandIntent ? commandFilteredPatrols : activePatrols).slice(0, 8).map((patrol) => {
                   const completion = Math.round((Number(patrol.checked_in ?? 0) / Math.max(Number(patrol.waypoints ?? 1), 1)) * 100);
                   const last = latestCheckInByPatrol.get(patrol.id);
                   const location = patrol.location_id ? locationById.get(patrol.location_id) : null;
@@ -308,7 +357,7 @@ function Patrols() {
               Next check-ins: {nextDue.length ? nextDue.join(" · ") : "No upcoming check-in data."}
             </div>
             <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-              {activePatrols.length} active patrol{activePatrols.length === 1 ? "" : "s"} currently on route.
+              {(commandIntent ? commandFilteredPatrols : activePatrols).length} active patrol{(commandIntent ? commandFilteredPatrols : activePatrols).length === 1 ? "" : "s"} currently on route.
             </div>
           </div>
         </section>
