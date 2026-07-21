@@ -7,7 +7,7 @@
 [![Typing SVG](https://readme-typing-svg.demolab.com?font=Inter&weight=700&size=32&duration=3000&pause=1000&color=00D4FF&center=true&vCenter=true&multiline=false&repeat=true&width=650&height=60&lines=LEMTIK+SECURITY;AI-Native+Operational+Intelligence;Built+for+OpenAI+Build+Week)](https://git.io/typing-svg)
 
 <p align="center">
-  <em>An AI-native operational intelligence platform for physical security operations, <br/>
+  <em>An AI-native operational intelligence platform for physical security operations —<br/>
   enhanced during OpenAI Build Week using <strong>OpenAI Codex Desktop</strong> as the primary development environment.</em>
 </p>
 
@@ -40,7 +40,7 @@ This project makes a deliberate distinction that judges, contributors, and inves
 | Layer | What it is | Model(s) used |
 |---|---|---|
 | **Development tooling** | The environment we used to *build and improve* the codebase during OpenAI Build Week | **OpenAI Codex Desktop**, powered by **GPT-5.6** |
-| **Runtime inference** | The model(s) that power the *production application* when it processes a real incident | **Groq-hosted, Qwen Vl, Gemini flash, Groq-compatible models** (e.g. Llama 3.3 70B Versatile), configurable per deployment |
+| **Runtime inference** | The model(s) that power the *production application* when it processes a real incident | **Groq-hosted, Groq-compatible models** (e.g. Llama 3.3 70B Versatile), configurable per deployment |
 
 **OpenAI models do not power the running application.** Codex Desktop and GPT-5.6 were our development environment and pair-programming partner throughout Build Week — they do not sit in the runtime request path. This is intentional and, per Build Week rules, acceptable: the requirement is that OpenAI tooling was used *during development*, not that OpenAI APIs serve production traffic. Every section below keeps this line clear.
 
@@ -75,13 +75,13 @@ This project makes a deliberate distinction that judges, contributors, and inves
 
 ## 🎯 Overview
 
-**Lemtik Security** is a civilian-grade **C4I (Command, Control, Communications, Computers & Intelligence)** platform, built in Lagos, Nigeria, for African urban security operations, estates, hospitals, hotels, banks, and government facilities.
+**Lemtik Security** is a civilian-grade **C4I (Command, Control, Communications, Computers & Intelligence)** platform, built in Lagos, Nigeria, for African urban security operations — estates, hospitals, hotels, banks, and government facilities.
 
 The platform already existed before OpenAI Build Week as a working, multi-service system with live incident management, patrol operations, routing, and a Groq-backed AI dispatch agent. During Build Week, we used the event as a forcing function to push the AI-native layer of the product further: structured intelligence extraction from messy field reports, an operator-facing "AI Command Studio," and a hardened safety layer that governs what the AI is and is not allowed to trigger autonomously.
 
 ## ❗ Problem
 
-Security operations in dense African cities run on radio chatter, WhatsApp voice notes, and Pidgin-inflected field reports. That raw, unstructured communication rarely makes it into a structured incident record fast enough to matter, and there is no consistent gate that prevents an automated system from acting on a bad inference, dispatching the wrong resource, or worse, ignoring a safety constraint during an evacuation.
+Security operations in dense African cities run on radio chatter, WhatsApp voice notes, and Pidgin-inflected field reports. That raw, unstructured communication rarely makes it into a structured incident record fast enough to matter, and there is no consistent gate that prevents an automated system from acting on a bad inference — dispatching the wrong resource, or worse, ignoring a safety constraint during an evacuation.
 
 ## ✅ Solution
 
@@ -119,6 +119,10 @@ The result is a shorter path from "something happened in the field" to "a verifi
 | ✅ Human Approval Workflow | Every AI action recommendation routes through an explicit approve/reject step |
 | 🛡 Safety Constraints Engine | Validates AI recommendations against hard safety rules before they can be actioned |
 | 🔌 Gateway AI Routes | New Fastify proxy endpoints connecting the dashboard to AI-backed services |
+| 🎥 CCTV Feeds Control Room | Real-time camera feeds panel supporting manual image uploads and diagnostics |
+| 👁 Qwen-VL Threat Diagnostics | Run multimodal visual threat verification on camera frames (loitering, tailgating, perimeter trespass) |
+| 🏷 Re-ID / Person Tracking | Real-time target continuity logs mapping clothing descriptions and similarity percentages |
+| 🔮 Blind-Spot Predictor | Foresees missing target transitions between camera corridors and estimates reappearance |
 
 ---
 
@@ -190,6 +194,7 @@ lemtiksecurity/
 │   ├── inventoryservices/          # Inventory Service (Python)
 │   ├── routecalculator/            # Route Calculator — Valhalla (Python)
 │   ├── proximity/                  # Proximity / Officer Finder (Python)
+│   ├── cctvai/                     # CCTV Feed Perception & Target Re-ID (Python)
 │   ├── autonomouscontroller/       # Autonomous Control + Safety Constraints Engine (Python)
 │   └── masterai/                   # Master AI Agent — Groq/Llama 3.3 (Python)
 └── README.md
@@ -199,14 +204,22 @@ lemtiksecurity/
 
 ## 🛠 What We Built During OpenAI Build Week
 
-### 1. Structured Intelligence Engine
+### 1. CCTV Perception & Multimodal Diagnostics
+**Repository:** `cctvai`
+
+- **Qwen-VL Vision Integration** — Runs multimodal image verification on uploaded or preset camera frames to detect loitering, perimeter trespass, or tailgating near restricted elevator corridors.
+- **Re-ID / Target Continuity** — Dynamically tracks subjects across offline networks using clothing descriptors, gender classification, and color histograms to assign matching confidence scores (e.g. `REID-C5A95045`).
+- **Blind-Spot Predictor** — Computes probability vectors to forecast transition delays and reappearances in neighboring cameras when a target enters a blind spot.
+- **CCTV Phone Test Page** — A development-friendly interface that lets operators turn any smartphone camera into a live-updating CCTV feed sending frames and Nigeria-localized voice messages to the system.
+
+### 2. Structured Intelligence Engine
 A parsing layer that takes unstructured radio traffic and field reports — including Nigerian Pidgin phrasing — and converts them into structured, schema-conformant incident data.
 
 - **Radio Intelligence Parser** — interprets radio-style and Pidgin field language into discrete fields (location, severity cues, actors, resource requests).
 - **Structured JSON Extraction** — enforces a consistent output schema so downstream services never have to guess at shape.
 - **Incident Normalization** — maps extracted fields onto the platform's canonical incident record, so a parsed report is immediately usable by the rest of the system.
 
-### 2. AI Command Studio
+### 3. AI Command Studio
 An interactive operator interface built specifically to make AI involvement legible rather than opaque.
 
 - **Interactive operator interface** for reviewing incoming AI-derived assessments.
@@ -214,7 +227,7 @@ An interactive operator interface built specifically to make AI involvement legi
 - **Human approval workflow** — no AI recommendation is actioned without an explicit operator decision.
 - **Action recommendation review** — operators can inspect the reasoning behind a suggested action before approving it.
 
-### 3. Safety Constraints Engine
+### 4. Safety Constraints Engine
 **Repository:** `autonomouscontroller`
 
 **Purpose:**
@@ -223,7 +236,7 @@ An interactive operator interface built specifically to make AI involvement legi
 - Require human approval at the point of action.
 - Never permit an action that would violate an evacuation constraint, regardless of AI confidence.
 
-### 4. Gateway Routing
+### 5. Gateway Routing
 New Fastify proxy endpoints were added to the Relationship API to connect the dashboard to the AI-backed services above:
 
 | Endpoint | Purpose |
@@ -232,8 +245,10 @@ New Fastify proxy endpoints were added to the Relationship API to connect the da
 | `POST /ai/parse-report` | Sends raw field/radio text to the Structured Intelligence Engine |
 | `POST /ai/correlate-events` | Requests correlation across related incidents/signals |
 | `POST /ai/device-recommendations` | Requests device/resource recommendations tied to an incident |
+| `POST /cctv/frames/ingest` | Receives incoming camera frames and forwards them to target telemetry |
+| `POST /cctv/judgement/analyze` | Queries Qwen Vision for threat verification reports on snapshots |
 
-### 5. Frontend
+### 6. Frontend
 - New React components for the **AI Command Studio** workflow.
 - A dedicated **operator workflow** for reviewing and approving/rejecting AI recommendations.
 - **AI interaction panels** presenting confidence scores and recommendation detail.
@@ -345,18 +360,19 @@ pip install -r requirements.txt
 Services must start in this order:
 
 ```bash
-# Terminal 1-6: Internal Python services
+# Terminal 1-7: Internal Python services
 cd Internalservices/osint                && python app.py    # :8001
 cd Internalservices/inventoryservices     && python app.py    # :8002
 cd Internalservices/routecalculator       && python app.py    # :8003
-cd Internalservices/proximity             && python app.py    # :8004
-cd Internalservices/autonomouscontroller  && python app.py    # :8005 (Safety Constraints Engine)
-cd Internalservices/masterai              && python main.py   # :8006
+cd Internalservices/cctvai                && python app.py    # :8004 (CCTV Diagnostics & Re-ID)
+cd Internalservices/proximity             && python app.py    # :8005
+cd Internalservices/autonomouscontroller  && python app.py    # :8006 (Safety Constraints Engine)
+cd Internalservices/masterai              && python main.py   # :8007
 
-# Terminal 7: Relationship API (gateway) — start after backend services
+# Terminal 8: Relationship API (gateway) — start after backend services
 cd relationship_api && npm run build && npm start              # :3000
 
-# Terminal 8: Dashboard
+# Terminal 9: Dashboard
 cd c4isod/lemtiksecurity-main && pnpm dev                       # :5173
 ```
 
@@ -372,6 +388,10 @@ VITE_MAPBOX_TOKEN=
 # Relationship API / Gateway
 SUPABASE_SERVICE_ROLE_KEY=
 GROQ_API_KEY=                   # Runtime inference (Master AI Agent) — NOT an OpenAI key
+
+# CCTV AI Perception Service
+QWEN_API_KEY=                   # Runtime inference (Qwen-VL diagnostics) — NOT an OpenAI key
+DATABASE_URL=                   # Supabase PostgreSQL connection string
 ```
 
 > Note: There is no OpenAI API key in the runtime environment variables above. OpenAI tooling (Codex Desktop) is used at development time only and has no corresponding runtime configuration.
