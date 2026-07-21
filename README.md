@@ -75,13 +75,13 @@ This project makes a deliberate distinction that judges, contributors, and inves
 
 ## 🎯 Overview
 
-**Lemtik Security** is a civilian-grade **C4I (Command, Control, Communications, Computers & Intelligence)** platform, built in Lagos, Nigeria, for African urban security operations — estates, hospitals, hotels, banks, and government facilities.
+**Lemtik Security** is a civilian-grade **C4I (Command, Control, Communications, Computers & Intelligence)** platform, built in Lagos, Nigeria, for African urban security operations, estates, hospitals, hotels, banks, and government facilities.
 
 The platform already existed before OpenAI Build Week as a working, multi-service system with live incident management, patrol operations, routing, and a Groq-backed AI dispatch agent. During Build Week, we used the event as a forcing function to push the AI-native layer of the product further: structured intelligence extraction from messy field reports, an operator-facing "AI Command Studio," and a hardened safety layer that governs what the AI is and is not allowed to trigger autonomously.
 
 ## ❗ Problem
 
-Security operations in dense African cities run on radio chatter, WhatsApp voice notes, and Pidgin-inflected field reports. That raw, unstructured communication rarely makes it into a structured incident record fast enough to matter, and there is no consistent gate that prevents an automated system from acting on a bad inference — dispatching the wrong resource, or worse, ignoring a safety constraint during an evacuation.
+Security operations in dense African cities run on radio chatter, WhatsApp voice notes, and Pidgin-inflected field reports. That raw, unstructured communication rarely makes it into a structured incident record fast enough to matter, and there is no consistent gate that prevents an automated system from acting on a bad inference, dispatching the wrong resource, or worse, ignoring a safety constraint during an evacuation.
 
 ## ✅ Solution
 
