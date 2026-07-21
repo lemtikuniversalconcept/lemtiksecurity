@@ -40,7 +40,7 @@ This project makes a deliberate distinction that judges, contributors, and inves
 | Layer | What it is | Model(s) used |
 |---|---|---|
 | **Development tooling** | The environment we used to *build and improve* the codebase during OpenAI Build Week | **OpenAI Codex Desktop**, powered by **GPT-5.6** |
-| **Runtime inference** | The model(s) that power the *production application* when it processes a real incident | **Groq-hosted, Groq-compatible models** (e.g. Llama 3.3 70B Versatile), configurable per deployment |
+| **Runtime inference** | The model(s) that power the *production application* when it processes a real incident | **Groq-hosted, Qwen Vl, Gemini flash, Groq-compatible models** (e.g. Llama 3.3 70B Versatile), configurable per deployment |
 
 **OpenAI models do not power the running application.** Codex Desktop and GPT-5.6 were our development environment and pair-programming partner throughout Build Week — they do not sit in the runtime request path. This is intentional and, per Build Week rules, acceptable: the requirement is that OpenAI tooling was used *during development*, not that OpenAI APIs serve production traffic. Every section below keeps this line clear.
 
