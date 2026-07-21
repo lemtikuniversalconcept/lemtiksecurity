@@ -28,23 +28,23 @@ type GatewayEnvelope<T = unknown> = {
 
 type AnyRecord = Record<string, any>;
 
-function normalizeCameraList(payload: unknown): CameraRecord[] {
+export function normalizeCameraList(payload: unknown): CameraRecord[] {
+  if (!payload) return [];
   if (Array.isArray(payload)) {
     return payload.filter(Boolean) as CameraRecord[];
   }
-
-  if (!payload || typeof payload !== "object") {
+  if (typeof payload !== "object") {
     return [];
   }
 
   const record = payload as Record<string, unknown>;
-  const candidates = [
-    record.data,
-    record.cameras,
-    record.items,
-    record.results,
-    record.records,
-  ];
+
+  // Recursively unwrap nested gateway 'data' objects
+  if (record.data && typeof record.data === "object") {
+    return normalizeCameraList(record.data);
+  }
+
+  const candidates = [record.cameras, record.items, record.results, record.records];
 
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) {

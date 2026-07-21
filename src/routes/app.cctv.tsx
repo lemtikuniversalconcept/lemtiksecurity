@@ -5,8 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
-import { getCameras, ingestFrame, analyzeJudgement, verifyVision, type CCTVFrameResult } from "@/lib/cctv.functions";
-import { type CameraRecord } from "@/lib/cameras.functions";
+import { getCameras, ingestFrame, analyzeJudgement, verifyVision, normalizeCameraList, type CCTVFrameResult } from "@/lib/cctv.functions";
 import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 import { cn } from "@/lib/utils";
 
@@ -65,23 +64,6 @@ type DecisionResult = {
   decisionLogs: string[];
 };
 
-function normalizeCameraList(payload: unknown): CameraRecord[] {
-  if (Array.isArray(payload)) {
-    return payload.filter(Boolean) as CameraRecord[];
-  }
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-  const record = payload as Record<string, unknown>;
-  const candidates = [record.data, record.cameras, record.items, record.results, record.records];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate.filter(Boolean) as CameraRecord[];
-    }
-  }
-  return [];
-}
-
 function CctvControlRoom() {
   const { appAccess } = Route.useRouteContext();
   const listCamerasFn = useServerFn(getCameras);
@@ -130,32 +112,27 @@ function CctvControlRoom() {
 
   const normalize = (primary: CCTVFrameResult | null, secondary?: CCTVFrameResult | null): DecisionResult => {
     const source = secondary ?? primary ?? {};
-    const confidence = source.confidence ?? 0.7;
     const summaries = [source.threat_summary, source.summary, source.explanation, source.visual_explanation, source.qwen_vision_explanation].filter(Boolean) as string[];
     const reidLogs = source.reid_matching_logs?.length
       ? source.reid_matching_logs
       : source.matches?.length
         ? source.matches.map((match, index) => ({
             status: String(match.status ?? `match-${index + 1}`),
-            similarity: Number(match.similarity ?? 0.61),
-            candidates: Array.isArray(match.candidates) ? match.candidates.map((candidate) => String(candidate)) : ["Candidate A", "Candidate B"],
+            similarity: Number(match.similarity ?? 0),
+            candidates: Array.isArray(match.candidates) ? match.candidates.map((candidate) => String(candidate)) : [],
           }))
-        : [{
-            status: "No direct match returned",
-            similarity: 0.38,
-            candidates: ["Unknown subject", "Low-confidence corridor pass"],
-          }];
+        : [];
     return {
-      threatSummary: summaries[0] ?? "The gateway returned no threat summary, so the page is showing the last operator context.",
-      confidencePct: Math.round(Math.max(0, Math.min(1, confidence)) * 100),
+      threatSummary: summaries[0] ?? "",
+      confidencePct: Math.round(Math.max(0, Math.min(1, source.confidence ?? 0)) * 100),
       statusLabel: String(source.request_id ?? source.id ?? "pending"),
       requestId: String(source.request_id ?? source.id ?? `cctv-${Date.now()}`),
-      explanation: summaries.slice(1).join(" ").trim() || "No additional explanation returned by the gateway.",
-      recommendations: source.recommended_actions?.length ? source.recommended_actions : ["Verify the frame against adjacent cameras", "Escalate to the command desk"],
-      visionGaps: source.vision_gaps?.length ? source.vision_gaps : ["No explicit blind-spot notes returned"],
+      explanation: summaries.slice(1).join(" ").trim(),
+      recommendations: source.recommended_actions ?? [],
+      visionGaps: source.vision_gaps ?? [],
       reidLogs,
-      blindSpotPredictions: source.blind_spot_predictions?.length ? source.blind_spot_predictions : source.blind_spot_prediction ? [source.blind_spot_prediction] : ["Predicted reappearance in adjacent camera corridor"],
-      decisionLogs: source.decision_logs?.length ? source.decision_logs : ["Frame captured", "Threat scoring complete"],
+      blindSpotPredictions: source.blind_spot_predictions ?? (source.blind_spot_prediction ? [source.blind_spot_prediction] : []),
+      decisionLogs: source.decision_logs ?? [],
     };
   };
 
