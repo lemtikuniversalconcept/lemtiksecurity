@@ -7,7 +7,7 @@
 [![Typing SVG](https://readme-typing-svg.demolab.com?font=Inter&weight=700&size=32&duration=3000&pause=1000&color=00D4FF&center=true&vCenter=true&multiline=false&repeat=true&width=650&height=60&lines=LEMTIK+SECURITY;AI-Native+Operational+Intelligence;Built+for+OpenAI+Build+Week)](https://git.io/typing-svg)
 
 <p align="center">
-  <em>An AI-native operational intelligence platform for physical security operations —<br/>
+  <em>An AI-native operational intelligence platform for physical security operations, <br/>
   enhanced during OpenAI Build Week using <strong>OpenAI Codex Desktop</strong> as the primary development environment.</em>
 </p>
 
