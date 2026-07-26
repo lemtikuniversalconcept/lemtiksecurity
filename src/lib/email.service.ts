@@ -97,18 +97,18 @@ export function buildUserInvitationEmail(input: {
   organisationName: string;
   invitedRole: string;
   invitedBy?: string | null;
-  inviteUrl: string;
+  inviteUrl?: string | null;
 }) {
   const title = `You have been invited to ${input.organisationName}`;
   const text = [
     `You have been invited to join ${input.organisationName} as ${input.invitedRole}.`,
     input.invitedBy ? `Invited by ${input.invitedBy}.` : null,
-    `Open this link to accept the invitation: ${input.inviteUrl}`,
+    input.inviteUrl ? `Open this link to accept the invitation: ${input.inviteUrl}` : "Your account has been provisioned and your administrator will share the sign-in password separately.",
   ].filter(Boolean).join("\n");
   const body = `
     <p style="margin:0;font-size:15px;line-height:1.7;color:#cbd5e1;">You have been invited to join <strong style="color:#f8fafc">${escapeHtml(input.organisationName)}</strong> as <strong style="color:#f8fafc">${escapeHtml(input.invitedRole)}</strong>.</p>
     ${input.invitedBy ? `<p style="margin:14px 0 0;font-size:14px;color:#94a3b8;">Invited by ${escapeHtml(input.invitedBy)}.</p>` : ""}
-    <div style="margin-top:22px;">${formatLink("Accept invitation", input.inviteUrl)}</div>
+    ${input.inviteUrl ? `<div style="margin-top:22px;">${formatLink("Accept invitation", input.inviteUrl)}</div>` : ""}
     <p style="margin:18px 0 0;font-size:13px;line-height:1.6;color:#94a3b8;">This invitation expires in 48 hours. If you are not expecting this email, you can ignore it.</p>
   `;
   return {

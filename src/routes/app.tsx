@@ -7,6 +7,9 @@ export const Route = createFileRoute("/app")({
   head: () => ({ meta: [{ title: "Lemtik SOD — Operations" }] }),
   beforeLoad: async () => {
     const appAccess = await resolveAppAccess(supabase);
+    if (appAccess.specRole === "field_officer") {
+      throw redirect({ to: "/officer/home" });
+    }
     return { appAccess };
   },
   component: AppRouteShell,

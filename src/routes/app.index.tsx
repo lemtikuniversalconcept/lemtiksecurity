@@ -13,6 +13,9 @@ export const Route = createFileRoute("/app/")({
   head: () => ({ meta: [{ title: "Overview · Lemtik SOD" }] }),
   beforeLoad: async () => {
     const access = await resolveAppAccess(supabase);
+    if (access.specRole === "field_officer") {
+      throw redirect({ to: "/officer/home" });
+    }
     if (access.specRole !== "lemtik_admin") {
       requireSectionAccess(access, [
         "security_manager",

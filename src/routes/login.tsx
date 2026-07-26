@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { ShieldHalf, Loader2, Mail, ArrowLeft } from "lucide-react";
+import { verifyGoogleLogin } from "@/lib/users.functions";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Sign in · Lemtik SOD" }] }),
@@ -14,9 +16,11 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const checkGoogleLogin = useServerFn(verifyGoogleLogin);
 
   useEffect(() => {
     let mounted = true;
@@ -91,16 +95,34 @@ function LoginPage() {
 
   const signInWithGoogle = async () => {
     setError(null);
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-    if (error) {
-      setError(error.message);
-      setLoading(false);
+    const emailHint = email.trim();
+    if (!emailHint) {
+      setError("Enter your email before continuing with Google sign-in.");
+      return;
+    }
+    setGoogleLoading(true);
+    try {
+      const result = await checkGoogleLogin({ data: { email: emailHint } });
+      if (!result?.exists) {
+        setError("No authorised account exists for that email.");
+        return;
+      }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/app`,
+          queryParams: {
+            login_hint: emailHint,
+          },
+        },
+      });
+      if (error) {
+        setError(error.message);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -197,9 +219,10 @@ function LoginPage() {
             <button
               type="button"
               onClick={signInWithGoogle}
-              disabled={loading}
+              disabled={loading || googleLoading}
               className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface/70 disabled:opacity-60"
             >
+              {googleLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               <GoogleIcon /> Continue with Google
             </button>
 

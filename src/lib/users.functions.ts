@@ -4,7 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { recordBlackboxAudit } from "@/lib/audit.server";
 import { buildUserInvitationEmail, sendResendEmail } from "@/lib/email.service";
 import { throwSafeError } from "@/lib/server-errors";
-import { getActiveOrgId, getSiteUrl } from "@/lib/orgs.server";
+import { getActiveOrgId } from "@/lib/orgs.server";
 
 const appRole = z.enum(["officer", "supervisor", "manager", "client_admin"]);
 
@@ -16,12 +16,72 @@ async function assertAdmin(supabase: any, userId: string, orgId: string) {
     throw new Error("Access denied. Admin role required.");
 }
 
+function defaultInvitePassword(email: string) {
+  const local = email.split("@")[0] ?? "user";
+  const safeLocal = local.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() || "USER";
+  return `LEM-2026-${safeLocal}`;
+}
+
+async function findAuthUserByEmail(email: string) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const target = email.toLowerCase().trim();
+  for (let page = 1; page <= 5; page += 1) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throwSafeError("users.lookupAuthUser", error, "Unable to provision account.");
+    const users = data?.users ?? [];
+    const match = users.find((user: any) => (user.email ?? "").toLowerCase() === target);
+    if (match) return match;
+    if (users.length < 1000) break;
+  }
+  return null;
+}
+
+async function provisionAuthUserForInvite(input: {
+  email: string;
+  password?: string | null;
+  orgId: string;
+  role: string;
+  invitedByName?: string | null;
+}) {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const email = input.email.toLowerCase().trim();
+  const password = (input.password?.trim() || defaultInvitePassword(email)).slice(0, 128);
+  const existing = await findAuthUserByEmail(email);
+
+  if (existing) {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
+      password,
+      email_confirm: true,
+      user_metadata: {
+        invited_role: input.role,
+        organisation_id: input.orgId,
+        invited_by: input.invitedByName ?? null,
+      },
+    });
+    if (error) throwSafeError("users.provisionExisting", error, "Unable to provision login.");
+    return { userId: existing.id, password };
+  }
+
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      invited_role: input.role,
+      organisation_id: input.orgId,
+      invited_by: input.invitedByName ?? null,
+    },
+  });
+  if (error || !data.user) throwSafeError("users.createAuth", error ?? new Error("Unable to create auth user."), "Unable to provision login.");
+  return { userId: data.user.id, password };
+}
+
 async function sendInvitationEmail(input: {
   email: string;
   organisationName: string;
   role: string;
   invitedBy?: string | null;
-  inviteUrl: string;
+  inviteUrl?: string | null;
 }) {
   const email = buildUserInvitationEmail({
     organisationName: input.organisationName,
@@ -177,6 +237,7 @@ export const createInvite = createServerFn({ method: "POST" })
     email: z.string().email().max(200),
     role: appRole,
     assigned_location_ids: z.array(z.string().uuid()).max(50).optional(),
+    password: z.string().min(8).max(128).optional(),
   }).parse(d))
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
@@ -187,6 +248,14 @@ export const createInvite = createServerFn({ method: "POST" })
       .from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle();
     const { data: org } = await context.supabase
       .from("organisations").select("name").eq("id", orgId).maybeSingle();
+
+    const provisioned = await provisionAuthUserForInvite({
+      email: data.email,
+      password: data.password,
+      orgId,
+      role: data.role,
+      invitedByName: meProf?.display_name ?? null,
+    });
 
     // Insert invite record (RLS scoped to admin)
     const { data: invite, error } = await context.supabase
@@ -200,32 +269,22 @@ export const createInvite = createServerFn({ method: "POST" })
       }).select().single();
     if (error) throwSafeError("invites.create", error, "Unable to create invite.");
 
-    // Send Supabase magic-link invite via admin
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const redirectBase = getSiteUrl();
-    const redirectTo = `${redirectBase}/onboarding?invite=${invite.token}`;
-    const inviteUrl = redirectTo;
-    const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
-      data: {
-        invite_token: invite.token,
-        organisation_id: orgId,
-        organisation_name: org?.name ?? "your team",
-        invited_role: data.role,
-        invited_by: meProf?.display_name ?? null,
-      },
-      redirectTo,
-    });
     const deliveryWarning = await sendInvitationEmail({
       email: invite.email,
       organisationName: org?.name ?? "your team",
       role: data.role,
       invitedBy: meProf?.display_name ?? null,
-      inviteUrl,
+      inviteUrl: null,
     });
-    if (inviteErr) {
-      // Don't fail the row create — surface to admin but keep record so they can copy link
-      return { ok: true, invite, delivery_warning: inviteErr.message };
-    }
+
+    await context.supabase.from("profiles").upsert(
+      {
+        user_id: provisioned.userId,
+        active_organisation_id: orgId,
+        assigned_location_ids: data.assigned_location_ids ?? [],
+      },
+      { onConflict: "user_id" },
+    );
 
     await recordBlackboxAudit({
       orgId,
@@ -236,7 +295,7 @@ export const createInvite = createServerFn({ method: "POST" })
       actionDetail: { email: invite.email, role: data.role } as any,
     });
 
-    return { ok: true, invite, delivery_warning: deliveryWarning };
+    return { ok: true, invite, delivery_warning: deliveryWarning, login_provisioned: true };
   });
 
 export const resendInvite = createServerFn({ method: "POST" })
@@ -253,31 +312,23 @@ export const resendInvite = createServerFn({ method: "POST" })
       .update({ expires_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(), status: "pending" })
       .eq("id", invite.id);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: meProf } = await context.supabase
       .from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle();
     const { data: org } = await context.supabase
       .from("organisations").select("name").eq("id", orgId).maybeSingle();
-    const redirectBase = getSiteUrl();
-    const inviteUrl = `${redirectBase}/onboarding?invite=${invite.token}`;
-    const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
-      data: {
-        invite_token: invite.token,
-        organisation_id: orgId,
-        invited_role: invite.role,
-        organisation_name: org?.name ?? "your team",
-        invited_by: meProf?.display_name ?? null,
-      },
-      redirectTo: inviteUrl,
+    await provisionAuthUserForInvite({
+      email: invite.email,
+      orgId,
+      role: invite.role,
+      invitedByName: meProf?.display_name ?? null,
     });
     const deliveryWarning = await sendInvitationEmail({
       email: invite.email,
       organisationName: org?.name ?? "your team",
       role: invite.role,
       invitedBy: meProf?.display_name ?? null,
-      inviteUrl,
+      inviteUrl: null,
     });
-    if (inviteErr) return { ok: true, delivery_warning: inviteErr.message };
     return { ok: true, delivery_warning: deliveryWarning };
   });
 
@@ -299,23 +350,29 @@ export const bulkInvite = createServerFn({ method: "POST" })
     rows: z.array(z.object({
       email: z.string().email().max(200),
       role: appRole.optional(),
+      password: z.string().min(8).max(128).optional(),
     })).min(1).max(200),
   }).parse(d))
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     await assertAdmin(context.supabase, context.userId, orgId);
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const results: Array<{ email: string; ok: boolean; error?: string }> = [];
     const { data: meProf } = await context.supabase
       .from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle();
     const { data: org } = await context.supabase
       .from("organisations").select("name").eq("id", orgId).maybeSingle();
-    const redirectBase = getSiteUrl();
 
     for (const row of data.rows) {
       const email = row.email.toLowerCase().trim();
       try {
+        await provisionAuthUserForInvite({
+          email,
+          password: row.password,
+          orgId,
+          role: row.role ?? "officer",
+          invitedByName: meProf?.display_name ?? null,
+        });
         const { data: invite, error } = await context.supabase
           .from("user_invites").insert({
             organisation_id: orgId,
@@ -323,24 +380,14 @@ export const bulkInvite = createServerFn({ method: "POST" })
             invited_by: context.userId,
           }).select().single();
         if (error) throw error;
-        const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-          data: {
-            invite_token: invite.token,
-            organisation_id: orgId,
-            invited_role: invite.role,
-            organisation_name: org?.name ?? "your team",
-            invited_by: meProf?.display_name ?? null,
-          },
-          redirectTo: `${redirectBase}/onboarding?invite=${invite.token}`,
-        });
         const deliveryWarning = await sendInvitationEmail({
           email,
           organisationName: org?.name ?? "your team",
           role: invite.role,
           invitedBy: meProf?.display_name ?? null,
-          inviteUrl: `${redirectBase}/onboarding?invite=${invite.token}`,
+          inviteUrl: null,
         });
-        results.push({ email, ok: true, error: inviteErr?.message ?? deliveryWarning ?? undefined });
+        results.push({ email, ok: true, error: deliveryWarning ?? undefined });
       } catch (e: any) {
         results.push({ email, ok: false, error: e?.message ?? "Failed" });
       }
@@ -395,4 +442,43 @@ export const redeemMyInvites = createServerFn({ method: "POST" })
       );
     }
     return { redeemed, active_org_id: lastOrg };
+  });
+
+export const verifyGoogleLogin = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ email: z.string().email().max(200) }).parse(d))
+  .handler(async ({ data }) => {
+    const authUser = await findAuthUserByEmail(data.email);
+    if (!authUser) {
+      return { exists: false };
+    }
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: platformRole } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", authUser.id)
+      .eq("role", "lemtik_admin")
+      .maybeSingle();
+    if (platformRole) {
+      return { exists: true };
+    }
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("active_organisation_id")
+      .eq("user_id", authUser.id)
+      .maybeSingle();
+    if (!profile?.active_organisation_id) {
+      return { exists: false };
+    }
+
+    const { data: membership } = await supabaseAdmin
+      .from("organisation_members")
+      .select("id")
+      .eq("organisation_id", profile.active_organisation_id)
+      .eq("user_id", authUser.id)
+      .maybeSingle();
+
+    return { exists: Boolean(membership) };
   });

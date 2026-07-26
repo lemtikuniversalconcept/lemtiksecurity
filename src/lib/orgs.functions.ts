@@ -338,8 +338,34 @@ export const updateMemberRole = createServerFn({ method: "POST" })
 
     await assertAdmin(context.supabase, context.userId, targetMember.organisation_id);
 
+    const { data: actorMember } = await context.supabase
+      .from("organisation_members")
+      .select("role")
+      .eq("organisation_id", targetMember.organisation_id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const actorRole = String(actorMember?.role ?? "");
+    const requestedRole = String(data.role);
+    const currentTargetRole = String(targetMember.role ?? "");
+
+    if (actorRole === "client_admin") {
+      throw new Error("Client admins cannot change member roles.");
+    }
+
+    if (actorRole !== "manager" && actorRole !== "lemtik_admin") {
+      throw new Error("Access denied. Role changes are restricted to managers.");
+    }
+
     if (targetMember.user_id === context.userId) {
       throw new Error("You cannot change your own role.");
+    }
+
+    if (requestedRole === "client_admin" || requestedRole === "lemtik_admin") {
+      throw new Error("You cannot assign client admin or platform admin roles here.");
+    }
+
+    if (currentTargetRole === "client_admin") {
+      throw new Error("Client admin roles cannot be edited from this page.");
     }
 
     const { error } = await context.supabase

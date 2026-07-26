@@ -15,10 +15,12 @@ import {
 export const Route = createFileRoute("/app/users")({
   head: () => ({ meta: [{ title: "Team · Lemtik SOD" }] }),
   beforeLoad: async () => {
-    requireSectionAccess(await resolveAppAccess(supabase), [
+    const appAccess = await resolveAppAccess(supabase);
+    requireSectionAccess(appAccess, [
       "security_manager",
       "client_admin",
     ]);
+    return { appAccess };
   },
   component: Users,
 });
@@ -45,7 +47,14 @@ function roleLabel(r: string) {
   return r.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function buildInvitePassword(email: string) {
+  const local = email.split("@")[0] ?? "user";
+  const safe = local.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() || "USER";
+  return `LEM-2026-${safe}`;
+}
+
 function Users() {
+  const { appAccess } = Route.useRouteContext();
   const qc = useQueryClient();
   const list = useServerFn(listMembers);
   const listLoc = useServerFn(listLocations);
@@ -79,6 +88,8 @@ function Users() {
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [assignedLocations, setAssignedLocations] = useState<string[]>([]);
+  const [invitePassword, setInvitePassword] = useState("");
+  const [inviteStep, setInviteStep] = useState<"details" | "password">("details");
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org-members"] });
@@ -98,8 +109,8 @@ function Users() {
     onSuccess: refresh,
   });
   const inviteMut = useMutation({
-    mutationFn: () => cInv({ data: { email: email.trim(), role, assigned_location_ids: assignedLocations } }),
-    onSuccess: () => { setEmail(""); setAssignedLocations([]); setInviteOpen(false); refresh(); },
+    mutationFn: (password: string) => cInv({ data: { email: email.trim(), role, assigned_location_ids: assignedLocations, password } }),
+    onSuccess: () => { setEmail(""); setAssignedLocations([]); setInviteOpen(false); setInviteStep("details"); setInvitePassword(""); refresh(); },
   });
   const bulkMut = useMutation({
     mutationFn: () => {
@@ -144,6 +155,9 @@ function Users() {
     const dutyRate = activeMembers.length ? Math.round((onDuty / activeMembers.length) * 100) : 0;
     return { activeMembers, onDuty, supervisors, inactive, recentlySeen, dutyRate };
   }, [members]);
+  const canEditRoles = appAccess.dbRole === "manager";
+  const editableRoles: Role[] = ["officer", "supervisor"];
+  const canEditMemberRole = (member: any) => canEditRoles && member.user_id !== appAccess.userId && member.role !== "client_admin";
 
   return (
     <div className="space-y-5">
@@ -158,7 +172,11 @@ function Users() {
             <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show inactive
           </label>
           <button
-            onClick={() => setInviteOpen(true)}
+            onClick={() => {
+              setInviteStep("details");
+              setInvitePassword("");
+              setInviteOpen(true);
+            }}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
           >
             <Plus className="h-3.5 w-3.5" /> Invite user
@@ -296,14 +314,20 @@ function Users() {
                       <td className="px-4 py-3 text-xs">
                         <div className="inline-flex items-center gap-2">
                           <ShieldCheck className="h-3.5 w-3.5 text-primary" />
-                          <select
-                            value={m.role}
-                            disabled={roleMut.isPending}
-                            onChange={(e) => roleMut.mutate({ member_id: m.id, role: e.target.value as Role })}
-                            className="rounded-md border border-border bg-surface px-2 py-1 text-xs"
-                          >
-                            {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-                          </select>
+                          {canEditMemberRole(m) ? (
+                            <select
+                              value={m.role}
+                              disabled={roleMut.isPending}
+                              onChange={(e) => roleMut.mutate({ member_id: m.id, role: e.target.value as Role })}
+                              className="rounded-md border border-border bg-surface px-2 py-1 text-xs"
+                            >
+                              {editableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                            </select>
+                          ) : (
+                            <span className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-muted-foreground">
+                              {roleLabel(m.role)}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -415,14 +439,36 @@ function Users() {
 
       {/* Invite dialog */}
       {inviteOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" onClick={() => setInviteOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4"
+          onClick={() => {
+            setInviteOpen(false);
+            setInviteStep("details");
+            setInvitePassword("");
+          }}
+        >
           <div className="w-full max-w-lg rounded-lg border border-border bg-card p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold">{bulkMode ? "Bulk invite" : "Invite a user"}</div>
-                <div className="text-[11px] text-muted-foreground">Sends a magic-link email · expires in 48 hours</div>
+                <div className="text-sm font-semibold">{bulkMode ? "Bulk invite" : inviteStep === "password" ? "Set invitation password" : "Invite a user"}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {bulkMode
+                    ? "Provision users with password-based sign-in and email notice."
+                    : inviteStep === "password"
+                      ? "Use the default password pattern or set a custom one before provisioning."
+                      : "Creates the user in Supabase, then sends a Resend notification. No magic link."}
+                </div>
               </div>
-              <button onClick={() => setInviteOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+              <button
+                onClick={() => {
+                  setInviteOpen(false);
+                  setInviteStep("details");
+                  setInvitePassword("");
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
             <div className="flex items-center gap-2 text-xs">
@@ -431,46 +477,114 @@ function Users() {
             </div>
 
             {!bulkMode ? (
-              <form onSubmit={(e) => { e.preventDefault(); inviteMut.mutate(); }} className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Email address</label>
-                  <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm" placeholder="name@example.com" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Role</label>
-                  <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm">
-                    {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Assigned locations</label>
-                  <div className="max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-surface p-2 text-xs">
-                    {locations.length === 0 ? (
-                      <div className="px-1 py-2 text-muted-foreground">No locations configured yet.</div>
-                    ) : locations.map((location: any) => (
-                      <label key={location.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-background">
-                        <input
-                          type="checkbox"
-                          checked={assignedLocations.includes(location.id)}
-                          onChange={(e) => {
-                            setAssignedLocations((current) =>
-                              e.target.checked ? [...current, location.id] : current.filter((id) => id !== location.id),
-                            );
-                          }}
-                        />
-                        <span className="font-medium">{location.name}</span>
-                        <span className="text-muted-foreground">{location.address ?? ""}</span>
-                      </label>
-                    ))}
+              inviteStep === "details" ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const defaultPassword = buildInvitePassword(email);
+                    setInvitePassword(defaultPassword);
+                    setInviteStep("password");
+                  }}
+                  className="space-y-3"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Email address</label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => {
+                        const nextEmail = e.target.value;
+                        const nextDefault = buildInvitePassword(nextEmail);
+                        if (!invitePassword || invitePassword === buildInvitePassword(email)) {
+                          setInvitePassword(nextDefault);
+                        }
+                        setEmail(nextEmail);
+                      }}
+                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+                      placeholder="name@example.com"
+                    />
                   </div>
-                </div>
-                <button type="submit" disabled={inviteMut.isPending || !email.trim()}
-                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                  {inviteMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
-                  Send email invite
-                </button>
-              </form>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Role</label>
+                    <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm">
+                      {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Assigned locations</label>
+                    <div className="max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-surface p-2 text-xs">
+                      {locations.length === 0 ? (
+                        <div className="px-1 py-2 text-muted-foreground">No locations configured yet.</div>
+                      ) : locations.map((location: any) => (
+                        <label key={location.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-background">
+                          <input
+                            type="checkbox"
+                            checked={assignedLocations.includes(location.id)}
+                            onChange={(e) => {
+                              setAssignedLocations((current) =>
+                                e.target.checked ? [...current, location.id] : current.filter((id) => id !== location.id),
+                              );
+                            }}
+                          />
+                          <span className="font-medium">{location.name}</span>
+                          <span className="text-muted-foreground">{location.address ?? ""}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!email.trim()}
+                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                    Next: set password
+                  </button>
+                </form>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    inviteMut.mutate(invitePassword || buildInvitePassword(email));
+                  }}
+                  className="space-y-3"
+                >
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Initial password</label>
+                    <input
+                      type="text"
+                      required
+                      value={invitePassword}
+                      onChange={(e) => setInvitePassword(e.target.value)}
+                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm font-mono"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Default pattern: <span className="font-mono text-foreground">{buildInvitePassword(email)}</span>
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
+                    {email} · {roleLabel(role)} · {assignedLocations.length} assigned location{assignedLocations.length === 1 ? "" : "s"}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setInviteStep("details")}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface/70"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={inviteMut.isPending || !invitePassword.trim()}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {inviteMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                      Send invitation
+                    </button>
+                  </div>
+                </form>
+              )
             ) : (
               <form onSubmit={(e) => { e.preventDefault(); bulkMut.mutate(); }} className="space-y-3">
                 <div className="space-y-1.5">

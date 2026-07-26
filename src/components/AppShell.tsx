@@ -219,13 +219,26 @@ export function AppShell({ access }: { access: AppAccess }) {
                 <Radio className="h-3 w-3 pulse-dot" />
                 <span className="font-mono uppercase tracking-wider">Platform health</span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="grid h-7 w-7 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
-                  {me.name.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() || "AD"}
-                </div>
-                <div className="hidden sm:block leading-tight">
-                  <div className="text-xs font-medium">{me.name}</div>
-                  <div className="text-[10px] text-muted-foreground">{me.role}</div>
+              <div className="relative group">
+                <button className="flex items-center gap-2 rounded-md px-1 py-1 text-left">
+                  <div className="grid h-7 w-7 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
+                    {me.name.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() || "AD"}
+                  </div>
+                  <div className="hidden sm:block leading-tight">
+                    <div className="text-xs font-medium">{me.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{me.role}</div>
+                  </div>
+                </button>
+                <div className="absolute right-0 top-full z-30 hidden pt-2 group-hover:block">
+                  <div className="w-44 rounded-md border border-border bg-card p-1 shadow-lg">
+                    <button
+                      onClick={signOut}
+                      className="flex w-full items-center gap-2 rounded px-2 py-2 text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      Logout
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -349,13 +362,26 @@ export function AppShell({ access }: { access: AppAccess }) {
               <span className="font-mono uppercase tracking-wider">Live ops</span>
             </div>
             <NotificationBell />
-            <div className="flex items-center gap-2">
-              <div className="grid h-7 w-7 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
-                {initials || "OP"}
-              </div>
-              <div className="hidden sm:block leading-tight">
-                <div className="text-xs font-medium">{me.name}</div>
-                <div className="text-[10px] text-muted-foreground">{me.role}</div>
+            <div className="relative group">
+              <button className="flex items-center gap-2 rounded-md px-1 py-1 text-left">
+                <div className="grid h-7 w-7 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
+                  {initials || "OP"}
+                </div>
+                <div className="hidden sm:block leading-tight">
+                  <div className="text-xs font-medium">{me.name}</div>
+                  <div className="text-[10px] text-muted-foreground">{me.role}</div>
+                </div>
+              </button>
+              <div className="absolute right-0 top-full z-30 hidden pt-2 group-hover:block">
+                <div className="w-44 rounded-md border border-border bg-card p-1 shadow-lg">
+                  <button
+                    onClick={signOut}
+                    className="flex w-full items-center gap-2 rounded px-2 py-2 text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Logout
+                  </button>
+                </div>
               </div>
             </div>
           </div>
