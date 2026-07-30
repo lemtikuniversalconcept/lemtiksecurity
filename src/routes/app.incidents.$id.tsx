@@ -70,6 +70,7 @@ import {
 } from "lucide-react";
 
 type IncidentTab = "overview" | "analysis" | "activity" | "evidence" | "escalation" | "related";
+type AnyRecord = Record<string, any>;
 
 export const Route = createFileRoute("/app/incidents/$id")({
   head: () => ({ meta: [{ title: "Incident · Lemtik SOD" }] }),
@@ -144,6 +145,51 @@ function humanList(values: string[]) {
   if (filtered.length === 1) return filtered[0];
   if (filtered.length === 2) return `${filtered[0]} and ${filtered[1]}`;
   return `${filtered.slice(0, -1).join(", ")}, and ${filtered[filtered.length - 1]}`;
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function listFromValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function firstRecordArray(...values: unknown[]) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const records = value.filter(isRecord);
+      if (records.length > 0) {
+        return records as AnyRecord[];
+      }
+    }
+  }
+  return [];
+}
+
+function toDisplayNumber(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function toDisplayPercent(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return numeric <= 1 ? Math.round(numeric * 100) : Math.round(numeric);
 }
 
 function isMedicalIncident(incident: any) {
@@ -283,110 +329,237 @@ function IncidentDetailPage() {
   const linkedIncidents = data.linkedIncidents as any[];
   const suggestedRows = data.suggested as any[];
   const patrolRows = patrols as any[];
+  const incidentAnalysis = isRecord(inc.analysis) ? (inc.analysis as AnyRecord) : {};
+  const agentOutput = isRecord(inc.agent_output) ? (inc.agent_output as AnyRecord) : {};
+  const analysisContext = isRecord(incidentAnalysis.historical_context) ? (incidentAnalysis.historical_context as AnyRecord) : {};
+  const agentContext = isRecord(agentOutput.historical_context) ? (agentOutput.historical_context as AnyRecord) : {};
+  const aiPayload = { ...incidentAnalysis, ...agentOutput, ...analysisContext, ...agentContext };
   const responseAgeMinutes = Math.max(1, Math.round((Date.now() - new Date(reportedAt).getTime()) / 60000));
   const severityScore = Number(inc.severity) || 1;
-  const osintCount = suggestedRows.length;
+  const osintItems = firstRecordArray(
+    incidentAnalysis.intelligence_items,
+    incidentAnalysis.related_intelligence,
+    incidentAnalysis.osint_items,
+    agentOutput.intelligence_items,
+    agentOutput.related_intelligence,
+    agentOutput.osint_items,
+  );
+  const osintCount = osintItems.length > 0 ? osintItems.length : suggestedRows.length;
   const reporterLabel = reporterProfile?.display_name || (reportedBy ? "Front Desk" : "System");
   const armed = isArmedIncident(inc);
   const medical = isMedicalIncident(inc);
   const responsePenalty = firstResponse ? 0 : 6;
-  const confidence = clamp(
+  const fallbackConfidence = clamp(
     Math.round(70 + severityScore * 4 + osintCount * 3 + Math.min(8, proximity.length * 2) - responsePenalty),
     78,
     97,
   );
+  const confidence = toDisplayPercent(
+    aiPayload.confidence ?? aiPayload.recommendation_confidence ?? aiPayload.analysis_confidence,
+    fallbackConfidence,
+  );
   const threatLevel =
-    severityScore >= 5 || armed
+    firstString(
+      aiPayload.threat_level,
+      aiPayload.threatLevel,
+      aiPayload.threat_assessment,
+      aiPayload.risk_level,
+      aiPayload.severity_label,
+    ) ||
+    (severityScore >= 5 || armed
       ? "Critical"
       : severityScore >= 4 || escalationRows.length > 0
         ? "High"
         : severityScore >= 3 || osintCount > 1
           ? "Elevated"
-          : "Guarded";
-  const suspectStatus = armed ? "Potentially armed" : severityScore >= 4 ? "Unconfirmed suspect" : "Not confirmed";
+          : "Guarded");
+  const suspectStatus =
+    firstString(aiPayload.suspect_status, aiPayload.suspectStatus, aiPayload.person_of_interest_status) ||
+    (armed ? "Potentially armed" : severityScore >= 4 ? "Unconfirmed suspect" : "Not confirmed");
   const historicalContext = (() => {
     const nearby = suggestedRows.slice(0, 3);
     const labels = nearby.map((item: any) => `${typeMeta[item.type as IncidentType]} · ${since(item.reported_at)}`);
-    return {
-      zoneScore: clamp(45 + osintCount * 8 + severityScore * 5 + escalationRows.length * 7, 0, 100),
-      trend: osintCount >= 3 ? "rising" : osintCount === 2 ? "steady" : "contained",
-      summary: nearby.length
+    const summary =
+      firstString(
+        aiPayload.situation_summary,
+        aiPayload.context_summary,
+        aiPayload.intelligence_summary,
+        aiPayload.historical_summary,
+        aiPayload.summary,
+        aiPayload.pattern_summary,
+      ) ||
+      (nearby.length
         ? `The same zone has ${nearby.length} related signal${nearby.length === 1 ? "" : "s"} in the last 24 hours: ${humanList(labels)}.`
-        : `No matching 24-hour zone pattern detected. Recent activity remains incident-specific.`,
+        : `No matching 24-hour zone pattern detected. Recent activity remains incident-specific.`);
+    return {
+      zoneScore: toDisplayPercent(
+        aiPayload.area_risk_score ?? aiPayload.zone_score ?? aiPayload.risk_score ?? aiPayload.risk,
+        clamp(45 + osintCount * 8 + severityScore * 5 + escalationRows.length * 7, 0, 100),
+      ),
+      trend:
+        firstString(aiPayload.trend, aiPayload.pattern_trend, aiPayload.zone_trend, aiPayload.risk_trend) ||
+        (osintCount >= 3 ? "rising" : osintCount === 2 ? "steady" : "contained"),
+      summary,
     };
   })();
 
-  const recommendedOfficers = proximity.map((officer: any, idx) => {
+  const normalizeOfficerCard = (officer: AnyRecord, idx: number, fallback?: any) => {
     const routeSegments = [
-      inc.zone,
-      inc.location,
-      officer.zone,
+      firstString(officer.zone, fallback?.zone, inc.zone),
+      firstString(officer.location, fallback?.location, inc.location),
       idx === 0 ? "fastest responder path" : "secondary coverage lane",
     ].filter(Boolean);
-    const etaMinutes = Math.max(1, Math.round(Number(officer.distance ?? 0) / 95));
+    const distance = toDisplayNumber(officer.distance ?? officer.distance_m ?? officer.distance_meters ?? fallback?.distance ?? 0, 0);
+    const etaFallbackMinutes = Math.max(1, Math.round(distance / 95));
     return {
-      ...officer,
-      eta: `${Math.floor(etaMinutes / 60) ? `${Math.floor(etaMinutes / 60)}h ` : ""}${etaMinutes % 60 || etaMinutes}m`,
-      route: humanList(routeSegments),
-      equipment: officer.role === "manager" ? ["Radio", "First Aid Kit", "Handcuffs"] : ["Radio", "Torch"],
+      id: firstString(officer.id, officer.user_id, officer.member_user_id, fallback?.id, `${inc.id}-officer-${idx}`),
+      name: firstString(officer.name, officer.display_name, officer.officer_name, officer.full_name, fallback?.name) || `Officer ${idx + 1}`,
+      role: firstString(officer.role, officer.position, officer.assignment_role, fallback?.role) || "operator",
+      zone: firstString(officer.zone, officer.location_zone, officer.last_zone, fallback?.zone, inc.zone) || "Unknown",
+      distance,
+      eta:
+        firstString(officer.eta, officer.eta_display, officer.eta_text, fallback?.eta) ||
+        `${Math.floor(etaFallbackMinutes / 60) ? `${Math.floor(etaFallbackMinutes / 60)}h ` : ""}${etaFallbackMinutes % 60 || etaFallbackMinutes}m`,
+      route:
+        firstString(officer.route, officer.dispatch_route, officer.route_summary, fallback?.route) ||
+        humanList(routeSegments),
+      equipment: listFromValue(officer.equipment).length > 0 ? listFromValue(officer.equipment) : fallback?.equipment || ["Radio", "Torch"],
       instructions:
-        idx === 0
+        firstString(officer.instructions, officer.guidance, officer.note, fallback?.instructions) ||
+        (idx === 0
           ? "Move first, secure the perimeter, confirm victim safety, and report state changes every 60 seconds."
-          : "Stage nearby, preserve an exit lane, and stay available for relief or containment support.",
+          : "Stage nearby, preserve an exit lane, and stay available for relief or containment support."),
     };
-  });
+  };
 
-  const vehicleRecommendations = patrolRows
-    .filter((patrol: any) => patrol.status !== "complete")
-    .slice(0, 3)
-    .map((patrol: any, idx: number) => {
-      const fuelLevel = clamp(
-        78 - Number(patrol.checked_in ?? 0) * 6 - (patrol.status === "delayed" ? 18 : 0) - idx * 5,
-        12,
-        100,
-      );
-      const etaMinutes = clamp(
-        Math.round((Number(patrol.waypoints ?? 1) - Number(patrol.checked_in ?? 0)) * 2.5 + idx * 3),
-        4,
-        38,
-      );
-      return {
-        id: patrol.id,
-        code: patrol.code,
-        name: patrol.name,
-        driver: patrol.officer || "Unassigned",
-        fuel: fuelLevel,
-        eta: `${etaMinutes}m`,
-        capacity: `${Math.max(Number(patrol.waypoints ?? 0), 1)} seats`,
-        status: patrol.status,
-      };
-    });
+  const payloadOfficerRecommendations = firstRecordArray(
+    incidentAnalysis.recommended_officers,
+    incidentAnalysis.recommended_responders,
+    incidentAnalysis.dispatch_recommendations,
+    agentOutput.recommended_officers,
+    agentOutput.recommended_responders,
+    agentOutput.dispatch_recommendations,
+  );
+  const recommendedOfficers =
+    payloadOfficerRecommendations.length > 0
+      ? payloadOfficerRecommendations.map((officer, idx) => normalizeOfficerCard(officer, idx, proximity[idx]))
+      : proximity.map((officer: any, idx) => normalizeOfficerCard(officer, idx));
 
-  const autonomousActions = [
-    {
-      id: "cctv-nw-wing",
-      label: `Activate CCTV ${inc.zone || "coverage"}`,
-      kind: "auto",
-      detail: `Auto-executing coverage sweep for ${inc.location}.`,
-      impact: "Improves visual confirmation and response routing.",
-      state: severityScore >= 4 ? "executing" : "queued",
-      meta: { zone: inc.zone, location: inc.location },
-    },
-    {
-      id: "elevator-hold",
-      label: "Hold Elevator B at Ground Floor",
-      kind: "approval",
-      detail: "Cuts the likely escape route by holding the nearest vertical corridor.",
-      impact: "Saves time and reduces suspect movement options.",
-      state: escalationRows.length > 0 ? "pending" : "recommended",
-      approval: "Supervisor",
-      risk: "Low",
-      savings: "~45 seconds",
-      meta: { zone: inc.zone, location: inc.location },
-    },
-  ] as const;
+  const payloadVehicleRecommendations = firstRecordArray(
+    incidentAnalysis.vehicle_recommendations,
+    incidentAnalysis.recommended_vehicles,
+    agentOutput.vehicle_recommendations,
+    agentOutput.recommended_vehicles,
+  );
+  const vehicleRecommendations =
+    payloadVehicleRecommendations.length > 0
+      ? payloadVehicleRecommendations.map((vehicle, idx) => ({
+          id: firstString(vehicle.id, vehicle.vehicle_id, `${inc.id}-vehicle-${idx}`),
+          code: firstString(vehicle.code, vehicle.vehicle_code, vehicle.name, `Vehicle ${idx + 1}`) || `Vehicle ${idx + 1}`,
+          name: firstString(vehicle.name, vehicle.label, vehicle.vehicle_name, `Vehicle ${idx + 1}`) || `Vehicle ${idx + 1}`,
+          driver: firstString(vehicle.driver, vehicle.assigned_to, vehicle.operator, "Unassigned") || "Unassigned",
+          fuel: clamp(toDisplayPercent(vehicle.fuel ?? vehicle.fuel_level ?? vehicle.battery, 0), 0, 100),
+          eta: firstString(vehicle.eta, vehicle.eta_display, vehicle.eta_text, "—") || "—",
+          capacity: firstString(vehicle.capacity, vehicle.seats, vehicle.seating, "—") || "—",
+          status: firstString(vehicle.status, vehicle.state, "available") || "available",
+        }))
+      : patrolRows
+          .filter((patrol: any) => patrol.status !== "complete")
+          .slice(0, 3)
+          .map((patrol: any, idx: number) => {
+            const fuelLevel = clamp(
+              78 - Number(patrol.checked_in ?? 0) * 6 - (patrol.status === "delayed" ? 18 : 0) - idx * 5,
+              12,
+              100,
+            );
+            const etaMinutes = clamp(
+              Math.round((Number(patrol.waypoints ?? 1) - Number(patrol.checked_in ?? 0)) * 2.5 + idx * 3),
+              4,
+              38,
+            );
+            return {
+              id: patrol.id,
+              code: patrol.code,
+              name: patrol.name,
+              driver: patrol.officer || "Unassigned",
+              fuel: fuelLevel,
+              eta: `${etaMinutes}m`,
+              capacity: `${Math.max(Number(patrol.waypoints ?? 0), 1)} seats`,
+              status: patrol.status,
+            };
+          });
+
+  const payloadAutonomousActions = firstRecordArray(
+    incidentAnalysis.autonomous_actions,
+    incidentAnalysis.infrastructure_actions,
+    incidentAnalysis.action_recommendations,
+    agentOutput.autonomous_actions,
+    agentOutput.infrastructure_actions,
+    agentOutput.action_recommendations,
+  );
+  const autonomousActions =
+    payloadAutonomousActions.length > 0
+      ? payloadAutonomousActions.map((action, idx) => {
+          const isAuto =
+            action.auto_execute === true ||
+            action.auto === true ||
+            action.kind === "auto" ||
+            action.execution_mode === "auto";
+          return {
+            id: firstString(action.id, action.action_id, `${inc.id}-action-${idx}`),
+            label: firstString(action.label, action.title, action.name, `Action ${idx + 1}`) || `Action ${idx + 1}`,
+            kind: isAuto ? "auto" : "approval",
+            detail: firstString(action.detail, action.description, action.reason, action.summary, "Pending review from the AI command layer.") || "Pending review from the AI command layer.",
+            impact: firstString(action.impact, action.benefit, action.effect, "Operational impact under review.") || "Operational impact under review.",
+            state: firstString(action.state, action.status, isAuto ? "executing" : "recommended") || (isAuto ? "executing" : "recommended"),
+            approval: firstString(action.approval, action.approval_level, action.required_approval, "Supervisor") || "Supervisor",
+            risk: firstString(action.risk, action.risk_level, "Medium") || "Medium",
+            savings: firstString(action.savings, action.time_savings, action.estimated_savings, "—") || "—",
+            meta: isRecord(action.meta) ? action.meta : { zone: inc.zone, location: inc.location },
+          } as const;
+        })
+      : [
+          {
+            id: "cctv-nw-wing",
+            label: `Activate CCTV ${inc.zone || "coverage"}`,
+            kind: "auto",
+            detail: `Auto-executing coverage sweep for ${inc.location}.`,
+            impact: "Improves visual confirmation and response routing.",
+            state: severityScore >= 4 ? "executing" : "queued",
+            meta: { zone: inc.zone, location: inc.location },
+          },
+          {
+            id: "elevator-hold",
+            label: "Hold Elevator B at Ground Floor",
+            kind: "approval",
+            detail: "Cuts the likely escape route by holding the nearest vertical corridor.",
+            impact: "Saves time and reduces suspect movement options.",
+            state: escalationRows.length > 0 ? "pending" : "recommended",
+            approval: "Supervisor",
+            risk: "Low",
+            savings: "~45 seconds",
+            meta: { zone: inc.zone, location: inc.location },
+          },
+        ] as const;
 
   const activeOverrides = (() => {
+    const payloadOverrides = firstRecordArray(
+      incidentAnalysis.active_overrides,
+      incidentAnalysis.overrides,
+      agentOutput.active_overrides,
+      agentOutput.overrides,
+      agentOutput.override_status,
+    );
+    if (payloadOverrides.length > 0) {
+      return payloadOverrides.map((item, idx) => ({
+        id: firstString(item.id, item.action_id, `${inc.id}-override-${idx}`),
+        label: firstString(item.label, item.title, item.name, item.action, `Override ${idx + 1}`) || `Override ${idx + 1}`,
+        status: firstString(item.status, item.state, "Active") || "Active",
+        updatedAt: firstString(item.updated_at, item.last_updated_at, item.created_at) || null,
+        actor: firstString(item.actor, item.actor_name, item.updated_by) || null,
+      }));
+    }
+
     const latestByAction = new Map<string, any>();
     for (const row of activityRows) {
       if (!["autonomous_action", "override_action"].includes(row.kind)) continue;
@@ -412,21 +585,41 @@ function IncidentDetailPage() {
       })
       .filter((item) => item.status === "Executing" || item.status === "Active" || item.status === "Awaiting approval");
   })();
-  const allRelated = [...linkedIncidents, ...suggestedRows]
+  const payloadRelated = firstRecordArray(
+    incidentAnalysis.related_incidents,
+    incidentAnalysis.related,
+    incidentAnalysis.linked_incidents,
+    agentOutput.related_incidents,
+    agentOutput.related,
+    agentOutput.linked_incidents,
+  );
+  const allRelated = [...linkedIncidents, ...suggestedRows, ...payloadRelated]
     .filter((item: any, idx, arr) => arr.findIndex((candidate: any) => candidate.id === item.id) === idx)
     .filter((item: any) => item.id !== inc.id);
-  const mapPoints = [
-    { id: inc.id, label: inc.code, lng: Number(inc.coord_x ?? incidentPoint[0]), lat: Number(inc.coord_y ?? incidentPoint[1]), severity: Number(inc.severity) },
-    ...allRelated
-      .filter((item: any) => item.coord_x != null && item.coord_y != null)
-      .map((item: any) => ({
-        id: item.id,
-        label: item.code,
-        lng: Number(item.coord_x),
-        lat: Number(item.coord_y),
-        severity: Number(item.severity ?? 1),
-      })),
-  ];
+  const payloadMapPoints = firstRecordArray(incidentAnalysis.map_points, agentOutput.map_points, agentOutput.tracking_points);
+  const mapPoints =
+    payloadMapPoints.length > 0
+      ? payloadMapPoints
+          .map((point, idx) => ({
+            id: firstString(point.id, point.incident_id, `${inc.id}-point-${idx}`),
+            label: firstString(point.label, point.code, point.name, `Point ${idx + 1}`) || `Point ${idx + 1}`,
+            lng: Number(point.lng ?? point.longitude ?? point.coord_x ?? incidentPoint[0]),
+            lat: Number(point.lat ?? point.latitude ?? point.coord_y ?? incidentPoint[1]),
+            severity: Number(point.severity ?? point.level ?? inc.severity ?? 1),
+          }))
+          .filter((point) => Number.isFinite(point.lng) && Number.isFinite(point.lat))
+      : [
+          { id: inc.id, label: inc.code, lng: Number(inc.coord_x ?? incidentPoint[0]), lat: Number(inc.coord_y ?? incidentPoint[1]), severity: Number(inc.severity) },
+          ...allRelated
+            .filter((item: any) => item.coord_x != null && item.coord_y != null)
+            .map((item: any) => ({
+              id: item.id,
+              label: item.code,
+              lng: Number(item.coord_x),
+              lat: Number(item.coord_y),
+              severity: Number(item.severity ?? 1),
+            })),
+        ];
 
   const autoApproveHandler = async (action: (typeof autonomousActions)[number], approved: boolean) => {
     if (approved) {
