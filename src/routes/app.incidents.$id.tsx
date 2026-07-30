@@ -351,26 +351,12 @@ function IncidentDetailPage() {
     };
   }, [id, qc]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading incident…
-      </div>
-    );
-  }
-  if (error || !data) {
-    return <div className="text-sm text-critical">Failed to load incident.</div>;
-  }
-
-  const inc = data.incident as any;
-  const evidenceItems = Array.isArray(inc.evidence) ? inc.evidence : [];
-  const reportedAt = inc.reported_at;
-  const firstResponse = (data.activity as any[]).find(
-    (a) => a.kind === "status_changed" && a.meta?.to === "acknowledged",
-  );
+  const inc = data?.incident as any | undefined;
   const incidentPoint: [number, number] = (() => {
-    if (inc.coord_x != null && inc.coord_y != null)
+    if (!inc) return [3.4219, 6.4281];
+    if (inc.coord_x != null && inc.coord_y != null) {
       return [Number(inc.coord_x), Number(inc.coord_y)];
+    }
     const direct = locations.find(
       (loc: any) => loc.id === inc.location_id && loc.coord_x != null && loc.coord_y != null,
     );
@@ -407,9 +393,25 @@ function IncidentDetailPage() {
         distance: number;
         source: string;
       }>>,
-    enabled: true,
+    enabled: !!inc,
   });
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading incident…
+      </div>
+    );
+  }
+  if (error || !data) {
+    return <div className="text-sm text-critical">Failed to load incident.</div>;
+  }
+
+  const evidenceItems = Array.isArray(inc.evidence) ? inc.evidence : [];
+  const reportedAt = inc.reported_at;
+  const firstResponse = (data.activity as any[]).find(
+    (a) => a.kind === "status_changed" && a.meta?.to === "acknowledged",
+  );
   const activityRows = data.activity as any[];
   const escalationRows = data.escalations as any[];
   const linkedIncidents = data.linkedIncidents as any[];
