@@ -7,7 +7,7 @@ import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols } from "@/lib/patrols.functions";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
-import { typeMeta, zoneRisk, type IncidentType } from "@/lib/mockData";
+import { typeMeta, type IncidentType } from "@/lib/mockData";
 import {
   Activity,
   ArrowRight,
@@ -429,6 +429,7 @@ function buildAnalytics(
   locations: LocationRow[],
   rangeWindow: { start: number; end: number },
 ) {
+  const zoneStats = buildZoneStats(incidents);
   const dayStamps = enumerateDays(rangeWindow.start, rangeWindow.end);
   const dayLabels = dayStamps.map((day) => new Date(day).toLocaleDateString("en-GB", { month: "short", day: "numeric" }));
   const bucketsByDay = dayStamps.map((day) => incidents.filter((incident) => sameDay(incident.reported_at, day)));
@@ -441,7 +442,7 @@ function buildAnalytics(
   const responseTrend = bucketsByDay.map((bucket) => average(bucket.map(estimateResponseMinutes)));
   const complianceTrend = bucketsByDay.map((bucket) => clamp(100 - bucket.filter((incident) => Number(incident.severity) >= 4).length * 5 - bucket.filter((incident) => incident.status === "escalated").length * 7, 48, 99));
   const osintTrend = bucketsByDay.map((bucket) => bucket.filter((incident) => Number(incident.severity) >= 3).length + Math.round(bucket.length * 0.3));
-  const riskTrend = bucketsByDay.map((bucket) => bucket.reduce((acc, incident) => acc + zoneRiskScore(incident.zone, bucket.length), 0) / Math.max(bucket.length, 1));
+  const riskTrend = bucketsByDay.map((bucket) => bucket.reduce((acc, incident) => acc + zoneRiskScore(incident.zone, bucket.length, zoneStats), 0) / Math.max(bucket.length, 1));
   const heatmap = buildHeatmap(incidents);
   const topLocations = rankLocations(incidents, locations);
   const responseBuckets = bucketize(responseMinutes, ["0-5m", "6-10m", "11-20m", "21-30m", "31m+"], [5, 10, 20, 30, 999]);
@@ -486,7 +487,9 @@ function buildAnalytics(
 
   const areaRiskTrend = dayLabels.map((day, idx) => {
     const bucket = bucketsByDay[idx] ?? [];
-    const zoneImpact = zoneRisk.reduce((acc, zone) => acc + zone.score, 0) / zoneRisk.length;
+    const zoneImpact = zoneStats.size
+      ? average([...zoneStats.values()].map((stat) => zoneImpactScore(stat.total, stat.severity)))
+      : 42;
     return clamp(Math.round(zoneImpact + bucket.filter((incident) => incident.severity >= 4).length * 4 - bucket.filter((incident) => incident.status === "resolved").length * 2), 20, 100);
   });
 
@@ -822,8 +825,25 @@ function estimateResponseMinutes(incident: IncidentRow) {
   return clamp(6 + severity * 2 + statusPenalty, 3, 75);
 }
 
-function zoneRiskScore(zone: string, sampleSize: number) {
-  const base = zoneRisk.find((z) => z.zone === zone)?.score ?? 50;
+function buildZoneStats(incidents: IncidentRow[]) {
+  const stats = new Map<string, { total: number; severity: number }>();
+  incidents.forEach((incident) => {
+    const zone = incident.zone || "Unknown";
+    const entry = stats.get(zone) ?? { total: 0, severity: 0 };
+    entry.total += 1;
+    entry.severity += Number(incident.severity) || 0;
+    stats.set(zone, entry);
+  });
+  return stats;
+}
+
+function zoneImpactScore(total: number, severity: number) {
+  return clamp(34 + total * 7 + severity * 3, 20, 100);
+}
+
+function zoneRiskScore(zone: string, sampleSize: number, zoneStats: Map<string, { total: number; severity: number }>) {
+  const entry = zoneStats.get(zone);
+  const base = entry ? zoneImpactScore(entry.total, entry.severity) : 50;
   return clamp(base + sampleSize * 2, 25, 100);
 }
 

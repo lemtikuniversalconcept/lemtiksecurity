@@ -359,14 +359,14 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         status: "pending",
       }));
     }
-    const locationDevices = [
-      `CCTV-${selectedIncident.zone.replace(/\s+/g, "-").toUpperCase()}`,
-      `ACCESS-${selectedIncident.location.replace(/\s+/g, "-").toUpperCase().slice(0, 12)}`,
-      `RADIO-${selectedIncident.code.slice(-3)}`,
-    ];
+    const matchingCameras = cameras.filter((camera) => {
+      const haystack = [camera.location, camera.name].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(selectedIncident.zone.toLowerCase()) || haystack.includes(selectedIncident.location.toLowerCase());
+    });
+    const cameraDevices = matchingCameras.map((camera) => camera.id);
     const nearestPatrol = activePatrols[0];
     const nearestOfficer = nearestPatrol?.officer ?? "nearest officer";
-    return [
+    const proposals: ApprovalProposal[] = [
       {
         id: `${selectedIncident.id}-dispatch`,
         title: `Dispatch ${nearestOfficer} to ${selectedIncident.code}`,
@@ -376,20 +376,8 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
           `The nearest live patrol is ${nearestOfficer}; dispatching keeps response inside the SLA window.`,
           `Relationship API approval is required before the action is logged and broadcast.`,
         ],
-        devices: locationDevices,
+        devices: cameraDevices,
         risk: Number(selectedIncident.severity) >= 4 ? "high" : "medium",
-        status: "pending",
-      },
-      {
-        id: `${selectedIncident.id}-cctv`,
-        title: `Activate CCTV on ${selectedIncident.zone}`,
-        confidence: Math.min(95, 82 + Number(selectedIncident.severity)),
-        reasoning: [
-          `Camera coverage around ${selectedIncident.zone} is needed for visual confirmation.`,
-          `This reduces blind-spot exposure before the response team arrives.`,
-        ],
-        devices: [`CCTV-${selectedIncident.zone.replace(/\s+/g, "-").toUpperCase()}`, `NVR-${selectedIncident.zone.slice(0, 4).toUpperCase()}`],
-        risk: "medium",
         status: "pending",
       },
       {
@@ -400,12 +388,27 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
           `Keep the perimeter sealed while the command team reviews the incident.`,
           `Temporary access-control hold prevents unnecessary movement into the scene.`,
         ],
-        devices: [`ACCESS-${selectedIncident.location.replace(/\s+/g, "-").toUpperCase().slice(0, 12)}`, `BARRIER-${selectedIncident.zone.replace(/\s+/g, "-").toUpperCase()}`],
+        devices: cameraDevices,
         risk: "low",
         status: "pending",
       },
     ];
-  }, [activePatrols, delayedPatrols, selectedIncident]);
+    if (cameraDevices.length > 0) {
+      proposals.splice(1, 0, {
+        id: `${selectedIncident.id}-cctv`,
+        title: `Activate CCTV coverage for ${selectedIncident.zone}`,
+        confidence: Math.min(95, 82 + Number(selectedIncident.severity)),
+        reasoning: [
+          `Camera coverage around ${selectedIncident.zone} is needed for visual confirmation.`,
+          `This reduces blind-spot exposure before the response team arrives.`,
+        ],
+        devices: cameraDevices,
+        risk: "medium",
+        status: "pending",
+      });
+    }
+    return proposals;
+  }, [activePatrols, cameras, delayedPatrols, selectedIncident]);
 
   const handleApprovalDecision = (
     decision: string,

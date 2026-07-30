@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { listMembers, listLocations } from "@/lib/orgs.functions";
 import { listPatrols } from "@/lib/patrols.functions";
 import { listIncidents } from "@/lib/incidents.functions";
 import {
@@ -14,8 +13,12 @@ import {
   updateOfficerInventory,
   updateVehicleInventory,
   updateWeaponInventory,
-  listInventoryOfficers,
-  listInventoryVehicles,
+  listOfficers,
+  listVehicles,
+  listWeapons,
+  listAmmunition,
+  listEquipment,
+  getFuelReserve,
 } from "@/lib/inventory.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
@@ -56,7 +59,7 @@ type OfficerRow = {
   user_id: string;
   name: string;
   badge: string;
-  status: "on-duty" | "off-duty" | "break";
+  status: string;
   armed: boolean;
   location: string;
   zone: string;
@@ -68,7 +71,7 @@ type VehicleRow = {
   id: string;
   vehicleId: string;
   type: string;
-  status: "available" | "low_fuel" | "unavailable";
+  status: string;
   fuel: number;
   condition: string;
   driver: string;
@@ -80,7 +83,7 @@ type WeaponRow = {
   id: string;
   weaponId: string;
   type: string;
-  status: "available" | "issued" | "maintenance";
+  status: string;
   issuedTo: string | null;
   notes: string;
 };
@@ -92,6 +95,14 @@ type EquipmentRow = {
   total: number;
 };
 type FuelLog = { id: string; date: string; litres: number; note: string };
+type FuelReserveRow = {
+  id: string;
+  current_litres: number | null;
+  capacity_litres: number | null;
+  threshold_litres: number | null;
+  last_restocked: string | null;
+  updated_at: string | null;
+};
 type AmmoRow = { type: string; quantity: number; threshold: number; restocks: number[] };
 type InventoryAlert = {
   id: string;
@@ -127,143 +138,51 @@ export const Route = createFileRoute("/app/inventory")({
 function InventoryPage() {
   const { appAccess } = Route.useRouteContext();
   const canEdit = appAccess.specRole === "security_manager";
-  const listMem = useServerFn(listMembers);
-  const listLoc = useServerFn(listLocations);
   const listPat = useServerFn(listPatrols);
   const listInc = useServerFn(listIncidents);
-  const listAlerts = useServerFn(listActiveAlerts);
   const loadInventory = useServerFn(getInventory);
+  const loadAlerts = useServerFn(listActiveAlerts);
   const addInventory = useServerFn(addInventoryItem);
   const saveOfficerFn = useServerFn(updateOfficerInventory);
   const saveVehicleFn = useServerFn(updateVehicleInventory);
   const saveWeaponFn = useServerFn(updateWeaponInventory);
   const saveFuelFn = useServerFn(updateFuelReserve);
-  const getOfficers = useServerFn(listInventoryOfficers);
-  const getVehicles = useServerFn(listInventoryVehicles);
+  const listOfficersFn = useServerFn(listOfficers);
+  const listVehiclesFn = useServerFn(listVehicles);
+  const listWeaponsFn = useServerFn(listWeapons);
+  const listAmmoFn = useServerFn(listAmmunition);
+  const listEquipmentFn = useServerFn(listEquipment);
+  const getFuelFn = useServerFn(getFuelReserve);
 
-  const { data: members = [], isLoading: membersLoading } = useQuery({ queryKey: ["inventory-members"], queryFn: () => listMem() });
-  const { data: locations = [], isLoading: locationsLoading } = useQuery({ queryKey: ["inventory-locations"], queryFn: () => listLoc() });
   const { data: patrols = [], isLoading: patrolsLoading } = useQuery({ queryKey: ["inventory-patrols"], queryFn: () => listPat() });
   const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["inventory-incidents"], queryFn: () => listInc() });
-  const { data: remoteAlerts = [], isLoading: alertsLoading } = useQuery({
-    queryKey: ["inventory-active-alerts", appAccess.orgId],
-    queryFn: () => listAlerts(),
-  });
-  const { data: remoteOfficers = [], isLoading: remoteOfficersLoading } = useQuery({
-    queryKey: ["inventory-remote-officers", appAccess.orgId],
-    queryFn: () => getOfficers(),
-  });
-  const { data: remoteVehicles = [], isLoading: remoteVehiclesLoading } = useQuery({
-    queryKey: ["inventory-remote-vehicles", appAccess.orgId],
-    queryFn: () => getVehicles(),
+  const { data: officers = [], isLoading: officersLoading } = useQuery({ queryKey: ["inventory-officers", appAccess.orgId], queryFn: () => listOfficersFn() });
+  const { data: vehicles = [], isLoading: vehiclesLoading } = useQuery({ queryKey: ["inventory-vehicles", appAccess.orgId], queryFn: () => listVehiclesFn() });
+  const { data: weapons = [], isLoading: weaponsLoading } = useQuery({ queryKey: ["inventory-weapons", appAccess.orgId], queryFn: () => listWeaponsFn() });
+  const { data: ammo = [], isLoading: ammoLoading } = useQuery({ queryKey: ["inventory-ammo", appAccess.orgId], queryFn: () => listAmmoFn() });
+  const { data: equipment = [], isLoading: equipmentLoading } = useQuery({ queryKey: ["inventory-equipment", appAccess.orgId], queryFn: () => listEquipmentFn() });
+  const { data: fuelReserve = null, isLoading: fuelLoading } = useQuery({ queryKey: ["inventory-fuel", appAccess.orgId], queryFn: () => getFuelFn() });
+  const { data: inventoryAlerts = [] } = useQuery({
+    queryKey: ["inventory-alerts", appAccess.orgId],
+    queryFn: () => loadAlerts(),
   });
   const { data: inventorySnapshot = null, isLoading: inventorySnapshotLoading } = useQuery({
     queryKey: ["inventory-snapshot", appAccess.orgId],
     queryFn: () => loadInventory({ data: { org_id: appAccess.orgId, scope: "overview" } }),
   });
 
-  useRealtimeInvalidate("organisation_members", [["inventory-members"]]);
-  useRealtimeInvalidate("organisation_locations", [["inventory-locations"]]);
+  useRealtimeInvalidate("officers", [["inventory-officers"]]);
+  useRealtimeInvalidate("vehicles", [["inventory-vehicles"]]);
+  useRealtimeInvalidate("weapons", [["inventory-weapons"]]);
+  useRealtimeInvalidate("ammunition", [["inventory-ammo"]]);
+  useRealtimeInvalidate("tactical_equipment", [["inventory-equipment"]]);
+  useRealtimeInvalidate("fuel_reserves", [["inventory-fuel"]]);
+  useRealtimeInvalidate("inventory_alerts", [["inventory-alerts"], ["inventory-snapshot", appAccess.orgId]]);
   useRealtimeInvalidate("patrols", [["inventory-patrols"]]);
   useRealtimeInvalidate("incidents", [["inventory-incidents"]]);
+  const dataReady = !patrolsLoading && !incidentsLoading && !officersLoading && !vehiclesLoading && !weaponsLoading && !ammoLoading && !equipmentLoading && !fuelLoading && !inventorySnapshotLoading;
 
-  const dataReady = !membersLoading && !locationsLoading && !patrolsLoading && !incidentsLoading && !alertsLoading && !remoteOfficersLoading && !remoteVehiclesLoading && !inventorySnapshotLoading;
-
-  const baseState = useMemo(() => {
-    const fallbackState = buildInventoryState(members as any[], locations as any[], patrols as any[], incidents as any[]);
-    if (inventorySnapshot) {
-      const snapshot = inventorySnapshot as Partial<InventoryState> & {
-        officers?: any[];
-        vehicles?: any[];
-        weapons?: any[];
-        ammo?: any[];
-        equipment?: any[];
-        fuelLogs?: any[];
-        alerts?: any[];
-      };
-      if (Array.isArray(snapshot.officers) && snapshot.officers.length > 0) {
-        fallbackState.officers = snapshot.officers.map((officer: any, index: number) => ({
-          id: officer.id ?? officer.user_id ?? `off-${index + 1}`,
-          user_id: officer.user_id ?? officer.id ?? `off-${index + 1}`,
-          name: officer.name ?? officer.display_name ?? `Officer ${index + 1}`,
-          badge: officer.badge ?? `BDG-${String(index + 1).padStart(3, "0")}`,
-          status: officer.status ?? "off-duty",
-          armed: Boolean(officer.armed),
-          location: officer.location ?? officer.zone ?? "Main site",
-          zone: officer.zone ?? officer.location ?? "Main site",
-          shift: officer.shift ?? "06:00 – 18:00",
-          certifications: officer.certifications ?? [],
-          contact: officer.contact ?? "App contact",
-        }));
-      }
-      if (Array.isArray(snapshot.vehicles) && snapshot.vehicles.length > 0) {
-        fallbackState.vehicles = snapshot.vehicles.map((vehicle: any, index: number) => ({
-          id: vehicle.id ?? vehicle.vehicleId ?? `veh-${index + 1}`,
-          vehicleId: vehicle.vehicleId ?? vehicle.vehicle_id ?? `VEH-${String(index + 1).padStart(3, "0")}`,
-          type: vehicle.type ?? "SUV",
-          status: vehicle.status ?? "available",
-          fuel: Number(vehicle.fuel ?? vehicle.fuel_percentage ?? 80),
-          condition: vehicle.condition ?? "Roadworthy",
-          driver: vehicle.driver ?? "Unassigned",
-          zone: vehicle.zone ?? "Main site",
-          location: vehicle.location ?? "Main site",
-          history: Array.isArray(vehicle.history) ? vehicle.history : [Number(vehicle.fuel ?? 80)],
-        }));
-      }
-      if (Array.isArray(snapshot.weapons) && snapshot.weapons.length > 0) {
-        fallbackState.weapons = snapshot.weapons.map((weapon: any, index: number) => ({
-          id: weapon.id ?? `wp-${index + 1}`,
-          weaponId: weapon.weaponId ?? weapon.weapon_id ?? `ARM-${String(index + 1).padStart(3, "0")}`,
-          type: weapon.type ?? "Pistol",
-          status: weapon.status ?? "available",
-          issuedTo: weapon.issuedTo ?? weapon.issued_to ?? null,
-          notes: weapon.notes ?? "",
-        }));
-      }
-      if (Array.isArray(snapshot.ammo) && snapshot.ammo.length > 0) fallbackState.ammo = snapshot.ammo as AmmoRow[];
-      if (Array.isArray(snapshot.equipment) && snapshot.equipment.length > 0) fallbackState.equipment = snapshot.equipment as EquipmentRow[];
-      if (typeof snapshot.fuelReserve === "number") fallbackState.fuelReserve = snapshot.fuelReserve;
-      if (typeof snapshot.fuelThreshold === "number") fallbackState.fuelThreshold = snapshot.fuelThreshold;
-      if (Array.isArray(snapshot.fuelLogs) && snapshot.fuelLogs.length > 0) fallbackState.fuelLogs = snapshot.fuelLogs as FuelLog[];
-      if (Array.isArray(snapshot.alerts) && snapshot.alerts.length > 0) fallbackState.alerts = snapshot.alerts as InventoryAlert[];
-    }
-    if (remoteOfficers && remoteOfficers.length > 0) {
-      fallbackState.officers = remoteOfficers.map((ro: any) => {
-        return {
-          id: ro.officer_id || ro.id,
-          user_id: ro.user_id || ro.officer_id,
-          name: ro.name || ro.officer_id,
-          badge: ro.badge || `BDG-${ro.officer_id}`,
-          status: ro.status || "off-duty",
-          armed: Boolean(ro.armed),
-          location: typeof ro.location === 'object' ? ro.location?.zone || ro.location?.name || 'Main site' : ro.location || 'Main site',
-          zone: ro.zone || 'Main site',
-          shift: ro.shift || "06:00 – 18:00",
-          certifications: ro.certifications || [],
-          contact: ro.contact || 'App contact',
-        };
-      });
-    }
-    if (remoteVehicles && remoteVehicles.length > 0) {
-      fallbackState.vehicles = remoteVehicles.map((rv: any) => {
-        return {
-          id: rv.vehicle_id || rv.id,
-          vehicleId: rv.vehicle_id,
-          type: rv.type || 'SUV',
-          status: rv.status || 'available',
-          fuel: rv.fuel_percentage ?? 80,
-          condition: rv.condition || 'Roadworthy',
-          driver: rv.driver || 'Unassigned',
-          zone: rv.zone || 'Main site',
-          location: typeof rv.location === 'object' ? rv.location?.name || 'Main site' : rv.location || 'Main site',
-          history: rv.history || [
-            { id: `h-${rv.vehicle_id}`, timestamp: new Date().toISOString(), type: "status_changed", message: `Vehicle initialized as ${rv.status || 'available'}` }
-          ],
-        };
-      });
-    }
-    return fallbackState;
-  }, [inventorySnapshot, members, locations, patrols, incidents, remoteOfficers, remoteVehicles]);
+  const baseState = useMemo(() => normalizeInventorySnapshot(inventorySnapshot, { officers, vehicles, weapons, ammo, equipment, fuelReserve, inventoryAlerts }), [ammo, equipment, fuelReserve, inventoryAlerts, inventorySnapshot, officers, vehicles, weapons]);
   const [state, setState] = useState<InventoryState | null>(null);
   const [tab, setTab] = useState<Tab>("officers");
   const [search, setSearch] = useState("");
@@ -281,15 +200,15 @@ function InventoryPage() {
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (dataReady && !state) {
+    if (dataReady) {
       setState(baseState);
     }
-  }, [baseState, dataReady, state]);
+  }, [baseState, dataReady]);
 
   const inventory = state ?? baseState;
   const activeAlerts = useMemo(
-    () => (remoteAlerts as InventoryAlert[]).filter((a) => !dismissedAlertIds.includes(a.id)),
-    [dismissedAlertIds, remoteAlerts],
+    () => inventory.alerts.filter((a) => !dismissedAlertIds.includes(a.id)),
+    [dismissedAlertIds, inventory.alerts],
   );
   const filteredOfficers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -314,8 +233,8 @@ function InventoryPage() {
     return { availableOfficers, vehicleAvailable, fuelled, weaponsIssued, ammoQty, equipmentAvail, fuelPct };
   }, [inventory]);
 
-  const fuelReservePct = Math.round((inventory.fuelReserve / 5000) * 100);
-  const showLoading = membersLoading || locationsLoading || patrolsLoading || incidentsLoading || alertsLoading || remoteOfficersLoading || remoteVehiclesLoading;
+  const fuelReservePct = Math.round((inventory.fuelReserve / Math.max(1, fuelReserve?.capacity_litres ?? 5000)) * 100);
+  const showLoading = !dataReady;
 
   const resolveAlert = (id: string) => setDismissedAlertIds((current) => (current.includes(id) ? current : [...current, id]));
   const updateState = (updater: (prev: InventoryState) => InventoryState) => setState((prev) => (prev ? updater(prev) : prev));
@@ -341,7 +260,7 @@ function InventoryPage() {
     }));
   };
   const rosterAdd = () => {
-    const next = newOfficer(inventory.officers.length + 1);
+    const next = newOfficer();
     setEditingOfficer(next);
   };
   const rosterCommit = async () => {
@@ -939,170 +858,12 @@ function InventoryPage() {
   );
 }
 
-function buildInventoryState(members: any[], locations: any[], patrols: any[], incidents: any[]): InventoryState {
-  const zones = locations.length ? locations : [{ name: "Main site", address: "HQ", zone: "HQ" }];
-  const officerPool = members.filter(Boolean);
-  const officers = officerPool.length ? officerPool.map((member, index) => {
-    const name = member.profile?.display_name ?? `Officer ${index + 1}`;
-    const zone = member.profile?.zone ?? zones[index % zones.length]?.name ?? "HQ";
-    const certs = certificationsFor(member.role, index);
-    return {
-      id: member.id,
-      user_id: member.user_id,
-      name,
-      badge: `BDG-${String(index + 1).padStart(3, "0")}`,
-      status: member.profile?.status ?? (index % 3 === 0 ? "off-duty" : "on-duty"),
-      armed: member.role === "manager" || member.role === "supervisor" || index % 2 === 0,
-      location: zone,
-      zone,
-      shift: index % 2 === 0 ? "18:00 – 06:00" : "06:00 – 18:00",
-      certifications: certs,
-      contact: `App contact · ${name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}-${100 + index}`,
-    };
-  }) : [{
-    id: "off-1",
-    user_id: "seed",
-    name: "Security Lead",
-    badge: "BDG-001",
-    status: "on-duty",
-    armed: true,
-    location: zones[0]?.name ?? "HQ",
-    zone: zones[0]?.name ?? "HQ",
-    shift: "18:00 – 06:00",
-    certifications: ["First Aid", "Radio"],
-    contact: "App contact",
-  }];
-
-  const criticalCount = incidents.filter((i) => Number(i.severity) >= 4).length;
-  const patrolPressure = patrols.filter((p) => p.status !== "complete").length;
-
-  const vehicles = (patrols.length ? patrols : [{ id: "pt-1", code: "PT-01", name: "HQ Loop", officer: officers[0]?.name ?? "Officer", status: "on_route" }]).map((patrol: any, index: number) => {
-    const fuel = Math.max(18, Math.min(96, 78 - index * 7 - criticalCount * 5 - (patrol.status === "missed" ? 22 : 0)));
-    return {
-      id: `veh-${patrol.id ?? index}`,
-      vehicleId: patrol.code ? `VEH-${patrol.code}` : `VEH-${String(index + 1).padStart(3, "0")}`,
-      type: patrol.name?.toLowerCase().includes("bike") ? "Motorbike" : index % 2 === 0 ? "SUV" : "Pickup",
-      status: fuel < 25 ? "low_fuel" : patrol.status === "missed" ? "unavailable" : "available",
-      fuel,
-      condition: patrol.status === "missed" ? "Needs inspection" : fuel < 25 ? "Fuel below threshold" : "Roadworthy",
-      driver: patrol.officer ?? officers[index % officers.length]?.name ?? "Unassigned",
-      zone: patrol.zone ?? zones[index % zones.length]?.name ?? "HQ",
-      location: patrol.location ?? zones[index % zones.length]?.address ?? "HQ",
-      history: makeHistory(fuel),
-    } satisfies VehicleRow;
-  });
-
-  const weapons = officers.slice(0, Math.max(3, Math.ceil(officers.length / 2))).map((officer, index) => ({
-    id: `wp-${index + 1}`,
-    weaponId: `ARM-${String(index + 1).padStart(3, "0")}`,
-    type: index % 2 === 0 ? "Pistol" : "Tactical shotgun",
-    status: index < Math.max(1, criticalCount) ? "issued" : "available",
-    issuedTo: index < Math.max(1, criticalCount) ? officer.name : null,
-    notes: index % 2 === 0 ? "Serial verified" : "Quarterly inspection due",
-  } satisfies WeaponRow));
-
-  const ammo: AmmoRow[] = [
-    { type: "9mm", quantity: 340 + officers.length * 12 - patrolPressure * 10, threshold: 280, restocks: makeRestocks(340) },
-    { type: "12-gauge", quantity: 96 + criticalCount * 3, threshold: 80, restocks: makeRestocks(96) },
-    { type: "Tasers", quantity: 22 + Math.max(0, officers.length - 3), threshold: 18, restocks: makeRestocks(22) },
-  ];
-
-  const equipment: EquipmentRow[] = [
-    { id: "eq-1", category: "Body armour", available: Math.max(2, officers.length - patrolPressure), inUse: Math.min(officers.length, patrolPressure + 2), total: officers.length + 3 },
-    { id: "eq-2", category: "Radios", available: Math.max(4, officers.length + 1), inUse: Math.max(0, patrolPressure - 1), total: officers.length + patrolPressure + 2 },
-    { id: "eq-3", category: "First aid kits", available: Math.max(3, officers.length), inUse: Math.max(1, criticalCount), total: officers.length + criticalCount + 2 },
-    { id: "eq-4", category: "Torches", available: Math.max(4, officers.length + 4), inUse: Math.max(0, patrolPressure), total: officers.length + 5 },
-  ];
-
-  const fuelReserve = Math.max(900, 4200 - criticalCount * 220 - patrolPressure * 150);
-  const fuelThreshold = fuelReserve / 5000 * 100 <= 35 ? 35 : 28;
-  const fuelLogs: FuelLog[] = Array.from({ length: 10 }, (_, index) => ({
-    id: `fuel-${index}`,
-    date: new Date(Date.now() - index * 3 * 86_400_000).toISOString(),
-    litres: Math.max(100, fuelReserve - index * 110),
-    note: index === 0 ? "Latest reserve snapshot" : `Delivery batch ${index + 1}`,
-  }));
-  const alerts = buildAlerts({
-    vehicles,
-    ammo,
-    equipment,
-    fuelReserve,
-    fuelThreshold,
-  });
-  return { officers, vehicles, weapons, ammo, equipment, fuelReserve, fuelThreshold, fuelLogs, alerts };
-}
-
-function buildAlerts(input: { vehicles: VehicleRow[]; ammo: AmmoRow[]; equipment: EquipmentRow[]; fuelReserve: number; fuelThreshold: number; }): InventoryAlert[] {
-  const alerts: InventoryAlert[] = [];
-  input.vehicles.filter((v) => v.status !== "available" || v.fuel < 30).forEach((v) => {
-    alerts.push({
-      id: `alert-${v.id}`,
-      resource: v.vehicleId,
-      currentValue: `${v.fuel}% fuel`,
-      threshold: "50% fuel and available",
-      action: "Refuel or mark for service",
-      createdAt: new Date(Date.now() - 19 * 60_000).toISOString(),
-      resolved: false,
-    });
-  });
-  input.ammo.filter((a) => a.quantity <= a.threshold).forEach((a) => {
-    alerts.push({
-      id: `alert-${a.type}`,
-      resource: a.type,
-      currentValue: `${a.quantity} rounds`,
-      threshold: `${a.threshold} rounds`,
-      action: "Restock ammunition before next deployment",
-      createdAt: new Date(Date.now() - 41 * 60_000).toISOString(),
-      resolved: false,
-    });
-  });
-  if (input.fuelReserve / 5000 * 100 < input.fuelThreshold) {
-    alerts.push({
-      id: "alert-fuel",
-      resource: "Fuel reserve",
-      currentValue: `${Math.round((input.fuelReserve / 5000) * 100)}%`,
-      threshold: `${input.fuelThreshold}%`,
-      action: "Log fuel delivery",
-      createdAt: new Date(Date.now() - 12 * 60_000).toISOString(),
-      resolved: false,
-    });
-  }
-  input.equipment.filter((e) => e.available === 0).forEach((e) => {
-    alerts.push({
-      id: `alert-${e.id}`,
-      resource: e.category,
-      currentValue: "0 available",
-      threshold: "At least 1 available",
-      action: "Return equipment from active duty",
-      createdAt: new Date(Date.now() - 33 * 60_000).toISOString(),
-      resolved: false,
-    });
-  });
-  return alerts;
-}
-
-function makeHistory(fuel: number) {
-  return Array.from({ length: 12 }, (_, idx) => Math.max(10, Math.min(100, fuel - idx * 4 + (idx % 2 === 0 ? 3 : -2))));
-}
-
-function makeRestocks(base: number) {
-  return Array.from({ length: 8 }, (_, idx) => Math.max(12, Math.min(100, base / 4 + idx * 6)));
-}
-
-function certificationsFor(role: string, index: number) {
-  const base = ["Radio"];
-  if (role === "manager" || role === "supervisor") base.push("First Aid", "Access Control");
-  if (index % 2 === 0) base.push("Patrol Ops");
-  if (index % 3 === 0) base.push("CCTV");
-  return base;
-}
-
-function newOfficer(sequence: number): OfficerRow {
+function newOfficer(): OfficerRow {
   return {
     id: `off-${Date.now()}`,
     user_id: `temp-${Date.now()}`,
-    name: `Officer ${sequence}`,
-    badge: `BDG-${String(sequence).padStart(3, "0")}`,
+    name: "",
+    badge: "",
     status: "off-duty",
     armed: false,
     location: "Unassigned",
@@ -1110,6 +871,67 @@ function newOfficer(sequence: number): OfficerRow {
     shift: "Pending",
     certifications: ["Radio"],
     contact: "Set contact",
+  };
+}
+
+function normalizeInventorySnapshot(
+  snapshot: unknown,
+  fallback: {
+    officers: OfficerRow[];
+    vehicles: VehicleRow[];
+    weapons: WeaponRow[];
+    ammo: AmmoRow[];
+    equipment: EquipmentRow[];
+    fuelReserve: FuelReserveRow | null;
+    inventoryAlerts: InventoryAlert[];
+  },
+): InventoryState {
+  const record = snapshot && typeof snapshot === "object" ? (snapshot as Partial<InventoryState>) : null;
+  if (
+    record &&
+    Array.isArray(record.officers) &&
+    Array.isArray(record.vehicles) &&
+    Array.isArray(record.weapons) &&
+    Array.isArray(record.ammo) &&
+    Array.isArray(record.equipment) &&
+    Array.isArray(record.alerts)
+  ) {
+    return {
+      officers: record.officers as OfficerRow[],
+      vehicles: record.vehicles as VehicleRow[],
+      weapons: record.weapons as WeaponRow[],
+      ammo: record.ammo as AmmoRow[],
+      equipment: record.equipment as EquipmentRow[],
+      fuelReserve: Number(record.fuelReserve ?? 0),
+      fuelThreshold: Number(record.fuelThreshold ?? 0),
+      fuelLogs: Array.isArray(record.fuelLogs) ? (record.fuelLogs as FuelLog[]) : [],
+      alerts: record.alerts as InventoryAlert[],
+    };
+  }
+
+  const reserve = fallback.fuelReserve;
+  const fuelReserve = Number(reserve?.current_litres ?? 0);
+  const fuelThreshold = reserve && Number(reserve.capacity_litres) > 0
+    ? Math.round((Number(reserve.threshold_litres ?? 0) / Number(reserve.capacity_litres)) * 100)
+    : 0;
+
+  return {
+    officers: fallback.officers.map((officer) => ({ ...officer })),
+    vehicles: fallback.vehicles.map((vehicle) => ({ ...vehicle })),
+    weapons: fallback.weapons.map((weapon) => ({ ...weapon })),
+    ammo: fallback.ammo.map((row) => ({ ...row })),
+    equipment: fallback.equipment.map((row) => ({ ...row })),
+    fuelReserve,
+    fuelThreshold,
+    fuelLogs: reserve
+      ? [{
+          id: reserve.id,
+          date: reserve.updated_at || reserve.last_restocked || new Date().toISOString(),
+          litres: fuelReserve,
+          note: "Current reserve snapshot",
+        }]
+      : [],
+    alerts: fallback.inventoryAlerts.map((alert) => ({ ...alert })),
   };
 }
 

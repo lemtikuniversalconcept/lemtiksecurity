@@ -604,49 +604,25 @@ function IncidentDetailPage() {
     agentOutput.action_recommendations,
   );
   const autonomousActions =
-    payloadAutonomousActions.length > 0
-      ? payloadAutonomousActions.map((action, idx) => {
-          const isAuto =
-            action.auto_execute === true ||
-            action.auto === true ||
-            action.kind === "auto" ||
-            action.execution_mode === "auto";
-          return {
-            id: firstString(action.id, action.action_id, `${inc.id}-action-${idx}`),
-            label: firstString(action.label, action.title, action.name, `Action ${idx + 1}`) || `Action ${idx + 1}`,
-            kind: isAuto ? "auto" : "approval",
-            detail: firstString(action.detail, action.description, action.reason, action.summary, "Pending review from the AI command layer.") || "Pending review from the AI command layer.",
-            impact: firstString(action.impact, action.benefit, action.effect, "Operational impact under review.") || "Operational impact under review.",
-            state: firstString(action.state, action.status, isAuto ? "executing" : "recommended") || (isAuto ? "executing" : "recommended"),
-            approval: firstString(action.approval, action.approval_level, action.required_approval, "Supervisor") || "Supervisor",
-            risk: firstString(action.risk, action.risk_level, "Medium") || "Medium",
-            savings: firstString(action.savings, action.time_savings, action.estimated_savings, "—") || "—",
-            meta: isRecord(action.meta) ? action.meta : { zone: inc.zone, location: inc.location },
-          } as const;
-        })
-      : [
-          {
-            id: "cctv-nw-wing",
-            label: `Activate CCTV ${inc.zone || "coverage"}`,
-            kind: "auto",
-            detail: `Auto-executing coverage sweep for ${inc.location}.`,
-            impact: "Improves visual confirmation and response routing.",
-            state: severityScore >= 4 ? "executing" : "queued",
-            meta: { zone: inc.zone, location: inc.location },
-          },
-          {
-            id: "elevator-hold",
-            label: "Hold Elevator B at Ground Floor",
-            kind: "approval",
-            detail: "Cuts the likely escape route by holding the nearest vertical corridor.",
-            impact: "Saves time and reduces suspect movement options.",
-            state: escalationRows.length > 0 ? "pending" : "recommended",
-            approval: "Supervisor",
-            risk: "Low",
-            savings: "~45 seconds",
-            meta: { zone: inc.zone, location: inc.location },
-          },
-        ] as const;
+    payloadAutonomousActions.map((action, idx) => {
+      const isAuto =
+        action.auto_execute === true ||
+        action.auto === true ||
+        action.kind === "auto" ||
+        action.execution_mode === "auto";
+      return {
+        id: firstString(action.id, action.action_id, `${inc.id}-action-${idx}`),
+        label: firstString(action.label, action.title, action.name, `Action ${idx + 1}`) || `Action ${idx + 1}`,
+        kind: isAuto ? "auto" : "approval",
+        detail: firstString(action.detail, action.description, action.reason, action.summary, "Pending review from the AI command layer.") || "Pending review from the AI command layer.",
+        impact: firstString(action.impact, action.benefit, action.effect, "Operational impact under review.") || "Operational impact under review.",
+        state: firstString(action.state, action.status, isAuto ? "executing" : "recommended") || (isAuto ? "executing" : "recommended"),
+        approval: firstString(action.approval, action.approval_level, action.required_approval, "Supervisor") || "Supervisor",
+        risk: firstString(action.risk, action.risk_level, "Medium") || "Medium",
+        savings: firstString(action.savings, action.time_savings, action.estimated_savings, "—") || "—",
+        meta: isRecord(action.meta) ? action.meta : { zone: inc.zone, location: inc.location },
+      } as const;
+    });
 
   const activeOverrides = (() => {
     const payloadOverrides = firstRecordArray(
@@ -1173,7 +1149,16 @@ function IncidentDetailPage() {
                     <ShieldCheck className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div className="mt-4 space-y-3">
-                    {autonomousActions.map((action) => {
+                    {autonomousActions.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border bg-surface p-6 text-center text-sm text-muted-foreground">
+                        No autonomous actions recommended for this incident.
+                        <div className="mt-2 text-xs">
+                          Connect smart infrastructure devices in{" "}
+                          <Link to="/app/settings">Settings → Infrastructure</Link>{" "}
+                          to enable automated response actions.
+                        </div>
+                      </div>
+                    ) : autonomousActions.map((action) => {
                       const isAuto = action.kind === "auto";
                       return (
                         <div key={action.id} className="rounded-xl border border-border bg-card p-4">

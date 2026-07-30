@@ -10,7 +10,7 @@ import { listLocations, listMembers } from "@/lib/orgs.functions";
 import { listCameras, type CameraRecord } from "@/lib/cameras.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { supabase } from "@/integrations/supabase/client";
-import { severityMeta, typeMeta, statusMeta, type Severity, type IncidentType, type IncidentStatus, zoneRisk } from "@/lib/mockData";
+import { severityMeta, typeMeta, statusMeta, type Severity, type IncidentType, type IncidentStatus } from "@/lib/mockData";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
@@ -106,11 +106,12 @@ function initials(name: string) {
 function deriveRisk(zoneName: string, incidents: any[], patrols: any[]) {
   const zoneIncidents = incidents.filter((incident) => incident.zone === zoneName);
   const zonePatrols = patrols.filter((patrol) => String(patrol.name ?? "").toLowerCase().includes(zoneName.toLowerCase()) || String(patrol.code ?? "").toLowerCase().includes(zoneName.toLowerCase()));
-  const base = zoneRisk.find((zone) => zone.zone === zoneName)?.score ?? 45;
-  const risk = base
+  const totalSeverity = zoneIncidents.reduce((acc, incident) => acc + Number(incident.severity ?? 0), 0);
+  const risk = 38
     + zoneIncidents.filter((incident) => Number(incident.severity) >= 4).length * 8
     + zoneIncidents.filter((incident) => Number(incident.severity) >= 3).length * 4
-    + zonePatrols.filter((patrol) => patrol.status === "delayed" || patrol.status === "missed").length * 6;
+    + zonePatrols.filter((patrol) => patrol.status === "delayed" || patrol.status === "missed").length * 6
+    + Math.min(10, totalSeverity);
   return Math.max(0, Math.min(100, Math.round(risk)));
 }
 

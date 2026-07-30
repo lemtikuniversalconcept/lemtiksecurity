@@ -10,7 +10,7 @@ import { getMapboxToken } from "@/lib/config.functions";
 import { getBriefings, generateBriefing } from "@/lib/intelligence.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
-import { incidents as fallbackIncidents, zoneRisk, type IncidentType } from "@/lib/mockData";
+import { type IncidentType } from "@/lib/mockData";
 import { Download, FileText, Filter, Loader2, MapPinned, Radar, Search, ShieldAlert, Sparkles, ExternalLink, ChevronRight, X, BrainCircuit } from "lucide-react";
 
 const LAGOS: [number, number] = [3.4219, 6.4281];
@@ -108,21 +108,7 @@ function IntelligenceFeedPage() {
   const markerRefs = useRef<mapboxgl.Marker[]>([]);
 
   const liveItems = useMemo(() => {
-    const source = incidents.length > 0 ? incidents : fallbackIncidents.map((i) => ({
-      id: i.id,
-      code: i.id,
-      type: i.type,
-      severity: i.severity,
-      status: i.status,
-      location: i.location,
-      zone: i.zone,
-      reported_at: fallbackReportedAt(i.reportedAt),
-      title: `${i.type.replace("_", " ")} signal`,
-      description: i.description,
-      coord_x: 3.35 + (i.coords.x - 50) / 550,
-      coord_y: 6.35 + (i.coords.y - 50) / 550,
-    }));
-    return (source as any[]).map((item, index) => deriveIntelligenceItem(item, index));
+    return (incidents as any[]).map((item, index) => deriveIntelligenceItem(item, index));
   }, [incidents]);
 
   const filteredItems = useMemo(() => {
@@ -166,16 +152,21 @@ function IntelligenceFeedPage() {
 
   const zoneScores = useMemo(() => {
     const counts = new Map<string, number>();
-    filteredItems.forEach((item) => counts.set(item.zone, (counts.get(item.zone) ?? 0) + 1));
-    return zoneRisk
-      .map((zone) => {
-        const boost = (counts.get(zone.zone) ?? 0) * 8 + filteredItems.filter((item) => item.zone === zone.zone && item.severity >= 4).length * 4;
-        return { ...zone, score: Math.min(100, zone.score + boost), incidents: counts.get(zone.zone) ?? 0 };
+    const severityTotals = new Map<string, number>();
+    filteredItems.forEach((item) => {
+      counts.set(item.zone, (counts.get(item.zone) ?? 0) + 1);
+      severityTotals.set(item.zone, (severityTotals.get(item.zone) ?? 0) + item.severity);
+    });
+    return [...counts.entries()]
+      .map(([zone, incidentCount]) => {
+        const severity = severityTotals.get(zone) ?? 0;
+        const score = Math.min(100, Math.round(35 + incidentCount * 8 + severity * 6));
+        return { zone, score, incidents: incidentCount, trend: incidentCount > 3 ? "rising" : "stable" };
       })
       .sort((a, b) => b.score - a.score);
   }, [filteredItems]);
 
-  const currentAreaRisk = zoneScores[0] ?? { zone: "Lagos", score: 42, trend: "stable", incidents: filteredItems.length };
+  const currentAreaRisk = zoneScores[0] ?? { zone: "Lagos", score: 0, trend: "stable", incidents: filteredItems.length };
   const currentBrief = useMemo(() => buildBrief(filteredItems, currentAreaRisk.zone, rangeFilter), [filteredItems, currentAreaRisk.zone, rangeFilter]);
 
   useEffect(() => {
@@ -519,13 +510,13 @@ function deriveIntelligenceItem(item: any, index: number): IntelligenceItem {
   const title = item.title?.trim() || item.code || `${item.zone ?? "Area"} signal`;
   const summary = String(item.description ?? item.body ?? title).replace(/\s+/g, " ").trim();
   const keywords = KEYWORDS.filter((word) => `${title} ${summary}`.toLowerCase().includes(word));
-  const zoneMatch = zoneRisk.find((z) => z.zone === item.zone);
-  const confidence = clamp(Math.round(58 + severity * 8 + Math.min(16, keywords.length * 4) + (zoneMatch?.score ?? 0) / 6), 60, 98);
+  const zoneScore = item.zone ? zoneScoreFromText(item.zone) : 0;
+  const confidence = clamp(Math.round(58 + severity * 8 + Math.min(16, keywords.length * 4) + zoneScore / 6), 60, 98);
   const verified = Boolean(item.status === "resolved" || item.status === "contained" || severity >= 4 || keywords.length >= 2);
   const sourceName = pickSource(category, index, severity);
   const sourceUrl = buildSearchUrl(title, sourceName, item.zone);
   const relatedIncidentIds = [item.related_to, item.code, item.id].filter(Boolean).slice(0, 3) as string[];
-  const locationRelevance = clamp(Math.round((zoneMatch?.score ?? 48) + severity * 6 + keywords.length * 4 - (verified ? 2 : 0)), 12, 99);
+  const locationRelevance = clamp(Math.round(zoneScore + severity * 6 + keywords.length * 4 - (verified ? 2 : 0)), 12, 99);
   return {
     id: String(item.id),
     title,
@@ -614,6 +605,15 @@ function toLng(item: any, index: number): [number, number] {
 function fallbackReportedAt(relativeLabel: string) {
   const minutes = parseRelativeMinutes(relativeLabel);
   return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
+function zoneScoreFromText(zone: string) {
+  const value = zone.toLowerCase();
+  if (value.includes("lekki")) return 72;
+  if (value.includes("ikoyi")) return 58;
+  if (value.includes("vi")) return 64;
+  if (value.includes("ajah")) return 55;
+  return 48;
 }
 
 function parseRelativeMinutes(label: string) {
