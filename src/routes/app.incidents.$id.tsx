@@ -319,6 +319,8 @@ function IncidentDetailPage() {
         { event: "UPDATE", schema: "public", table: "incidents", filter: `id=eq.${id}` },
         (payload) => {
           const next = payload.new as Record<string, any>;
+          const previous = (payload.old as Record<string, any> | null) ?? null;
+          const statusChanged = !!previous && previous.status !== next.status;
           qc.setQueryData(["incident", id], (old: any) => {
             if (!old) return old;
             return {
@@ -337,6 +339,9 @@ function IncidentDetailPage() {
               sessionStorage.removeItem(markerKey);
             }
             setAnalysisLifecycle({ analysisStatus: "ready", dispatchPlanStatus: "ready" });
+          }
+          if (statusChanged) {
+            void qc.invalidateQueries({ queryKey: ["incident", id] });
           }
         },
       )
