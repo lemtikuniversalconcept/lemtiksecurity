@@ -169,6 +169,10 @@ function listFromValue(value: unknown) {
   return [];
 }
 
+function isRecord(value: unknown): value is AnyRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function firstRecordArray(...values: unknown[]) {
   for (const value of values) {
     if (Array.isArray(value)) {
