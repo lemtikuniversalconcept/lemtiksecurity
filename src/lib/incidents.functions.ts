@@ -115,8 +115,15 @@ export const createIncident = createServerFn({ method: "POST" })
       .insert({ ...data, reported_by: context.userId, organisation_id: orgId })
       .select().single();
     if (error) throwSafeError("incidents.create", error, "Unable to create incident.");
-    await orchestrateIncident(row as Record<string, any>, orgId, context.userId);
-    return row;
+    const orchestration = await orchestrateIncident(row as Record<string, any>, orgId, context.userId);
+    const asyncState = orchestration as Record<string, any> | null;
+    return {
+      ...row,
+      analysis_status: asyncState?.analysis_status ?? asyncState?.status ?? "pending",
+      dispatch_plan: asyncState?.dispatch_plan ?? row.dispatch_plan ?? null,
+      analysis: asyncState?.analysis ?? row.analysis ?? null,
+      agent_output: asyncState?.agent_output ?? row.agent_output ?? null,
+    };
   });
 
 export const updateIncidentStatus = createServerFn({ method: "POST" })

@@ -245,6 +245,7 @@ function IncidentDetailPage() {
     queryKey: ["patrols"],
     queryFn: () => fetchPatrols(),
   });
+  const [analysisLifecycle, setAnalysisLifecycle] = useState<{ analysisStatus: string; dispatchPlanStatus: string } | null>(null);
   const reportedBy = data?.incident?.reported_by ?? null;
   const { data: reporterProfile } = useQuery({
     queryKey: ["incident-reporter", reportedBy],
@@ -263,7 +264,83 @@ function IncidentDetailPage() {
     sessionStorage.removeItem("lemtik-open-incident-tab");
   }, [id]);
 
+  useEffect(() => {
+    const markerKey = `lemtik-incident-analysis:${id}`;
+    if (typeof window === "undefined") return;
+    const raw = sessionStorage.getItem(markerKey);
+    if (!raw) {
+      setAnalysisLifecycle(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as { analysis_status?: string; dispatch_plan_status?: string };
+      setAnalysisLifecycle({
+        analysisStatus: String(parsed.analysis_status ?? "pending"),
+        dispatchPlanStatus: String(parsed.dispatch_plan_status ?? "pending"),
+      });
+    } catch {
+      sessionStorage.removeItem(markerKey);
+      setAnalysisLifecycle(null);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    const markerKey = `lemtik-incident-analysis:${id}`;
+    const incident = data?.incident as any | undefined;
+    if (!incident) return;
+    const hasAnalysis = isRecord(incident.analysis) && Object.keys(incident.analysis as AnyRecord).length > 0;
+    const hasDispatchPlan = isRecord(incident.dispatch_plan) && Object.keys(incident.dispatch_plan as AnyRecord).length > 0;
+    if (hasAnalysis || hasDispatchPlan) {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(markerKey);
+      }
+      setAnalysisLifecycle({ analysisStatus: "ready", dispatchPlanStatus: "ready" });
+      return;
+    }
+    if (typeof window !== "undefined") {
+      const raw = sessionStorage.getItem(markerKey);
+      if (!raw) {
+        setAnalysisLifecycle(null);
+      }
+    }
+  }, [data?.incident?.analysis, data?.incident?.dispatch_plan, id]);
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ["incident", id] });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`incident-live:${id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "incidents", filter: `id=eq.${id}` },
+        (payload) => {
+          const next = payload.new as Record<string, any>;
+          qc.setQueryData(["incident", id], (old: any) => {
+            if (!old) return old;
+            return {
+              ...old,
+              incident: {
+                ...(old.incident ?? {}),
+                ...next,
+              },
+            };
+          });
+          const nextAnalysis = next.analysis;
+          const nextDispatchPlan = next.dispatch_plan;
+          const markerKey = `lemtik-incident-analysis:${id}`;
+          if ((nextAnalysis && Object.keys(nextAnalysis).length > 0) || (nextDispatchPlan && Object.keys(nextDispatchPlan).length > 0)) {
+            if (typeof window !== "undefined") {
+              sessionStorage.removeItem(markerKey);
+            }
+            setAnalysisLifecycle({ analysisStatus: "ready", dispatchPlanStatus: "ready" });
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id, qc]);
 
   if (isLoading) {
     return (
@@ -330,16 +407,20 @@ function IncidentDetailPage() {
   const suggestedRows = data.suggested as any[];
   const patrolRows = patrols as any[];
   const incidentAnalysis = isRecord(inc.analysis) ? (inc.analysis as AnyRecord) : {};
+  const dispatchPlan = isRecord(inc.dispatch_plan) ? (inc.dispatch_plan as AnyRecord) : {};
   const agentOutput = isRecord(inc.agent_output) ? (inc.agent_output as AnyRecord) : {};
   const analysisContext = isRecord(incidentAnalysis.historical_context) ? (incidentAnalysis.historical_context as AnyRecord) : {};
   const agentContext = isRecord(agentOutput.historical_context) ? (agentOutput.historical_context as AnyRecord) : {};
-  const aiPayload = { ...incidentAnalysis, ...agentOutput, ...analysisContext, ...agentContext };
+  const aiPayload = { ...incidentAnalysis, ...dispatchPlan, ...agentOutput, ...analysisContext, ...agentContext };
   const responseAgeMinutes = Math.max(1, Math.round((Date.now() - new Date(reportedAt).getTime()) / 60000));
   const severityScore = Number(inc.severity) || 1;
   const osintItems = firstRecordArray(
     incidentAnalysis.intelligence_items,
     incidentAnalysis.related_intelligence,
     incidentAnalysis.osint_items,
+    dispatchPlan.intelligence_items,
+    dispatchPlan.related_intelligence,
+    dispatchPlan.osint_items,
     agentOutput.intelligence_items,
     agentOutput.related_intelligence,
     agentOutput.osint_items,
@@ -358,6 +439,12 @@ function IncidentDetailPage() {
     aiPayload.confidence ?? aiPayload.recommendation_confidence ?? aiPayload.analysis_confidence,
     fallbackConfidence,
   );
+  const analysisStatus = firstString(inc.analysis_status, inc.analysis_state, inc.ai_status, analysisLifecycle?.analysisStatus);
+  const dispatchPlanStatus = firstString(inc.dispatch_plan_status, inc.plan_status, analysisLifecycle?.dispatchPlanStatus);
+  const analysisPending =
+    ["pending", "queued", "analyzing", "processing"].includes(analysisStatus) ||
+    ["pending", "queued", "analyzing", "processing"].includes(dispatchPlanStatus) ||
+    (!analysisStatus && !Object.keys(incidentAnalysis).length && !Object.keys(dispatchPlan).length && ["reported", "acknowledged"].includes(String(inc.status)));
   const threatLevel =
     firstString(
       aiPayload.threat_level,
@@ -436,6 +523,9 @@ function IncidentDetailPage() {
     incidentAnalysis.recommended_officers,
     incidentAnalysis.recommended_responders,
     incidentAnalysis.dispatch_recommendations,
+    dispatchPlan.recommended_officers,
+    dispatchPlan.recommended_responders,
+    dispatchPlan.dispatch_recommendations,
     agentOutput.recommended_officers,
     agentOutput.recommended_responders,
     agentOutput.dispatch_recommendations,
@@ -448,6 +538,8 @@ function IncidentDetailPage() {
   const payloadVehicleRecommendations = firstRecordArray(
     incidentAnalysis.vehicle_recommendations,
     incidentAnalysis.recommended_vehicles,
+    dispatchPlan.vehicle_recommendations,
+    dispatchPlan.recommended_vehicles,
     agentOutput.vehicle_recommendations,
     agentOutput.recommended_vehicles,
   );
@@ -493,6 +585,9 @@ function IncidentDetailPage() {
     incidentAnalysis.autonomous_actions,
     incidentAnalysis.infrastructure_actions,
     incidentAnalysis.action_recommendations,
+    dispatchPlan.autonomous_actions,
+    dispatchPlan.infrastructure_actions,
+    dispatchPlan.action_recommendations,
     agentOutput.autonomous_actions,
     agentOutput.infrastructure_actions,
     agentOutput.action_recommendations,
@@ -546,6 +641,8 @@ function IncidentDetailPage() {
     const payloadOverrides = firstRecordArray(
       incidentAnalysis.active_overrides,
       incidentAnalysis.overrides,
+      dispatchPlan.active_overrides,
+      dispatchPlan.overrides,
       agentOutput.active_overrides,
       agentOutput.overrides,
       agentOutput.override_status,
@@ -596,7 +693,12 @@ function IncidentDetailPage() {
   const allRelated = [...linkedIncidents, ...suggestedRows, ...payloadRelated]
     .filter((item: any, idx, arr) => arr.findIndex((candidate: any) => candidate.id === item.id) === idx)
     .filter((item: any) => item.id !== inc.id);
-  const payloadMapPoints = firstRecordArray(incidentAnalysis.map_points, agentOutput.map_points, agentOutput.tracking_points);
+  const payloadMapPoints = firstRecordArray(
+    incidentAnalysis.map_points,
+    dispatchPlan.map_points,
+    agentOutput.map_points,
+    agentOutput.tracking_points,
+  );
   const mapPoints =
     payloadMapPoints.length > 0
       ? payloadMapPoints
@@ -909,6 +1011,19 @@ function IncidentDetailPage() {
           {activeTab === "analysis" && (
             <div className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr]">
               <div className="space-y-4">
+                {analysisPending && (
+                  <div className="rounded-xl border border-primary/20 bg-primary/10 p-4">
+                    <div className="flex items-center gap-3">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">AI analysis running</div>
+                        <div className="text-xs text-muted-foreground">
+                          The incident has been logged and is waiting for the analysis and dispatch plan payloads to arrive.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="rounded-xl border border-border bg-surface p-4">
                   <div className="flex items-center justify-between gap-2">
                     <div>

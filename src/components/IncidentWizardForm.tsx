@@ -557,9 +557,18 @@ export function IncidentWizardForm({
             <div className="rounded-2xl border border-border bg-surface p-4 text-xs text-muted-foreground">
               <div className="flex items-center gap-2 text-foreground">
                 <CheckCircle2 className="h-4 w-4 text-resolved" />
-                Ready to submit and trigger AI analysis
+                Ready to submit and queue AI analysis
               </div>
-              <div className="mt-2">The incident payload includes people, location, severity, and evidence attachments already uploaded to storage.</div>
+              <div className="mt-2">
+                The incident payload includes people, location, severity, and evidence attachments already uploaded to storage.
+                After submission, command intake continues asynchronously while analysis and dispatch planning complete.
+              </div>
+              {loading && (
+                <div className="mt-3 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Logging incident and starting AI analysis...
+                </div>
+              )}
             </div>
           </div>
         );

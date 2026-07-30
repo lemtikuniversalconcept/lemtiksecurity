@@ -252,6 +252,18 @@ function IncidentsList({ appAccess, navigate }: { appAccess: ReturnType<typeof R
       }
       setShowNew(false);
       if (row?.id) {
+        const analysisStatus = String((row as any)?.analysis_status ?? (row as any)?.status ?? "pending").toLowerCase();
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(
+            `lemtik-incident-analysis:${row.id}`,
+            JSON.stringify({
+              incident_id: row.id,
+              analysis_status: analysisStatus,
+              dispatch_plan_status: (row as any)?.dispatch_plan ? "ready" : "pending",
+              created_at: new Date().toISOString(),
+            }),
+          );
+        }
         sessionStorage.setItem(AUTO_OPEN_TAB_KEY, row.id);
         navigate({ to: "/app/incidents/$id", params: { id: row.id } });
       }
