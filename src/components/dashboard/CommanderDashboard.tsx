@@ -7,6 +7,7 @@ import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols, listCheckIns } from "@/lib/patrols.functions";
 import { listAlerts } from "@/lib/alerts.functions";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
+import { listVehicles } from "@/lib/inventory.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { AiChatWidget, ApprovalHistoryPanel, HumanApprovalLayer } from "@/components/dashboard/AICommandStudio";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
@@ -131,6 +132,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
   const loadCheckIns = useServerFn(listCheckIns);
   const loadCameras = useServerFn(listCameras);
   const loadToken = useServerFn(getMapboxToken);
+  const loadVehiclesFn = useServerFn(listVehicles);
 
   useRealtimeInvalidate("incidents", [["command-incidents"]]);
   useRealtimeInvalidate("patrols", [["command-patrols"]]);
@@ -143,6 +145,7 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
   const { data: members = [], isLoading: membersLoading } = useQuery({ queryKey: ["command-members"], queryFn: () => loadMembers() as Promise<MemberRow[]> });
   const { data: locations = [], isLoading: locationsLoading } = useQuery({ queryKey: ["command-locations"], queryFn: () => loadLocations() as Promise<LocationRow[]> });
   const { data: checkIns = [], isLoading: checkInsLoading } = useQuery({ queryKey: ["command-checkins"], queryFn: () => loadCheckIns() as Promise<CheckInRow[]> });
+  const { data: vehicles = [], isLoading: vehiclesLoading } = useQuery({ queryKey: ["command-vehicles"], queryFn: () => loadVehiclesFn() });
   const { data: cameras = [], isLoading: camerasLoading } = useQuery({
     queryKey: ["command-cameras"],
     queryFn: () => loadCameras() as Promise<CameraRecord[]>,
@@ -179,57 +182,64 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
     saveStoredCommandHistory(approvalHistory);
   }, [approvalHistory]);
 
+  const safeIncidents = useMemo(() => (Array.isArray(incidents) ? incidents : []), [incidents]);
+  const safePatrols = useMemo(() => (Array.isArray(patrols) ? patrols : []), [patrols]);
+  const safeAlerts = useMemo(() => (Array.isArray(alerts) ? alerts : []), [alerts]);
+  const safeMembers = useMemo(() => (Array.isArray(members) ? members : []), [members]);
+  const safeVehicles = useMemo(() => (Array.isArray(vehicles) ? vehicles : []), [vehicles]);
+
   const openIncidents = useMemo(
-    () => incidents.filter((incident) => incident.status !== "resolved" && incident.status !== "closed"),
-    [incidents],
+    () => safeIncidents.filter((incident) => incident.status !== "resolved" && incident.status !== "closed"),
+    [safeIncidents],
   );
   const criticalIncidents = useMemo(
     () => openIncidents.filter((incident) => Number(incident.severity) >= 4),
     [openIncidents],
   );
   const delayedPatrols = useMemo(
-    () => patrols.filter((patrol) => patrol.status === "delayed" || patrol.status === "missed"),
-    [patrols],
+    () => safePatrols.filter((patrol) => patrol.status === "delayed" || patrol.status === "missed"),
+    [safePatrols],
   );
   const activePatrols = useMemo(
-    () => patrols.filter((patrol) => patrol.status !== "complete"),
-    [patrols],
+    () => safePatrols.filter((patrol) => patrol.status !== "complete"),
+    [safePatrols],
   );
   const onDutyMembers = useMemo(
-    () => members.filter((member: any) => (member.profile?.status ?? member.status) === "on-duty"),
-    [members],
+    () => safeMembers.filter((member: any) => (member.profile?.status ?? member.status) === "on-duty"),
+    [safeMembers],
   );
   const patrolCompliance = useMemo(() => {
-    if (!patrols.length) return 0;
-    const sum = patrols.reduce((acc, patrol) => acc + patrol.checked_in / Math.max(patrol.waypoints || 1, 1), 0);
-    return Math.round((sum / patrols.length) * 100);
-  }, [patrols]);
+    if (!safePatrols.length) return 0;
+    const sum = safePatrols.reduce((acc, patrol) => acc + patrol.checked_in / Math.max(patrol.waypoints || 1, 1), 0);
+    return Math.round((sum / safePatrols.length) * 100);
+  }, [safePatrols]);
   const avgResponseAgeMinutes = useMemo(() => {
     if (!openIncidents.length) return 0;
     const sum = openIncidents.reduce((acc, incident) => acc + (Date.now() - new Date(incident.reported_at).getTime()) / 60000, 0);
     return Math.round(sum / openIncidents.length);
   }, [openIncidents]);
   const areaRiskScore = useMemo(() => {
-    const score = 28
-      + criticalIncidents.length * 10
-      + openIncidents.length * 2
-      + delayedPatrols.length * 7
-      + Math.max(0, 100 - patrolCompliance) * 0.25;
+    if (!openIncidents.length && !criticalIncidents.length) return 0;
+    const score = criticalIncidents.length * 25
+      + openIncidents.length * 10
+      + delayedPatrols.length * 15;
     return Math.max(0, Math.min(100, Math.round(score)));
-  }, [criticalIncidents.length, delayedPatrols.length, openIncidents.length, patrolCompliance]);
+  }, [criticalIncidents.length, delayedPatrols.length, openIncidents.length]);
+
   const fleetProxy = useMemo(() => {
-    const totalFleet = Math.max(5, patrols.length + 2);
-    const deployed = Math.min(totalFleet, activePatrols.length);
-    return { totalFleet, deployed, available: Math.max(0, totalFleet - deployed) };
-  }, [activePatrols.length, patrols.length]);
-  const fuelLowUnits = Math.max(0, delayedPatrols.length);
+    const totalFleet = safeVehicles.length;
+    const deployed = safeVehicles.filter((v: any) => v.status === "deployed" || v.status === "responding").length;
+    const available = safeVehicles.filter((v: any) => v.status === "available").length;
+    return { totalFleet, deployed, available };
+  }, [safeVehicles]);
+  const fuelLowUnits = safeVehicles.filter((v: any) => v.status === "low_fuel" || (v.fuel_percentage != null && v.fuel_percentage < 25)).length;
 
   const osintAlerts = useMemo(
     () =>
-      alerts
+      safeAlerts
         .filter((alert) => Number(alert.severity) >= 3 || alert.alert_type === "osint_threat")
         .slice(0, 4),
-    [alerts],
+    [safeAlerts],
   );
   const inventoryAlerts = useMemo(() => {
     const derived: Array<{ id: string; title: string; detail: string; severity: "critical" | "warning" }> = [];
@@ -359,13 +369,38 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         status: "pending",
       }));
     }
-    const matchingCameras = cameras.filter((camera) => {
+    const safeCameras = Array.isArray(cameras) ? cameras : [];
+    const matchingCameras = safeCameras.filter((camera) => {
       const haystack = [camera.location, camera.name].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(selectedIncident.zone.toLowerCase()) || haystack.includes(selectedIncident.location.toLowerCase());
     });
     const cameraDevices = matchingCameras.map((camera) => camera.id);
+
+    // If incident has real backend AI dispatch plan / agent output, map those:
+    const backendActions = (selectedIncident as any)?.dispatch_plan?.recommended_actions 
+      || (selectedIncident as any)?.agent_output?.recommended_actions;
+
+    if (Array.isArray(backendActions) && backendActions.length > 0) {
+      return backendActions.map((action: any, idx: number) => ({
+        id: action.id || `${selectedIncident.id}-action-${idx}`,
+        title: action.title || action.label || action.name || `Action ${idx + 1}`,
+        confidence: Number(action.confidence) || 85,
+        reasoning: Array.isArray(action.reasoning) ? action.reasoning : [action.detail || action.description || "AI recommended response action."],
+        devices: cameraDevices,
+        risk: (action.risk || "medium").toLowerCase() as "low" | "medium" | "high",
+        status: "pending" as const,
+      }));
+    }
+
+    // Only create a patrol dispatch proposal if there is an ACTUAL live officer / active patrol:
+    if (!activePatrols.length) {
+      return [];
+    }
+
     const nearestPatrol = activePatrols[0];
-    const nearestOfficer = nearestPatrol?.officer ?? "nearest officer";
+    const nearestOfficer = nearestPatrol?.officer;
+    if (!nearestOfficer) return [];
+
     const proposals: ApprovalProposal[] = [
       {
         id: `${selectedIncident.id}-dispatch`,
@@ -373,42 +408,15 @@ export function CommanderDashboard({ access }: { access: AppAccess }) {
         confidence: Math.min(97, 86 + Math.min(8, Number(selectedIncident.severity) * 2)),
         reasoning: [
           `The selected incident is severity ${selectedIncident.severity} in ${selectedIncident.location}.`,
-          `The nearest live patrol is ${nearestOfficer}; dispatching keeps response inside the SLA window.`,
-          `Relationship API approval is required before the action is logged and broadcast.`,
+          `Live patrol ${nearestOfficer} is active; dispatching keeps response inside SLA window.`,
         ],
         devices: cameraDevices,
         risk: Number(selectedIncident.severity) >= 4 ? "high" : "medium",
         status: "pending",
       },
-      {
-        id: `${selectedIncident.id}-perimeter`,
-        title: `Stabilize perimeter around ${selectedIncident.location}`,
-        confidence: Math.min(93, 80 + Number(selectedIncident.severity)),
-        reasoning: [
-          `Keep the perimeter sealed while the command team reviews the incident.`,
-          `Temporary access-control hold prevents unnecessary movement into the scene.`,
-        ],
-        devices: cameraDevices,
-        risk: "low",
-        status: "pending",
-      },
     ];
-    if (cameraDevices.length > 0) {
-      proposals.splice(1, 0, {
-        id: `${selectedIncident.id}-cctv`,
-        title: `Activate CCTV coverage for ${selectedIncident.zone}`,
-        confidence: Math.min(95, 82 + Number(selectedIncident.severity)),
-        reasoning: [
-          `Camera coverage around ${selectedIncident.zone} is needed for visual confirmation.`,
-          `This reduces blind-spot exposure before the response team arrives.`,
-        ],
-        devices: cameraDevices,
-        risk: "medium",
-        status: "pending",
-      });
-    }
     return proposals;
-  }, [activePatrols, cameras, delayedPatrols, selectedIncident]);
+  }, [activePatrols, cameras, selectedIncident]);
 
   const handleApprovalDecision = (
     decision: string,
