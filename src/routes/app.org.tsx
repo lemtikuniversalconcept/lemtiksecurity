@@ -9,6 +9,7 @@ import {
   listEmergencyContacts, upsertEmergencyContact, deleteEmergencyContact, listLocations,
   getSettings, updateSettings,
 } from "@/lib/orgs.functions";
+import { issueConsumerSession } from "@/lib/consumer.functions";
 import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
 import { Loader2, Save, Plus, X, Building2, Activity, ShieldAlert, Mail, MapPin, Layers } from "lucide-react";
 
@@ -322,6 +323,8 @@ function OrgSettings() {
       </section>
       )}
 
+      {activeTab === "locations" && <GuestAccessCard locations={locations} />}
+
       {activeTab === "alerts" && (
       <section className="rounded-lg border border-border bg-card p-5 space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Alert Configuration</h2>
@@ -496,6 +499,75 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 }
 function ErrText({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">{children}</div>;
+}
+
+function GuestAccessCard({ locations }: { locations: any[] }) {
+  const issue = useServerFn(issueConsumerSession);
+  const [locationId, setLocationId] = useState("");
+  const [guestReference, setGuestReference] = useState("");
+  const [expiresInHours, setExpiresInHours] = useState("24");
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  const issueMut = useMutation({
+    mutationFn: () =>
+      issue({
+        data: {
+          location_id: locationId || undefined,
+          guest_reference: guestReference || undefined,
+          expires_in_hours: Number(expiresInHours) || 24,
+        },
+      }),
+    onSuccess: async (result) => {
+      const QRCode = (await import("qrcode")).default;
+      setQrDataUrl(await QRCode.toDataURL(result.qr_code_url, { width: 220, margin: 1 }));
+    },
+  });
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-5 space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Guest emergency access</h2>
+        <p className="text-xs text-muted-foreground">Issue a one-time code so a guest can use the emergency reporting app while on premises.</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label className="text-xs text-muted-foreground">Location</label>
+          <select
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
+          >
+            <option value="">Any / unspecified</option>
+            {locations.map((l: any) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        </div>
+        <Field label="Guest reference" value={guestReference} onChange={setGuestReference} placeholder="Booking #12345" />
+        <Field label="Expires in (hours)" value={expiresInHours} onChange={setExpiresInHours} placeholder="24" />
+      </div>
+      {issueMut.error && <ErrText>{(issueMut.error as Error).message}</ErrText>}
+      <button
+        onClick={() => issueMut.mutate()}
+        disabled={issueMut.isPending}
+        className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+      >
+        {issueMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+        Issue code
+      </button>
+
+      {issueMut.data && (
+        <div className="flex flex-col sm:flex-row items-start gap-4 rounded-md border border-border bg-surface p-4">
+          {qrDataUrl && <img src={qrDataUrl} alt="Guest access QR code" className="h-40 w-40 rounded-md bg-white p-2" />}
+          <div className="space-y-1.5">
+            <InfoCard label="Code" value={issueMut.data.token} />
+            <div className="text-xs text-muted-foreground break-all">{issueMut.data.qr_code_url}</div>
+            <div className="text-xs text-muted-foreground">Expires {new Date(issueMut.data.expires_at).toLocaleString()}</div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 
