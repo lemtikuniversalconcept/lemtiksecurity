@@ -9,7 +9,7 @@ const orgType = z.enum(["estate", "corporate", "hotel", "government"]);
 // Subscription tier/status are intentionally not exposed in any user-facing
 // validator — billing must be updated via privileged paths only.
 
-const appRole = z.enum(["officer", "supervisor", "manager", "client_admin"]);
+const appRole = z.enum(["officer", "supervisor", "manager", "client_admin", "security_forensic_analyst"]);
 
 async function assertAdmin(supabase: any, userId: string, orgId: string) {
   const { data } = await supabase

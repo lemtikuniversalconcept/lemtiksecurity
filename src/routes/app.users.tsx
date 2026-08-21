@@ -25,7 +25,7 @@ export const Route = createFileRoute("/app/users")({
   component: Users,
 });
 
-const ROLES = ["officer", "supervisor", "manager", "client_admin"] as const;
+const ROLES = ["officer", "supervisor", "manager", "client_admin", "security_forensic_analyst"] as const;
 type Role = (typeof ROLES)[number];
 
 const statusTone: Record<string, string> = {
@@ -44,7 +44,7 @@ function timeAgo(iso?: string | null) {
 }
 
 function roleLabel(r: string) {
-  return r.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function buildInvitePassword(email: string) {
@@ -174,7 +174,7 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
     return { activeMembers, onDuty, supervisors, inactive, recentlySeen, dutyRate };
   }, [members]);
   const canEditRoles = appAccess.dbRole === "manager";
-  const editableRoles: Role[] = ["officer", "supervisor"];
+  const editableRoles: Role[] = ["officer", "supervisor", "security_forensic_analyst"];
   const canEditMemberRole = (member: any) => canEditRoles && member.user_id !== appAccess.userId && member.role !== "client_admin";
 
   return (

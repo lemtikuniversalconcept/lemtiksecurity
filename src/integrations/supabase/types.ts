@@ -1127,6 +1127,7 @@ export type Database = {
         | "officer"
         | "client_admin"
         | "lemtik_admin"
+        | "security_forensic_analyst"
       incident_status:
         | "reported"
         | "acknowledged"
@@ -1290,6 +1291,7 @@ export const Constants = {
         "officer",
         "client_admin",
         "lemtik_admin",
+        "security_forensic_analyst",
       ],
       incident_status: [
         "reported",

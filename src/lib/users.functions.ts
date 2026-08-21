@@ -6,7 +6,7 @@ import { buildUserInvitationEmail, sendResendEmail } from "@/lib/email.service";
 import { throwSafeError } from "@/lib/server-errors";
 import { getActiveOrgId } from "@/lib/orgs.server";
 
-const appRole = z.enum(["officer", "supervisor", "manager", "client_admin"]);
+const appRole = z.enum(["officer", "supervisor", "manager", "client_admin", "security_forensic_analyst"]);
 
 async function assertAdmin(supabase: any, userId: string, orgId: string) {
   const { data } = await supabase
