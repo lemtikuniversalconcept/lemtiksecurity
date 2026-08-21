@@ -14,9 +14,11 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as OfficerRouteImport } from './routes/officer'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ConsumerRouteImport } from './routes/consumer'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OfficerIndexRouteImport } from './routes/officer.index'
+import { Route as ConsumerIndexRouteImport } from './routes/consumer.index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
@@ -25,6 +27,11 @@ import { Route as OfficerNotificationsRouteImport } from './routes/officer.notif
 import { Route as OfficerNavigationRouteImport } from './routes/officer.navigation'
 import { Route as OfficerHomeRouteImport } from './routes/officer.home'
 import { Route as OfficerDispatchRouteImport } from './routes/officer.dispatch'
+import { Route as ConsumerStatusRouteImport } from './routes/consumer.status'
+import { Route as ConsumerReportRouteImport } from './routes/consumer.report'
+import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
+import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
+import { Route as ConsumerActivateRouteImport } from './routes/consumer.activate'
 import { Route as AppUsersRouteImport } from './routes/app.users'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
 import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
@@ -74,6 +81,11 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConsumerRoute = ConsumerRouteImport.update({
+  id: '/consumer',
+  path: '/consumer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
@@ -88,6 +100,11 @@ const OfficerIndexRoute = OfficerIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => OfficerRoute,
+} as any)
+const ConsumerIndexRoute = ConsumerIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ConsumerRoute,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
@@ -128,6 +145,31 @@ const OfficerDispatchRoute = OfficerDispatchRouteImport.update({
   id: '/dispatch',
   path: '/dispatch',
   getParentRoute: () => OfficerRoute,
+} as any)
+const ConsumerStatusRoute = ConsumerStatusRouteImport.update({
+  id: '/status',
+  path: '/status',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerReportRoute = ConsumerReportRouteImport.update({
+  id: '/report',
+  path: '/report',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerHomeRoute = ConsumerHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerAiRoute = ConsumerAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerActivateRoute = ConsumerActivateRouteImport.update({
+  id: '/activate',
+  path: '/activate',
+  getParentRoute: () => ConsumerRoute,
 } as any)
 const AppUsersRoute = AppUsersRouteImport.update({
   id: '/users',
@@ -248,6 +290,7 @@ const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/consumer': typeof ConsumerRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/officer': typeof OfficerRouteWithChildren
@@ -266,6 +309,11 @@ export interface FileRoutesByFullPath {
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
   '/app/users': typeof AppUsersRouteWithChildren
+  '/consumer/activate': typeof ConsumerActivateRoute
+  '/consumer/ai': typeof ConsumerAiRoute
+  '/consumer/home': typeof ConsumerHomeRoute
+  '/consumer/report': typeof ConsumerReportRoute
+  '/consumer/status': typeof ConsumerStatusRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
   '/officer/home': typeof OfficerHomeRoute
   '/officer/navigation': typeof OfficerNavigationRoute
@@ -274,6 +322,7 @@ export interface FileRoutesByFullPath {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/app/': typeof AppIndexRoute
+  '/consumer/': typeof ConsumerIndexRoute
   '/officer/': typeof OfficerIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
@@ -305,6 +354,11 @@ export interface FileRoutesByTo {
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
   '/app/users': typeof AppUsersRouteWithChildren
+  '/consumer/activate': typeof ConsumerActivateRoute
+  '/consumer/ai': typeof ConsumerAiRoute
+  '/consumer/home': typeof ConsumerHomeRoute
+  '/consumer/report': typeof ConsumerReportRoute
+  '/consumer/status': typeof ConsumerStatusRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
   '/officer/home': typeof OfficerHomeRoute
   '/officer/navigation': typeof OfficerNavigationRoute
@@ -313,6 +367,7 @@ export interface FileRoutesByTo {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/app': typeof AppIndexRoute
+  '/consumer': typeof ConsumerIndexRoute
   '/officer': typeof OfficerIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
@@ -329,6 +384,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/consumer': typeof ConsumerRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/officer': typeof OfficerRouteWithChildren
@@ -347,6 +403,11 @@ export interface FileRoutesById {
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
   '/app/users': typeof AppUsersRouteWithChildren
+  '/consumer/activate': typeof ConsumerActivateRoute
+  '/consumer/ai': typeof ConsumerAiRoute
+  '/consumer/home': typeof ConsumerHomeRoute
+  '/consumer/report': typeof ConsumerReportRoute
+  '/consumer/status': typeof ConsumerStatusRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
   '/officer/home': typeof OfficerHomeRoute
   '/officer/navigation': typeof OfficerNavigationRoute
@@ -355,6 +416,7 @@ export interface FileRoutesById {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/app/': typeof AppIndexRoute
+  '/consumer/': typeof ConsumerIndexRoute
   '/officer/': typeof OfficerIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
@@ -372,6 +434,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/consumer'
     | '/forgot-password'
     | '/login'
     | '/officer'
@@ -390,6 +453,11 @@ export interface FileRouteTypes {
     | '/app/report-centre'
     | '/app/reports'
     | '/app/users'
+    | '/consumer/activate'
+    | '/consumer/ai'
+    | '/consumer/home'
+    | '/consumer/report'
+    | '/consumer/status'
     | '/officer/dispatch'
     | '/officer/home'
     | '/officer/navigation'
@@ -398,6 +466,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/app/'
+    | '/consumer/'
     | '/officer/'
     | '/app/admin/audit'
     | '/app/admin/billing'
@@ -429,6 +498,11 @@ export interface FileRouteTypes {
     | '/app/report-centre'
     | '/app/reports'
     | '/app/users'
+    | '/consumer/activate'
+    | '/consumer/ai'
+    | '/consumer/home'
+    | '/consumer/report'
+    | '/consumer/status'
     | '/officer/dispatch'
     | '/officer/home'
     | '/officer/navigation'
@@ -437,6 +511,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/app'
+    | '/consumer'
     | '/officer'
     | '/app/admin/audit'
     | '/app/admin/billing'
@@ -452,6 +527,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/consumer'
     | '/forgot-password'
     | '/login'
     | '/officer'
@@ -470,6 +546,11 @@ export interface FileRouteTypes {
     | '/app/report-centre'
     | '/app/reports'
     | '/app/users'
+    | '/consumer/activate'
+    | '/consumer/ai'
+    | '/consumer/home'
+    | '/consumer/report'
+    | '/consumer/status'
     | '/officer/dispatch'
     | '/officer/home'
     | '/officer/navigation'
@@ -478,6 +559,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/app/'
+    | '/consumer/'
     | '/officer/'
     | '/app/admin/audit'
     | '/app/admin/billing'
@@ -494,6 +576,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  ConsumerRoute: typeof ConsumerRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   OfficerRoute: typeof OfficerRouteWithChildren
@@ -538,6 +621,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/consumer': {
+      id: '/consumer'
+      path: '/consumer'
+      fullPath: '/consumer'
+      preLoaderRoute: typeof ConsumerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app': {
       id: '/app'
       path: '/app'
@@ -558,6 +648,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/officer/'
       preLoaderRoute: typeof OfficerIndexRouteImport
       parentRoute: typeof OfficerRoute
+    }
+    '/consumer/': {
+      id: '/consumer/'
+      path: '/'
+      fullPath: '/consumer/'
+      preLoaderRoute: typeof ConsumerIndexRouteImport
+      parentRoute: typeof ConsumerRoute
     }
     '/app/': {
       id: '/app/'
@@ -614,6 +711,41 @@ declare module '@tanstack/react-router' {
       fullPath: '/officer/dispatch'
       preLoaderRoute: typeof OfficerDispatchRouteImport
       parentRoute: typeof OfficerRoute
+    }
+    '/consumer/status': {
+      id: '/consumer/status'
+      path: '/status'
+      fullPath: '/consumer/status'
+      preLoaderRoute: typeof ConsumerStatusRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/report': {
+      id: '/consumer/report'
+      path: '/report'
+      fullPath: '/consumer/report'
+      preLoaderRoute: typeof ConsumerReportRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/home': {
+      id: '/consumer/home'
+      path: '/home'
+      fullPath: '/consumer/home'
+      preLoaderRoute: typeof ConsumerHomeRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/ai': {
+      id: '/consumer/ai'
+      path: '/ai'
+      fullPath: '/consumer/ai'
+      preLoaderRoute: typeof ConsumerAiRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/activate': {
+      id: '/consumer/activate'
+      path: '/activate'
+      fullPath: '/consumer/activate'
+      preLoaderRoute: typeof ConsumerActivateRouteImport
+      parentRoute: typeof ConsumerRoute
     }
     '/app/users': {
       id: '/app/users'
@@ -872,6 +1004,28 @@ const AppRouteChildren: AppRouteChildren = {
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
+interface ConsumerRouteChildren {
+  ConsumerActivateRoute: typeof ConsumerActivateRoute
+  ConsumerAiRoute: typeof ConsumerAiRoute
+  ConsumerHomeRoute: typeof ConsumerHomeRoute
+  ConsumerReportRoute: typeof ConsumerReportRoute
+  ConsumerStatusRoute: typeof ConsumerStatusRoute
+  ConsumerIndexRoute: typeof ConsumerIndexRoute
+}
+
+const ConsumerRouteChildren: ConsumerRouteChildren = {
+  ConsumerActivateRoute: ConsumerActivateRoute,
+  ConsumerAiRoute: ConsumerAiRoute,
+  ConsumerHomeRoute: ConsumerHomeRoute,
+  ConsumerReportRoute: ConsumerReportRoute,
+  ConsumerStatusRoute: ConsumerStatusRoute,
+  ConsumerIndexRoute: ConsumerIndexRoute,
+}
+
+const ConsumerRouteWithChildren = ConsumerRoute._addFileChildren(
+  ConsumerRouteChildren,
+)
+
 interface OfficerRouteChildren {
   OfficerDispatchRoute: typeof OfficerDispatchRoute
   OfficerHomeRoute: typeof OfficerHomeRoute
@@ -904,6 +1058,7 @@ const OfficerRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  ConsumerRoute: ConsumerRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   OfficerRoute: OfficerRouteWithChildren,
