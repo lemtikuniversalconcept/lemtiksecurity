@@ -14,10 +14,12 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as OfficerRouteImport } from './routes/officer'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as ForensicRouteImport } from './routes/forensic'
 import { Route as ConsumerRouteImport } from './routes/consumer'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OfficerIndexRouteImport } from './routes/officer.index'
+import { Route as ForensicIndexRouteImport } from './routes/forensic.index'
 import { Route as ConsumerIndexRouteImport } from './routes/consumer.index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
@@ -27,6 +29,8 @@ import { Route as OfficerNotificationsRouteImport } from './routes/officer.notif
 import { Route as OfficerNavigationRouteImport } from './routes/officer.navigation'
 import { Route as OfficerHomeRouteImport } from './routes/officer.home'
 import { Route as OfficerDispatchRouteImport } from './routes/officer.dispatch'
+import { Route as ForensicQueriesRouteImport } from './routes/forensic.queries'
+import { Route as ForensicCasesRouteImport } from './routes/forensic.cases'
 import { Route as ConsumerStatusRouteImport } from './routes/consumer.status'
 import { Route as ConsumerReportRouteImport } from './routes/consumer.report'
 import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
@@ -47,6 +51,7 @@ import { Route as AppAuditRouteImport } from './routes/app.audit'
 import { Route as AppAlertsRouteImport } from './routes/app.alerts'
 import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
 import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
+import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id'
 import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
 import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
 import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
@@ -54,6 +59,9 @@ import { Route as AppAdminSystemRouteImport } from './routes/app.admin.system'
 import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
 import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
+import { Route as ForensicCasesIdReidRouteImport } from './routes/forensic.cases.$id.reid'
+import { Route as ForensicCasesIdEvidenceRouteImport } from './routes/forensic.cases.$id.evidence'
+import { Route as ForensicCasesIdAiRouteImport } from './routes/forensic.cases.$id.ai'
 import { Route as AppAdminOrganisationsIdRouteImport } from './routes/app.admin.organisations.$id'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -81,6 +89,11 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForensicRoute = ForensicRouteImport.update({
+  id: '/forensic',
+  path: '/forensic',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConsumerRoute = ConsumerRouteImport.update({
   id: '/consumer',
   path: '/consumer',
@@ -100,6 +113,11 @@ const OfficerIndexRoute = OfficerIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => OfficerRoute,
+} as any)
+const ForensicIndexRoute = ForensicIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ForensicRoute,
 } as any)
 const ConsumerIndexRoute = ConsumerIndexRouteImport.update({
   id: '/',
@@ -145,6 +163,16 @@ const OfficerDispatchRoute = OfficerDispatchRouteImport.update({
   id: '/dispatch',
   path: '/dispatch',
   getParentRoute: () => OfficerRoute,
+} as any)
+const ForensicQueriesRoute = ForensicQueriesRouteImport.update({
+  id: '/queries',
+  path: '/queries',
+  getParentRoute: () => ForensicRoute,
+} as any)
+const ForensicCasesRoute = ForensicCasesRouteImport.update({
+  id: '/cases',
+  path: '/cases',
+  getParentRoute: () => ForensicRoute,
 } as any)
 const ConsumerStatusRoute = ConsumerStatusRouteImport.update({
   id: '/status',
@@ -246,6 +274,11 @@ const OfficerIncidentIdRoute = OfficerIncidentIdRouteImport.update({
   path: '/incident/$id',
   getParentRoute: () => OfficerRoute,
 } as any)
+const ForensicCasesIdRoute = ForensicCasesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ForensicCasesRoute,
+} as any)
 const AppUsersIdRoute = AppUsersIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -281,6 +314,21 @@ const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   path: '/admin/audit',
   getParentRoute: () => AppRoute,
 } as any)
+const ForensicCasesIdReidRoute = ForensicCasesIdReidRouteImport.update({
+  id: '/reid',
+  path: '/reid',
+  getParentRoute: () => ForensicCasesIdRoute,
+} as any)
+const ForensicCasesIdEvidenceRoute = ForensicCasesIdEvidenceRouteImport.update({
+  id: '/evidence',
+  path: '/evidence',
+  getParentRoute: () => ForensicCasesIdRoute,
+} as any)
+const ForensicCasesIdAiRoute = ForensicCasesIdAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => ForensicCasesIdRoute,
+} as any)
 const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -291,6 +339,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/consumer': typeof ConsumerRouteWithChildren
+  '/forensic': typeof ForensicRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/officer': typeof OfficerRouteWithChildren
@@ -314,6 +363,8 @@ export interface FileRoutesByFullPath {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/forensic/cases': typeof ForensicCasesRouteWithChildren
+  '/forensic/queries': typeof ForensicQueriesRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
   '/officer/home': typeof OfficerHomeRoute
   '/officer/navigation': typeof OfficerNavigationRoute
@@ -323,6 +374,7 @@ export interface FileRoutesByFullPath {
   '/officer/sos': typeof OfficerSosRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
+  '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
@@ -331,9 +383,13 @@ export interface FileRoutesByFullPath {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
+  '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
+  '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
+  '/forensic/cases/$id/reid': typeof ForensicCasesIdReidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -359,6 +415,8 @@ export interface FileRoutesByTo {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/forensic/cases': typeof ForensicCasesRouteWithChildren
+  '/forensic/queries': typeof ForensicQueriesRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
   '/officer/home': typeof OfficerHomeRoute
   '/officer/navigation': typeof OfficerNavigationRoute
@@ -368,6 +426,7 @@ export interface FileRoutesByTo {
   '/officer/sos': typeof OfficerSosRoute
   '/app': typeof AppIndexRoute
   '/consumer': typeof ConsumerIndexRoute
+  '/forensic': typeof ForensicIndexRoute
   '/officer': typeof OfficerIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
@@ -376,15 +435,20 @@ export interface FileRoutesByTo {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
+  '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
+  '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
+  '/forensic/cases/$id/reid': typeof ForensicCasesIdReidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/consumer': typeof ConsumerRouteWithChildren
+  '/forensic': typeof ForensicRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/officer': typeof OfficerRouteWithChildren
@@ -408,6 +472,8 @@ export interface FileRoutesById {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/forensic/cases': typeof ForensicCasesRouteWithChildren
+  '/forensic/queries': typeof ForensicQueriesRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
   '/officer/home': typeof OfficerHomeRoute
   '/officer/navigation': typeof OfficerNavigationRoute
@@ -417,6 +483,7 @@ export interface FileRoutesById {
   '/officer/sos': typeof OfficerSosRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
+  '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
@@ -425,9 +492,13 @@ export interface FileRoutesById {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
+  '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
+  '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
+  '/forensic/cases/$id/reid': typeof ForensicCasesIdReidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -435,6 +506,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/consumer'
+    | '/forensic'
     | '/forgot-password'
     | '/login'
     | '/officer'
@@ -458,6 +530,8 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/forensic/cases'
+    | '/forensic/queries'
     | '/officer/dispatch'
     | '/officer/home'
     | '/officer/navigation'
@@ -467,6 +541,7 @@ export interface FileRouteTypes {
     | '/officer/sos'
     | '/app/'
     | '/consumer/'
+    | '/forensic/'
     | '/officer/'
     | '/app/admin/audit'
     | '/app/admin/billing'
@@ -475,9 +550,13 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
+    | '/forensic/cases/$id'
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/forensic/cases/$id/ai'
+    | '/forensic/cases/$id/evidence'
+    | '/forensic/cases/$id/reid'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -503,6 +582,8 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/forensic/cases'
+    | '/forensic/queries'
     | '/officer/dispatch'
     | '/officer/home'
     | '/officer/navigation'
@@ -512,6 +593,7 @@ export interface FileRouteTypes {
     | '/officer/sos'
     | '/app'
     | '/consumer'
+    | '/forensic'
     | '/officer'
     | '/app/admin/audit'
     | '/app/admin/billing'
@@ -520,14 +602,19 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
+    | '/forensic/cases/$id'
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/forensic/cases/$id/ai'
+    | '/forensic/cases/$id/evidence'
+    | '/forensic/cases/$id/reid'
   id:
     | '__root__'
     | '/'
     | '/app'
     | '/consumer'
+    | '/forensic'
     | '/forgot-password'
     | '/login'
     | '/officer'
@@ -551,6 +638,8 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/forensic/cases'
+    | '/forensic/queries'
     | '/officer/dispatch'
     | '/officer/home'
     | '/officer/navigation'
@@ -560,6 +649,7 @@ export interface FileRouteTypes {
     | '/officer/sos'
     | '/app/'
     | '/consumer/'
+    | '/forensic/'
     | '/officer/'
     | '/app/admin/audit'
     | '/app/admin/billing'
@@ -568,15 +658,20 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
+    | '/forensic/cases/$id'
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/forensic/cases/$id/ai'
+    | '/forensic/cases/$id/evidence'
+    | '/forensic/cases/$id/reid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
   ConsumerRoute: typeof ConsumerRouteWithChildren
+  ForensicRoute: typeof ForensicRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   OfficerRoute: typeof OfficerRouteWithChildren
@@ -621,6 +716,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forensic': {
+      id: '/forensic'
+      path: '/forensic'
+      fullPath: '/forensic'
+      preLoaderRoute: typeof ForensicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/consumer': {
       id: '/consumer'
       path: '/consumer'
@@ -648,6 +750,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/officer/'
       preLoaderRoute: typeof OfficerIndexRouteImport
       parentRoute: typeof OfficerRoute
+    }
+    '/forensic/': {
+      id: '/forensic/'
+      path: '/'
+      fullPath: '/forensic/'
+      preLoaderRoute: typeof ForensicIndexRouteImport
+      parentRoute: typeof ForensicRoute
     }
     '/consumer/': {
       id: '/consumer/'
@@ -711,6 +820,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/officer/dispatch'
       preLoaderRoute: typeof OfficerDispatchRouteImport
       parentRoute: typeof OfficerRoute
+    }
+    '/forensic/queries': {
+      id: '/forensic/queries'
+      path: '/queries'
+      fullPath: '/forensic/queries'
+      preLoaderRoute: typeof ForensicQueriesRouteImport
+      parentRoute: typeof ForensicRoute
+    }
+    '/forensic/cases': {
+      id: '/forensic/cases'
+      path: '/cases'
+      fullPath: '/forensic/cases'
+      preLoaderRoute: typeof ForensicCasesRouteImport
+      parentRoute: typeof ForensicRoute
     }
     '/consumer/status': {
       id: '/consumer/status'
@@ -852,6 +975,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OfficerIncidentIdRouteImport
       parentRoute: typeof OfficerRoute
     }
+    '/forensic/cases/$id': {
+      id: '/forensic/cases/$id'
+      path: '/$id'
+      fullPath: '/forensic/cases/$id'
+      preLoaderRoute: typeof ForensicCasesIdRouteImport
+      parentRoute: typeof ForensicCasesRoute
+    }
     '/app/users/$id': {
       id: '/app/users/$id'
       path: '/$id'
@@ -900,6 +1030,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/admin/audit'
       preLoaderRoute: typeof AppAdminAuditRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/forensic/cases/$id/reid': {
+      id: '/forensic/cases/$id/reid'
+      path: '/reid'
+      fullPath: '/forensic/cases/$id/reid'
+      preLoaderRoute: typeof ForensicCasesIdReidRouteImport
+      parentRoute: typeof ForensicCasesIdRoute
+    }
+    '/forensic/cases/$id/evidence': {
+      id: '/forensic/cases/$id/evidence'
+      path: '/evidence'
+      fullPath: '/forensic/cases/$id/evidence'
+      preLoaderRoute: typeof ForensicCasesIdEvidenceRouteImport
+      parentRoute: typeof ForensicCasesIdRoute
+    }
+    '/forensic/cases/$id/ai': {
+      id: '/forensic/cases/$id/ai'
+      path: '/ai'
+      fullPath: '/forensic/cases/$id/ai'
+      preLoaderRoute: typeof ForensicCasesIdAiRouteImport
+      parentRoute: typeof ForensicCasesIdRoute
     }
     '/app/admin/organisations/$id': {
       id: '/app/admin/organisations/$id'
@@ -1026,6 +1177,50 @@ const ConsumerRouteWithChildren = ConsumerRoute._addFileChildren(
   ConsumerRouteChildren,
 )
 
+interface ForensicCasesIdRouteChildren {
+  ForensicCasesIdAiRoute: typeof ForensicCasesIdAiRoute
+  ForensicCasesIdEvidenceRoute: typeof ForensicCasesIdEvidenceRoute
+  ForensicCasesIdReidRoute: typeof ForensicCasesIdReidRoute
+}
+
+const ForensicCasesIdRouteChildren: ForensicCasesIdRouteChildren = {
+  ForensicCasesIdAiRoute: ForensicCasesIdAiRoute,
+  ForensicCasesIdEvidenceRoute: ForensicCasesIdEvidenceRoute,
+  ForensicCasesIdReidRoute: ForensicCasesIdReidRoute,
+}
+
+const ForensicCasesIdRouteWithChildren = ForensicCasesIdRoute._addFileChildren(
+  ForensicCasesIdRouteChildren,
+)
+
+interface ForensicCasesRouteChildren {
+  ForensicCasesIdRoute: typeof ForensicCasesIdRouteWithChildren
+}
+
+const ForensicCasesRouteChildren: ForensicCasesRouteChildren = {
+  ForensicCasesIdRoute: ForensicCasesIdRouteWithChildren,
+}
+
+const ForensicCasesRouteWithChildren = ForensicCasesRoute._addFileChildren(
+  ForensicCasesRouteChildren,
+)
+
+interface ForensicRouteChildren {
+  ForensicCasesRoute: typeof ForensicCasesRouteWithChildren
+  ForensicQueriesRoute: typeof ForensicQueriesRoute
+  ForensicIndexRoute: typeof ForensicIndexRoute
+}
+
+const ForensicRouteChildren: ForensicRouteChildren = {
+  ForensicCasesRoute: ForensicCasesRouteWithChildren,
+  ForensicQueriesRoute: ForensicQueriesRoute,
+  ForensicIndexRoute: ForensicIndexRoute,
+}
+
+const ForensicRouteWithChildren = ForensicRoute._addFileChildren(
+  ForensicRouteChildren,
+)
+
 interface OfficerRouteChildren {
   OfficerDispatchRoute: typeof OfficerDispatchRoute
   OfficerHomeRoute: typeof OfficerHomeRoute
@@ -1059,6 +1254,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
   ConsumerRoute: ConsumerRouteWithChildren,
+  ForensicRoute: ForensicRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   OfficerRoute: OfficerRouteWithChildren,
