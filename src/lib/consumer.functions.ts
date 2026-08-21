@@ -31,6 +31,7 @@ export const issueConsumerSession = createServerFn({ method: "POST" })
         method: "POST",
         body: {
           org_id: orgId,
+          created_by: context.userId,
           location_id: data.location_id,
           guest_reference: data.guest_reference,
           expires_at: expiresAt,
