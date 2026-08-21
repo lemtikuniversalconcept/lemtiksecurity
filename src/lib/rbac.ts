@@ -1,8 +1,8 @@
 import { redirect } from "@tanstack/react-router";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type DbRole = "manager" | "supervisor" | "officer" | "client_admin" | "lemtik_admin";
-export type SpecRole = "security_manager" | "operator" | "field_officer" | "client_admin" | "lemtik_admin";
+export type DbRole = "manager" | "supervisor" | "officer" | "client_admin" | "lemtik_admin" | "security_forensic_analyst";
+export type SpecRole = "security_manager" | "operator" | "field_officer" | "client_admin" | "lemtik_admin" | "security_forensic_analyst";
 
 export interface AppAccess {
   userId: string;
@@ -14,7 +14,14 @@ export interface AppAccess {
 }
 
 export function normalizeRole(role: string): DbRole {
-  if (role === "manager" || role === "supervisor" || role === "officer" || role === "client_admin" || role === "lemtik_admin") {
+  if (
+    role === "manager" ||
+    role === "supervisor" ||
+    role === "officer" ||
+    role === "client_admin" ||
+    role === "lemtik_admin" ||
+    role === "security_forensic_analyst"
+  ) {
     return role;
   }
   return "officer";
@@ -48,6 +55,8 @@ export function roleLabel(role: DbRole | SpecRole): string {
       return "Client Admin";
     case "lemtik_admin":
       return "Lemtik Admin";
+    case "security_forensic_analyst":
+      return "Forensic Analyst";
     default:
       return "Member";
   }
