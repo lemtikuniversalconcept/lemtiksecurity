@@ -395,27 +395,33 @@ export const findProximityMembers = createServerFn({ method: "POST" })
       limit: z.number().int().min(1).max(20).optional(),
     }).parse(d),
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<any[]> => {
     const orgId = data.org_id ?? await getActiveOrgId(context.supabase, context.userId);
-    const result = await requestRelationshipApi<Array<{
-      id: string;
-      user_id: string;
-      name: string;
-      role: string;
-      zone: string;
-      status: string;
-      coordinates: [number, number];
-      distance: number;
-      source: string;
-    }>>("/api/v1/proximity/find", {
+    // relationship_api's /api/v1/proximity/find is the same "find_responders" endpoint
+    // the incident-orchestration pipeline uses — it always expects a full request_type +
+    // incident envelope, not a flat coordinate query, or it 500s on schema validation.
+    const result = await requestRelationshipApi<{
+      status?: string;
+      data?: {
+        recommended_officers?: Array<Record<string, unknown>>;
+        recommended_vehicles?: Array<Record<string, unknown>>;
+      };
+    }>("/api/v1/proximity/find", {
       body: {
+        request_type: "find_responders",
+        request_id: crypto.randomUUID(),
         org_id: orgId,
-        incident_id: data.incident_id ?? null,
-        coord_x: data.coord_x,
-        coord_y: data.coord_y,
-        limit: data.limit ?? 10,
-        source: "c4isod-dashboard",
+        incident: {
+          id: data.incident_id ?? `adhoc-${crypto.randomUUID()}`,
+          location: { lat: data.coord_y, lng: data.coord_x },
+        },
+        options: {
+          search_radius_km: 5,
+          max_candidates: data.limit ?? 10,
+          include_vehicles: false,
+          request_eta_from_route_calculator: true,
+        },
       },
     });
-    return result ?? [];
+    return result?.data?.recommended_officers ?? [];
   });

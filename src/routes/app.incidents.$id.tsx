@@ -506,10 +506,10 @@ function IncidentDetailPage() {
       firstString(officer.location, fallback?.location, inc.location),
       idx === 0 ? "fastest responder path" : "secondary coverage lane",
     ].filter(Boolean);
-    const distance = toDisplayNumber(officer.distance ?? officer.distance_m ?? officer.distance_meters ?? fallback?.distance ?? 0, 0);
+    const distance = toDisplayNumber(officer.distance ?? officer.distance_m ?? officer.distance_meters ?? officer.distance_metres ?? fallback?.distance ?? 0, 0);
     const etaFallbackMinutes = Math.max(1, Math.round(distance / 95));
     return {
-      id: firstString(officer.id, officer.user_id, officer.member_user_id, fallback?.id, `${inc.id}-officer-${idx}`),
+      id: firstString(officer.id, officer.officer_id, officer.user_id, officer.member_user_id, fallback?.id, `${inc.id}-officer-${idx}`),
       name: firstString(officer.name, officer.display_name, officer.officer_name, officer.full_name, fallback?.name) || `Officer ${idx + 1}`,
       role: firstString(officer.role, officer.position, officer.assignment_role, fallback?.role) || "operator",
       zone: firstString(officer.zone, officer.location_zone, officer.last_zone, fallback?.zone, inc.zone) || "Unknown",
