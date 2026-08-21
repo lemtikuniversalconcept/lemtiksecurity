@@ -771,6 +771,43 @@ function IncidentDetailPage() {
     await invalidate();
   };
 
+  // Records the operator's decision on the AI's dispatch recommendation — accepted
+  // as-is, or edited with a note on what changed and why. Written as an
+  // incident_activity row of kind "operator_decision", which pairs with the AI's
+  // own "ai_recommendation" row (written by relationship_api when orchestration
+  // completes) to form the accept/edit accountability trail. Both kinds are
+  // append-only at the database level once written.
+  const [decisionNote, setDecisionNote] = useState("");
+  const [editingDecision, setEditingDecision] = useState(false);
+  const [recordingDecision, setRecordingDecision] = useState(false);
+
+  const recordOperatorDecision = async (decision: "accepted" | "edited", note?: string) => {
+    setRecordingDecision(true);
+    try {
+      await recordAction({
+        data: {
+          incident_id: id,
+          kind: "operator_decision",
+          message:
+            decision === "accepted"
+              ? `Operator accepted the AI recommendation as-is (${recommendedOfficers.length} officer${recommendedOfficers.length === 1 ? "" : "s"}).`
+              : `Operator changed the AI recommendation: ${note}`,
+          meta: {
+            decision,
+            note: note ?? null,
+            recommended_officer_ids: recommendedOfficers.map((officer) => officer.id),
+            recommended_officer_count: recommendedOfficers.length,
+          },
+        },
+      });
+      await invalidate();
+      setEditingDecision(false);
+      setDecisionNote("");
+    } finally {
+      setRecordingDecision(false);
+    }
+  };
+
   const incidentTitle = inc.title || typeMeta[inc.type as IncidentType];
   const timeOpen = duration(reportedAt);
 
@@ -1105,6 +1142,52 @@ function IncidentDetailPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-surface p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Operator review</div>
+                      <h3 className="text-sm font-semibold">Accept or change this recommendation</h3>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Whatever you decide is logged permanently against this incident — accepted as-is, or changed with your note attached.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      disabled={recordingDecision}
+                      onClick={() => recordOperatorDecision("accepted")}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] uppercase tracking-wider text-primary-foreground hover:opacity-95 disabled:opacity-60"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Accept recommendation
+                    </button>
+                    <button
+                      disabled={recordingDecision}
+                      onClick={() => setEditingDecision((current) => !current)}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2 disabled:opacity-60"
+                    >
+                      <ClipboardList className="h-3.5 w-3.5" /> Log a change
+                    </button>
+                  </div>
+                  {editingDecision && (
+                    <div className="mt-3 space-y-2">
+                      <textarea
+                        value={decisionNote}
+                        onChange={(e) => setDecisionNote(e.target.value)}
+                        placeholder="What are you changing from the AI's recommendation, and why?"
+                        rows={3}
+                        className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs"
+                      />
+                      <button
+                        disabled={recordingDecision || !decisionNote.trim()}
+                        onClick={() => recordOperatorDecision("edited", decisionNote.trim())}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] uppercase tracking-wider text-primary-foreground hover:opacity-95 disabled:opacity-60"
+                      >
+                        <Send className="h-3.5 w-3.5" /> Save decision
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {vehicleRecommendations.length > 0 && (
