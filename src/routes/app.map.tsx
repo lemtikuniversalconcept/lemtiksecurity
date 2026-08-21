@@ -290,7 +290,7 @@ function LiveMap() {
         .limit(200);
       if (!active) return;
       if (error) {
-        setConn("reconnecting");
+        console.warn("[map] cctv_ai_telemetry initial load failed", error);
         return;
       }
       setTelemetryRows((data ?? []) as TelemetryRow[]);
@@ -311,11 +311,11 @@ function LiveMap() {
           merged.sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime());
           return merged.slice(-200);
         });
-        setConn("live");
       })
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") setConn("live");
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setConn("reconnecting");
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("[map] cctv-ai-telemetry channel", status);
+        }
       });
     return () => {
       supabase.removeChannel(channel);

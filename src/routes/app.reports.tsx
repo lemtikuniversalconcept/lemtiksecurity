@@ -643,7 +643,8 @@ function BarChartCard({ bars }: { bars: Array<{ label: string; value: number }> 
 }
 
 function DonutChart({ segments }: { segments: Array<{ label: string; value: number; color: string }> }) {
-  const sum = segments.reduce((acc, segment) => acc + segment.value, 0) || 1;
+  const rawSum = segments.reduce((acc, segment) => acc + segment.value, 0);
+  const sum = rawSum || 1; // avoid divide-by-zero in the arc math only — never shown to the user
   let offset = 0;
   return (
     <div className="grid gap-4 sm:grid-cols-[180px_1fr] items-center">
@@ -669,7 +670,7 @@ function DonutChart({ segments }: { segments: Array<{ label: string; value: numb
           offset += dash;
           return circle;
         })}
-        <text x="60" y="58" textAnchor="middle" className="fill-foreground text-[16px] font-semibold">{sum}</text>
+        <text x="60" y="58" textAnchor="middle" className="fill-foreground text-[16px] font-semibold">{rawSum}</text>
         <text x="60" y="73" textAnchor="middle" className="fill-muted-foreground text-[9px] uppercase tracking-wider">incidents</text>
       </svg>
       <div className="space-y-2">
