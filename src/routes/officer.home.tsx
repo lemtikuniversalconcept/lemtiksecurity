@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listPatrols } from "@/lib/patrols.functions";
 import { listShifts } from "@/lib/patrols.functions";
 import { listIncidents } from "@/lib/incidents.functions";
 import { listMyNotifications } from "@/lib/alerts.functions";
+import { getOwnDutyStatus, setDutyStatus, reportOwnLocation } from "@/lib/officerDuty.functions";
 import { officerRoom, useRealtimeEventFeed } from "@/lib/realtime.events";
 import * as offlineQueue from "@/lib/offlineQueue";
 import { supabase } from "@/integrations/supabase/client";
@@ -21,9 +22,15 @@ import {
   Bell,
   MapPin,
   ShieldCheck,
+  Loader2,
   Route as RouteIcon,
 } from "lucide-react";
 import { useOfficerPermissions } from "@/hooks/use-officer-permissions";
+
+// How often to refresh location while on duty. Proximity treats a location
+// older than 300s (MAX_LOCATION_STALENESS_SECONDS) as stale and excludes the
+// officer from dispatch matching, so this needs comfortable headroom under that.
+const LOCATION_REPORT_INTERVAL_MS = 60_000;
 
 export const Route = createFileRoute("/officer/home")({
   component: OfficerHome,
@@ -37,7 +44,13 @@ function OfficerHome() {
   const listSh = useServerFn(listShifts);
   const listInc = useServerFn(listIncidents);
   const listNotifs = useServerFn(listMyNotifications);
+  const getDuty = useServerFn(getOwnDutyStatus);
+  const setDuty = useServerFn(setDutyStatus);
+  const reportLocation = useServerFn(reportOwnLocation);
   const lastAlertedDispatch = useRef<string | null>(null);
+  const qc = useQueryClient();
+  const [dutyBusy, setDutyBusy] = useState(false);
+  const [dutyError, setDutyError] = useState<string | null>(null);
 
   const { data: patrols = [] } = useQuery({ queryKey: ["officer-patrols"], queryFn: () => listPat() });
   const { data: shifts = [] } = useQuery({ queryKey: ["officer-shifts"], queryFn: () => listSh({ data: {} }) });
@@ -47,6 +60,68 @@ function OfficerHome() {
     queryFn: () => listNotifs(),
     refetchInterval: 30_000,
   });
+  const { data: dutyStatus } = useQuery({
+    queryKey: ["officer-duty-status"],
+    queryFn: () => getDuty(),
+    refetchInterval: 30_000,
+  });
+  const isOnDuty = dutyStatus?.status === "available" || dutyStatus?.status === "on_duty";
+
+  const getPosition = () =>
+    new Promise<GeolocationPosition>((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Location is not available on this device."));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15_000 });
+    });
+
+  const toggleDuty = async () => {
+    setDutyError(null);
+    setDutyBusy(true);
+    try {
+      if (isOnDuty) {
+        await setDuty({ data: { on_duty: false } });
+      } else {
+        const position = await getPosition();
+        await setDuty({
+          data: {
+            on_duty: true,
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          },
+        });
+      }
+      await qc.invalidateQueries({ queryKey: ["officer-duty-status"] });
+    } catch (err) {
+      setDutyError(err instanceof Error ? err.message : "Unable to update duty status.");
+    } finally {
+      setDutyBusy(false);
+    }
+  };
+
+  // While on duty, keep the officer's location fresh so proximity matching
+  // doesn't exclude them for a stale position (see LOCATION_REPORT_INTERVAL_MS).
+  useEffect(() => {
+    if (!isOnDuty) return;
+    let cancelled = false;
+    const ping = async () => {
+      try {
+        const position = await getPosition();
+        if (cancelled) return;
+        await reportLocation({ data: { lat: position.coords.latitude, lng: position.coords.longitude } });
+      } catch {
+        // best-effort — a missed ping just means the next one is due sooner
+      }
+    };
+    void ping();
+    const interval = setInterval(() => void ping(), LOCATION_REPORT_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnDuty]);
 
   useEffect(() => {
     (async () => {
@@ -217,6 +292,27 @@ function OfficerHome() {
                 {connectionLabel}
               </div>
             </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Duty status</div>
+              <div className="mt-1 flex items-center gap-2 text-sm font-medium text-white">
+                <span className={`h-2.5 w-2.5 rounded-full ${isOnDuty ? "bg-emerald-400" : "bg-slate-500"}`} />
+                {isOnDuty ? "On duty — visible for dispatch" : "Off duty"}
+              </div>
+              {dutyError && <div className="mt-1 text-xs text-red-300">{dutyError}</div>}
+            </div>
+            <button
+              onClick={() => void toggleDuty()}
+              disabled={dutyBusy}
+              className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60 ${
+                isOnDuty ? "border border-white/10 bg-slate-900 text-slate-200" : "bg-emerald-400 text-slate-950"
+              }`}
+            >
+              {dutyBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isOnDuty ? "End shift" : "Go on duty"}
+            </button>
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
