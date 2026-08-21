@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
@@ -73,6 +73,19 @@ export const Route = createFileRoute("/app/admin/organisations")({
 });
 
 function OrganisationsPage() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isDetailRoute = pathname.startsWith("/app/admin/organisations/") && pathname !== "/app/admin/organisations";
+
+  if (isDetailRoute) {
+    return <Outlet />;
+  }
+
+  return <OrganisationsList />;
+}
+
+// app.admin.organisations.$id is a nested child route of this one — see the
+// identical comment in app.users.tsx for why this split is required.
+function OrganisationsList() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const loadOrgs = useServerFn(listPlatformOrganisations);

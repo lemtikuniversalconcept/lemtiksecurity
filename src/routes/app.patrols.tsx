@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -62,6 +62,20 @@ type ScheduleDraft = {
 
 function Patrols() {
   const { appAccess } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isDetailRoute = pathname.startsWith("/app/patrols/") && pathname !== "/app/patrols";
+
+  if (isDetailRoute) {
+    return <Outlet />;
+  }
+
+  return <PatrolsList appAccess={appAccess} />;
+}
+
+// app.patrols.$id is a nested child route of this one — see the identical
+// comment in app.users.tsx for why this split (rather than an early return
+// among this component's own hooks) is required.
+function PatrolsList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteContext>["appAccess"] }) {
   const canManage = appAccess.specRole === "security_manager";
   const navigate = useNavigate();
   const qc = useQueryClient();

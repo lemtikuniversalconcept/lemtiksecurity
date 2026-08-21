@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
@@ -55,6 +55,24 @@ function buildInvitePassword(email: string) {
 
 function Users() {
   const { appAccess } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const isDetailRoute = pathname.startsWith("/app/users/") && pathname !== "/app/users";
+
+  if (isDetailRoute) {
+    return <Outlet />;
+  }
+
+  return <UsersList appAccess={appAccess} />;
+}
+
+// app.users.$id is a nested child route of this one, so without rendering
+// <Outlet /> somewhere, navigating to /app/users/$id updates the URL and
+// document title but the child route's component has nowhere to mount —
+// the list below just keeps rendering underneath it. Splitting the list into
+// its own component (mirroring app.incidents.tsx's IncidentsList) keeps that
+// branch above every hook the list uses, so switching between the two never
+// changes how many hooks this component calls on a given render.
+function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteContext>["appAccess"] }) {
   const qc = useQueryClient();
   const list = useServerFn(listMembers);
   const listLoc = useServerFn(listLocations);
