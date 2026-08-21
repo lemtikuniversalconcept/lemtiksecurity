@@ -423,7 +423,6 @@ function IncidentDetailPage() {
   const analysisContext = isRecord(incidentAnalysis.historical_context) ? (incidentAnalysis.historical_context as AnyRecord) : {};
   const agentContext = isRecord(agentOutput.historical_context) ? (agentOutput.historical_context as AnyRecord) : {};
   const aiPayload = { ...incidentAnalysis, ...dispatchPlan, ...agentOutput, ...analysisContext, ...agentContext };
-  const responseAgeMinutes = Math.max(1, Math.round((Date.now() - new Date(reportedAt).getTime()) / 60000));
   const severityScore = Number(inc.severity) || 1;
   const osintItems = firstRecordArray(
     incidentAnalysis.intelligence_items,
@@ -839,7 +838,7 @@ function IncidentDetailPage() {
             <Metric
               icon={Radio}
               label="Response age"
-              value={`${responseAgeMinutes}m`}
+              value={duration(reportedAt)}
               tone={firstResponse ? "resolved" : "warning"}
             />
             <Metric

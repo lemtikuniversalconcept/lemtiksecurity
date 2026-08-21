@@ -216,6 +216,10 @@ function CctvControlRoom() {
             <div className="mt-4 flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-5 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading camera registry…
             </div>
+          ) : cameras.length === 0 ? (
+            <div className="mt-4 rounded-md border border-dashed border-border bg-surface p-8 text-center text-sm text-muted-foreground">
+              No cameras registered for this organisation yet. Contact ops to connect a camera feed.
+            </div>
           ) : (
             <div className="mt-4 grid gap-4">
               <div className="grid gap-4 xl:grid-cols-2">
