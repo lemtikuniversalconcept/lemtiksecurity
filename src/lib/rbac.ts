@@ -64,10 +64,10 @@ export function requireSectionAccess(access: AppAccess, allowedRoles: SpecRole[]
   throw redirect({ to: "/" });
 }
 
-export async function resolveAppAccess(supabase: SupabaseClient): Promise<AppAccess> {
+export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: string): Promise<AppAccess> {
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) {
-    throw redirect({ to: "/login" });
+    throw redirect({ to: "/login", search: { redirect: redirectPath } });
   }
 
   const { data: directRole } = await supabase

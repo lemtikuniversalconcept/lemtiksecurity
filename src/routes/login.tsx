@@ -7,11 +7,21 @@ import { verifyGoogleLogin } from "@/lib/users.functions";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Sign in · Lemtik SOD" }] }),
+  validateSearch: (search: Record<string, unknown>) => ({
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+  }),
   component: LoginPage,
 });
 
+// Only ever follow same-app relative paths back — never an absolute/external URL, and never back into /login itself.
+function safeRedirectTarget(path: string | undefined): string | null {
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/login")) return null;
+  return path;
+}
+
 function LoginPage() {
   const navigate = useNavigate();
+  const { redirect: redirectParam } = Route.useSearch();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,7 +47,7 @@ function LoginPage() {
         .maybeSingle();
 
       if (lemtikAdmin) {
-        navigate({ to: "/app", replace: true });
+        navigate({ to: safeRedirectTarget(redirectParam) ?? "/app", replace: true });
         return;
       }
 
@@ -60,7 +70,9 @@ function LoginPage() {
         .maybeSingle();
 
       const role = String(membership?.role ?? "officer");
-      navigate({ to: role === "officer" ? "/officer/home" : "/app", replace: true });
+      const fallback = role === "officer" ? "/officer/home" : "/app";
+      const target = role === "officer" ? fallback : safeRedirectTarget(redirectParam) ?? fallback;
+      navigate({ to: target, replace: true });
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
@@ -77,7 +89,7 @@ function LoginPage() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, redirectParam]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -5,8 +5,8 @@ import { resolveAppAccess } from "@/lib/rbac";
 
 export const Route = createFileRoute("/app")({
   head: () => ({ meta: [{ title: "Lemtik SOD — Operations" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ location }) => {
+    const appAccess = await resolveAppAccess(supabase, location.href);
     if (appAccess.specRole === "field_officer") {
       throw redirect({ to: "/officer/home" });
     }
