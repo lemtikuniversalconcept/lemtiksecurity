@@ -42,6 +42,11 @@ function ActivatePage() {
       const result = await activate({
         data: { token, device_lat: position.lat, device_lng: position.lng },
       });
+      if (!result.valid) {
+        setStatus("error");
+        setError(REASON_MESSAGES[result.reason] || "Could not activate this code. Please try again.");
+        return;
+      }
       setConsumerSession(token, {
         sessionId: result.session_id,
         organisationName: result.organisation_name,
@@ -52,7 +57,7 @@ function ActivatePage() {
       navigate({ to: "/consumer/home" });
     } catch {
       setStatus("error");
-      setError("Could not connect. Please check you are on the venue WiFi and try again.");
+      setError("Could not connect. Please check your internet connection and try again.");
     }
   };
 

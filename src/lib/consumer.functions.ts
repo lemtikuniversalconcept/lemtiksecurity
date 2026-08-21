@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { throwSafeError } from "@/lib/server-errors";
 import { getActiveOrgId } from "@/lib/orgs.server";
-import { requestRelationshipApi } from "@/lib/relationship-api";
+import { requestRelationshipApi, relationshipApiConfig } from "@/lib/relationship-api";
 
 // ---------------------------------------------------------------------------
 // Operator-facing: issue a guest session token. Everything below this point
@@ -42,6 +42,18 @@ export const issueConsumerSession = createServerFn({ method: "POST" })
     return result;
   });
 
+type ActivateResult =
+  | {
+      valid: true;
+      status: string;
+      session_id: string;
+      organisation_name: string;
+      expires_at: string;
+      geofence: { lat: number | null; lng: number | null; radius_m: number };
+      allowed_ssids: string[];
+    }
+  | { valid: false; reason: string };
+
 export const activateConsumerSession = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({
@@ -51,16 +63,24 @@ export const activateConsumerSession = createServerFn({ method: "POST" })
       device_lng: z.number().optional(),
     }).parse(d),
   )
-  .handler(async ({ data }) => {
-    const result = await requestRelationshipApi<{
-      status: string;
-      session_id: string;
-      organisation_name: string;
-      expires_at: string;
-      geofence: { lat: number | null; lng: number | null; radius_m: number };
-      allowed_ssids: string[];
-    }>("/consumer/session/activate", { method: "POST", body: data });
-    if (!result) throwSafeError("consumer.session.activate", new Error("relationship API unreachable"), "Could not connect. Please check you are on the venue WiFi and try again.");
+  .handler(async ({ data }): Promise<ActivateResult> => {
+    // requestRelationshipApi throws away the response body on a non-2xx status, but
+    // that body is exactly where /consumer/session/activate puts the real failure
+    // reason (invalid_token / expired / outside_premises / deactivated) — a plain
+    // fetch here keeps that reason instead of collapsing every failure into one
+    // generic message.
+    const config = relationshipApiConfig();
+    if (!config) throwSafeError("consumer.session.activate", new Error("relationship API not configured"), "Could not connect. Please try again.");
+    const response = await fetch(`${config.baseUrl}/consumer/session/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": config.apiKey, "X-Client-Name": "c4isod-dashboard" },
+      body: JSON.stringify(data),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { valid: false, reason: body?.reason || "invalid_token" };
+    }
+    const result = { valid: true as const, ...body };
     return result;
   });
 
