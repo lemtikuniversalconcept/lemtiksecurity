@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate, useRouterState, Outlet } from "@tanstack/
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 import { listIncidents } from "@/lib/incidents.functions";
 
 export const Route = createFileRoute("/forensic/cases")({
@@ -95,6 +95,7 @@ function CasesList() {
               <th className="px-4 py-3 text-left font-medium">Severity</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-left font-medium">Evidence</th>
+              <th className="px-4 py-3 text-left font-medium"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#2d3748] bg-[#1a2234]">
@@ -115,10 +116,22 @@ function CasesList() {
                 </td>
                 <td className="px-4 py-3 text-xs text-[#94a3b8]">{incident.status}</td>
                 <td className="px-4 py-3 text-xs text-[#94a3b8]">{(incident.evidence?.length as number) || 0}</td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate({ to: "/forensic/cases/$id/ai", params: { id: incident.id } });
+                    }}
+                    className="flex items-center gap-1.5 rounded-full border border-[#3b82f6]/40 bg-[#3b82f6]/10 px-2.5 py-1 text-[11px] font-medium text-[#3b82f6] hover:bg-[#3b82f6]/20"
+                  >
+                    <Sparkles className="h-3 w-3" /> Ask AI
+                  </button>
+                </td>
               </tr>
             ))}
             {!isLoading && pageRows.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-[#94a3b8]">No cases match these filters.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[#94a3b8]">No cases match these filters.</td></tr>
             )}
           </tbody>
         </table>

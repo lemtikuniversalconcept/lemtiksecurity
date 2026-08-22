@@ -92,6 +92,33 @@ function CaseDetailPage() {
         <p className="text-sm text-[#94a3b8]">{incident.code} · {incident.type} · severity {incident.severity}</p>
       </div>
 
+      <div className="flex gap-1 border-b border-[#2d3748]">
+        <Link
+          to="/forensic/cases/$id"
+          params={{ id }}
+          className={`flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+            isOverview ? "border-b-2 border-[#3b82f6] text-white" : "border-b-2 border-transparent text-[#94a3b8] hover:text-[#e2e8f0]"
+          }`}
+        >
+          Overview
+        </Link>
+        {tabs.map((tab) => {
+          const active = pathname === tab.to;
+          const Icon = tab.icon;
+          return (
+            <Link
+              key={tab.to}
+              to={tab.to}
+              className={`flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                active ? "border-b-2 border-[#3b82f6] text-white" : "border-b-2 border-transparent text-[#94a3b8] hover:text-[#e2e8f0]"
+              }`}
+            >
+              <Icon className="h-4 w-4" /> {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+
       {isOverview ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div className="flex flex-col gap-3 lg:col-span-2">
@@ -164,29 +191,6 @@ function CaseDetailPage() {
       ) : (
         <Outlet />
       )}
-
-      <div className="sticky bottom-0 -mx-4 mt-2 flex gap-1 border-t border-[#2d3748] bg-[#0a0f1e]/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6">
-        <Link
-          to="/forensic/cases/$id"
-          params={{ id }}
-          className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${isOverview ? "bg-[#3b82f6]/15 text-white" : "text-[#94a3b8] hover:bg-white/5"}`}
-        >
-          Overview
-        </Link>
-        {tabs.map((tab) => {
-          const active = pathname === tab.to;
-          const Icon = tab.icon;
-          return (
-            <Link
-              key={tab.to}
-              to={tab.to}
-              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${active ? "bg-[#3b82f6]/15 text-white" : "text-[#94a3b8] hover:bg-white/5"}`}
-            >
-              <Icon className="h-4 w-4" /> {tab.label}
-            </Link>
-          );
-        })}
-      </div>
     </div>
   );
 }
