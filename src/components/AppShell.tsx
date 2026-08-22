@@ -27,6 +27,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listMyOrgs, switchActiveOrg, getActiveOrg } from "@/lib/orgs.functions";
 import { NotificationBell } from "@/components/NotificationBell";
+import { ConsumerEmergencyAlert } from "@/components/ConsumerEmergencyAlert";
 import type { AppAccess, SpecRole } from "@/lib/rbac";
 
 const nav = [
@@ -301,6 +302,8 @@ export function AppShell({ access }: { access: AppAccess }) {
             </div>
           )}
         </div>
+
+        <ConsumerEmergencyAlert orgId={access.orgId} />
 
         <nav className="flex-1 px-2 py-3 space-y-0.5">
           {visibleNav.map((item) => {

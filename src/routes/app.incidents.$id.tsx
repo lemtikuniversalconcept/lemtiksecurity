@@ -268,6 +268,14 @@ function IncidentDetailPage() {
     sessionStorage.removeItem("lemtik-open-incident-tab");
   }, [id]);
 
+  // Opening a guest-triggered incident is what clears it from the flashing sidebar
+  // alert — acknowledged_at is what that alert watches for.
+  useEffect(() => {
+    const incident = data?.incident as { source?: string; acknowledged_at?: string | null } | undefined;
+    if (!incident || incident.source !== "consumer_pwa" || incident.acknowledged_at) return;
+    void supabase.from("incidents" as any).update({ acknowledged_at: new Date().toISOString() }).eq("id", id);
+  }, [data?.incident, id]);
+
   useEffect(() => {
     const markerKey = `lemtik-incident-analysis:${id}`;
     if (typeof window === "undefined") return;
