@@ -152,6 +152,31 @@ export const updateConsumerReport = createServerFn({ method: "POST" })
     return result;
   });
 
+export const sendIntakeTurn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z.object({
+      token: z.string().min(1),
+      report_id: z.string().min(1),
+      transcript: z.string().min(1),
+      conversation_history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).optional(),
+    }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    const { token, report_id, ...body } = data;
+    const result = await requestRelationshipApi<{
+      spoken_response: string;
+      follow_up_question: string | null;
+      danger_detected: boolean;
+      ai_generated: boolean;
+    }>(`/consumer/report/${report_id}/intake-turn`, {
+      method: "POST",
+      body,
+      headers: { "X-Consumer-Token": token },
+    });
+    if (!result) throwSafeError("consumer.report.intakeTurn", new Error("relationship API unreachable"), "Could not process that right now. Please try again.");
+    return result;
+  });
+
 export const getConsumerReportStatus = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) =>
     z.object({ token: z.string().min(1), report_id: z.string().min(1) }).parse(d),

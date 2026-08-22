@@ -78,7 +78,7 @@ function AiPage() {
             )}
           </div>
         ))}
-        {pending && <div className="flex items-center gap-2 text-xs text-[#94a3b8]"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…</div>}
+        {pending && <div className="flex items-center gap-2 text-xs text-[#94a3b8]"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking… (can take up to 20s on the first message)</div>}
       </div>
 
       <form

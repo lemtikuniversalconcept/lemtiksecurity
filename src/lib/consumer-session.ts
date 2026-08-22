@@ -36,15 +36,29 @@ export function clearConsumerSession(): void {
   window.localStorage.removeItem(SESSION_META_KEY);
 }
 
-export function getCurrentPositionSafe(): Promise<{ lat?: number; lng?: number }> {
+export type PositionResult = {
+  lat?: number;
+  lng?: number;
+  error?: "denied" | "unavailable" | "timeout" | "unsupported";
+};
+
+// Silently swallowing every failure here (permission denied, no HTTPS, GPS off) meant
+// the geofence check downstream just saw undefined lat/lng and failed as
+// "outside_premises" with zero indication that location was ever the problem — the
+// caller needs to know WHY it failed so it can tell the guest and offer a retry.
+export function getCurrentPositionSafe(): Promise<PositionResult> {
   return new Promise((resolve) => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      resolve({});
+      resolve({ error: "unsupported" });
       return;
     }
     navigator.geolocation.getCurrentPosition(
       (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
-      () => resolve({}),
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) resolve({ error: "denied" });
+        else if (err.code === err.TIMEOUT) resolve({ error: "timeout" });
+        else resolve({ error: "unavailable" });
+      },
       { enableHighAccuracy: true, timeout: 8_000, maximumAge: 10_000 },
     );
   });

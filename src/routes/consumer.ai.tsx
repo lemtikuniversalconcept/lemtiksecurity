@@ -47,7 +47,7 @@ function AssistantPage() {
         ))}
         {pending && (
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking… (can take up to 20s on the first message)
           </div>
         )}
       </div>

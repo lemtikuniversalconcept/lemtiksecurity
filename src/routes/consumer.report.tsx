@@ -1,29 +1,36 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
-import { Camera, Mic, Video, CheckCircle2, Loader2 } from "lucide-react";
-import { createConsumerReport, updateConsumerReport } from "@/lib/consumer.functions";
+import { Camera, Mic, Video, CheckCircle2, Loader2, Keyboard, ShieldAlert, Send } from "lucide-react";
+import { createConsumerReport, sendIntakeTurn } from "@/lib/consumer.functions";
 import { uploadWithRetry } from "@/lib/consumer-media-queue";
 import { getConsumerToken, getCurrentPositionSafe, setLastReportId } from "@/lib/consumer-session";
-
-const QUESTIONS = [
-  "Where are you right now?",
-  "What is happening?",
-  "Are you safe, or in immediate danger?",
-];
 
 type TranscriptTurn = { speaker: "ai" | "you"; text: string };
 type UploadState = { id: string; label: string; progress: number; done: boolean; failed: boolean };
 
-function speak(text: string) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.95;
-  window.speechSynthesis.speak(utterance);
+const OPENING_LINE = "Stay calm, help is on the way. What's your emergency?";
+
+// Speaking and listening are chained through promises rather than fired independently
+// so listening only ever starts once the AI has actually finished talking — starting
+// it eagerly let the mic pick up the AI's own voice through the speaker and transcribe
+// it as if the guest had spoken, which is what caused the "looping" on phones (a
+// laptop's TTS is usually quieter relative to its mic gain, so it was less visible there).
+function speak(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      resolve();
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.95;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
-// The Web Speech API's SpeechRecognition constructor isn't in TS's lib.dom.d.ts yet;
-// treat it as an untyped constructor rather than pulling in a third-party ambient types package.
 function getSpeechRecognition(): (new () => any) | undefined {
   if (typeof window === "undefined") return undefined;
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -40,21 +47,96 @@ function ReportPage() {
   const { report_id: existingReportId } = Route.useSearch();
   const navigate = useNavigate();
   const createReport = useServerFn(createConsumerReport);
-  const updateReport = useServerFn(updateConsumerReport);
+  const sendTurn = useServerFn(sendIntakeTurn);
   const token = getConsumerToken();
 
   const [reportId, setReportId] = useState<string | null>(existingReportId || null);
-  const [locationText, setLocationText] = useState("");
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
-  const [questionIndex, setQuestionIndex] = useState(existingReportId ? QUESTIONS.length : 0);
   const [listening, setListening] = useState(false);
+  const [awaitingReply, setAwaitingReply] = useState(false);
+  const [conversationDone, setConversationDone] = useState(Boolean(existingReportId));
+  // Once true, stays true: switches the guest to typing and the AI to on-screen-only
+  // text, so neither side's voice can be overheard by whatever is threatening them.
+  const [dangerMode, setDangerMode] = useState(false);
+  const [textInput, setTextInput] = useState("");
   const [uploads, setUploads] = useState<UploadState[]>([]);
-  const recognitionRef = useRef<InstanceType<NonNullable<ReturnType<typeof getSpeechRecognition>>> | null>(null);
+  const recognitionRef = useRef<any>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunkIndexRef = useRef(0);
+  const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
 
-  // The three things the spec calls out as happening the instant this screen
-  // mounts: create the report, capture GPS, and start speaking to the guest.
+  const listenOnce = (): Promise<string | null> =>
+    new Promise((resolve) => {
+      const Recognition = getSpeechRecognition();
+      if (!Recognition) {
+        resolve(null);
+        return;
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // already stopped
+        }
+      }
+      const recognition = new Recognition();
+      recognition.lang = "en-NG";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      let settled = false;
+      const finish = (text: string | null) => {
+        if (settled) return;
+        settled = true;
+        recognitionRef.current = null;
+        setListening(false);
+        resolve(text);
+      };
+      recognition.onresult = (event: any) => finish(event.results?.[0]?.[0]?.transcript || null);
+      recognition.onerror = () => finish(null);
+      recognition.onend = () => finish(null);
+      recognitionRef.current = recognition;
+      setListening(true);
+      recognition.start();
+    });
+
+  const runTurn = async (guestText: string) => {
+    if (!reportId || !token || awaitingReply) return;
+    setTranscript((prev) => [...prev, { speaker: "you", text: guestText }]);
+    historyRef.current = [...historyRef.current, { role: "user", content: guestText }];
+    setAwaitingReply(true);
+    try {
+      const result = await sendTurn({
+        data: { token, report_id: reportId, transcript: guestText, conversation_history: historyRef.current },
+      });
+      const dangerNow = dangerMode || result.danger_detected;
+      if (result.danger_detected) setDangerMode(true);
+
+      const spoken = [result.spoken_response, result.follow_up_question].filter(Boolean).join(" ");
+      setTranscript((prev) => [...prev, { speaker: "ai", text: spoken }]);
+      historyRef.current = [...historyRef.current, { role: "assistant", content: spoken }];
+
+      if (!result.follow_up_question) {
+        setConversationDone(true);
+      }
+
+      if (dangerNow) {
+        // No audible AI voice, no mic — everything from here is silent and on-screen.
+        return;
+      }
+      await speak(spoken);
+      if (result.follow_up_question) {
+        const nextAnswer = await listenOnce();
+        if (nextAnswer) void runTurn(nextAnswer);
+      }
+    } finally {
+      setAwaitingReply(false);
+    }
+  };
+
+  // The three things happening the instant this screen mounts: create the incident,
+  // capture GPS (best-effort — an emergency report must never block on location), and
+  // start talking to the guest.
   useEffect(() => {
     if (existingReportId) return;
     let cancelled = false;
@@ -66,8 +148,12 @@ function ReportPage() {
       if (cancelled) return;
       setReportId(result.report_id);
       setLastReportId(result.report_id);
-      speak("Help is on the way. Where are you right now?");
-      setTranscript([{ speaker: "ai", text: QUESTIONS[0] }]);
+      setTranscript([{ speaker: "ai", text: OPENING_LINE }]);
+      historyRef.current = [{ role: "assistant", content: OPENING_LINE }];
+      await speak(OPENING_LINE);
+      if (cancelled) return;
+      const firstAnswer = await listenOnce();
+      if (firstAnswer && !cancelled) void runTurn(firstAnswer);
     })();
     return () => {
       cancelled = true;
@@ -75,36 +161,11 @@ function ReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const submitAnswer = async (text: string) => {
-    if (!reportId) return;
-    setTranscript((prev) => [...prev, { speaker: "you", text }]);
-    const field = questionIndex === 0 ? { location_text: text } : { description: text };
-    await updateReport({ data: { token: token || "", report_id: reportId, ai_transcription: text, ...field } });
-    if (questionIndex === 0) setLocationText(text);
-    const next = questionIndex + 1;
-    setQuestionIndex(next);
-    if (next < QUESTIONS.length) {
-      speak(QUESTIONS[next]);
-      setTranscript((prev) => [...prev, { speaker: "ai", text: QUESTIONS[next] }]);
-    }
-  };
-
-  const startListening = () => {
-    const Recognition = getSpeechRecognition();
-    if (!Recognition) return;
-    const recognition = new Recognition();
-    recognition.lang = "en-NG";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event: any) => {
-      const text = event.results[0]?.[0]?.transcript;
-      if (text) void submitAnswer(text);
-    };
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
-    recognitionRef.current = recognition;
-    setListening(true);
-    recognition.start();
+  const submitTyped = () => {
+    const text = textInput.trim();
+    if (!text) return;
+    setTextInput("");
+    void runTurn(text);
   };
 
   const addUpload = (id: string, label: string) => setUploads((prev) => [...prev, { id, label, progress: 0, done: false, failed: false }]);
@@ -163,16 +224,12 @@ function ReportPage() {
         Emergency — sending now
       </div>
 
-      <div>
-        <label className="text-xs uppercase tracking-wider text-slate-500">Location</label>
-        <input
-          value={locationText}
-          onChange={(e) => setLocationText(e.target.value)}
-          onBlur={() => reportId && token && void updateReport({ data: { token, report_id: reportId, location_text: locationText } })}
-          placeholder="Detected, or type your location"
-          className="mt-1 w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-red-500 focus:outline-none"
-        />
-      </div>
+      {dangerMode && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          Switched to silent mode — type instead of speaking. Security has been notified.
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
         {transcript.map((turn, i) => (
@@ -181,15 +238,49 @@ function ReportPage() {
             {turn.text}
           </div>
         ))}
-        {questionIndex < QUESTIONS.length && reportId && (
-          <button
-            type="button"
-            onClick={startListening}
-            disabled={listening}
-            className="mt-1 flex items-center justify-center gap-2 self-start rounded-lg border border-white/15 px-3 py-2 text-xs disabled:opacity-50"
-          >
-            <Mic className="h-3.5 w-3.5" /> {listening ? "Listening…" : "Tap to answer"}
-          </button>
+        {awaitingReply && (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> …
+          </div>
+        )}
+
+        {!conversationDone && reportId && !awaitingReply && (
+          dangerMode ? (
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitTyped()}
+                placeholder="Type here…"
+                autoFocus
+                className="flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-500 focus:outline-none"
+              />
+              <button type="button" onClick={submitTyped} disabled={!textInput.trim()} className="rounded-lg bg-amber-600 p-2 text-white disabled:opacity-40">
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="mt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const text = await listenOnce();
+                  if (text) void runTurn(text);
+                }}
+                disabled={listening}
+                className="flex items-center justify-center gap-2 self-start rounded-lg border border-white/15 px-3 py-2 text-xs disabled:opacity-50"
+              >
+                <Mic className="h-3.5 w-3.5" /> {listening ? "Listening…" : "Tap to answer"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDangerMode(true)}
+                className="flex items-center justify-center gap-1.5 self-start rounded-lg border border-white/10 px-2.5 py-2 text-[11px] text-slate-400"
+              >
+                <Keyboard className="h-3 w-3" /> Type instead
+              </button>
+            </div>
+          )
         )}
       </div>
 

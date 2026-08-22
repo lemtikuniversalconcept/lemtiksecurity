@@ -12,6 +12,13 @@ const REASON_MESSAGES: Record<string, string> = {
   outside_premises: "This code only works on the premises. Please try again once you're inside.",
 };
 
+const LOCATION_ERROR_MESSAGES: Record<string, string> = {
+  denied: "We need your location to confirm you're on the premises. Please allow location access in your browser settings, then try again.",
+  timeout: "Could not get your location in time. Please try again.",
+  unavailable: "Could not determine your location. Please try again.",
+  unsupported: "Your browser doesn't support location. Please ask reception for help.",
+};
+
 export const Route = createFileRoute("/consumer/activate")({
   validateSearch: (search: Record<string, unknown>) => ({
     token: typeof search.token === "string" ? search.token : undefined,
@@ -44,7 +51,14 @@ function ActivatePage() {
       });
       if (!result.valid) {
         setStatus("error");
-        setError(REASON_MESSAGES[result.reason] || "Could not activate this code. Please try again.");
+        // A geofence rejection when we never actually got a location reading is really
+        // a location-permission problem wearing an "outside_premises" costume — tell
+        // the guest the true, actionable reason instead of the confusing generic one.
+        if (result.reason === "outside_premises" && position.error) {
+          setError(LOCATION_ERROR_MESSAGES[position.error]);
+        } else {
+          setError(REASON_MESSAGES[result.reason] || "Could not activate this code. Please try again.");
+        }
         return;
       }
       setConsumerSession(token, {
