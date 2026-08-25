@@ -174,20 +174,26 @@ function PatrolDetail() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["shifts", id] }),
   });
 
-  if (isLoading || !data) {
-    return <div className="rounded-lg border border-border bg-card p-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading patrol…</div>;
-  }
-  const p = data.patrol as any;
-  const archived = !!p.archived_at;
+  // Declared before the isLoading/!data early return below (using data?.patrol
+  // rather than the later-defined `p`) — a hook after a conditional return changes
+  // the hook count between the loading and loaded renders, which is a Rules of
+  // Hooks violation (React error #310, crashes the whole patrol detail page).
   const routeStats = useMemo(() => {
-    const totalWaypoints = Math.max(p.waypoints ?? waypoints.length, waypoints.length, 1);
-    const checked = Number(p.checked_in ?? 0);
+    const p = data?.patrol as any;
+    const totalWaypoints = Math.max(p?.waypoints ?? waypoints.length, waypoints.length, 1);
+    const checked = Number(p?.checked_in ?? 0);
     const completion = Math.round((checked / totalWaypoints) * 100);
     const activeShifts = shifts.filter((s: any) => s.status === "active").length;
     const lateCheckins = checkins.filter((c: any) => c.status === "late" || c.status === "out_of_zone").length;
     const avgLate = checkins.length ? Math.round(checkins.reduce((acc: number, c: any) => acc + (c.minutes_late ?? 0), 0) / checkins.length) : 0;
     return { totalWaypoints, checked, completion, activeShifts, lateCheckins, avgLate };
-  }, [p.waypoints, p.checked_in, waypoints.length, shifts, checkins]);
+  }, [data?.patrol, waypoints.length, shifts, checkins]);
+
+  if (isLoading || !data) {
+    return <div className="rounded-lg border border-border bg-card p-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading patrol…</div>;
+  }
+  const p = data.patrol as any;
+  const archived = !!p.archived_at;
 
   return (
     <div className="space-y-5">
