@@ -404,6 +404,20 @@ function IncidentDetailPage() {
     enabled: !!inc,
   });
 
+  // Records the operator's decision on the AI's dispatch recommendation — accepted
+  // as-is, or edited with a note on what changed and why. Written as an
+  // incident_activity row of kind "operator_decision", which pairs with the AI's
+  // own "ai_recommendation" row (written by relationship_api when orchestration
+  // completes) to form the accept/edit accountability trail. Both kinds are
+  // append-only at the database level once written.
+  // Declared here (before the loading/error early returns below) rather than
+  // further down where it's used — a hook after a conditional return changes
+  // the hook count between the loading and loaded renders, which is a Rules of
+  // Hooks violation (React error #310, crashes the whole incident detail page).
+  const [decisionNote, setDecisionNote] = useState("");
+  const [editingDecision, setEditingDecision] = useState(false);
+  const [recordingDecision, setRecordingDecision] = useState(false);
+
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -778,16 +792,6 @@ function IncidentDetailPage() {
     });
     await invalidate();
   };
-
-  // Records the operator's decision on the AI's dispatch recommendation — accepted
-  // as-is, or edited with a note on what changed and why. Written as an
-  // incident_activity row of kind "operator_decision", which pairs with the AI's
-  // own "ai_recommendation" row (written by relationship_api when orchestration
-  // completes) to form the accept/edit accountability trail. Both kinds are
-  // append-only at the database level once written.
-  const [decisionNote, setDecisionNote] = useState("");
-  const [editingDecision, setEditingDecision] = useState(false);
-  const [recordingDecision, setRecordingDecision] = useState(false);
 
   const recordOperatorDecision = async (decision: "accepted" | "edited", note?: string) => {
     setRecordingDecision(true);
