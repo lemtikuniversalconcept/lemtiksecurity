@@ -4,8 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { Bell, CheckCircle2, Loader2, Mail, MessageCircle, Mic2, Radar, Settings2, ShieldAlert, Smartphone, TriangleAlert, XCircle } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { listAlerts, listMyNotifications, markAllNotificationsRead, markNotificationRead, getAlertPreferences, updateAlertPreferences } from "@/lib/alerts.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 
@@ -46,8 +45,8 @@ const ALL_CHANNELS = ["in-app", "whatsapp", "sms", "email", "push"] as const;
 
 export const Route = createFileRoute("/app/alerts")({
   head: () => ({ meta: [{ title: "Alert Centre · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     requireSectionAccess(access, ["security_manager", "operator"]);
     return { access };
   },

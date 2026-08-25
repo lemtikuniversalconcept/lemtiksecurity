@@ -3,9 +3,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo } from "react";
 import type { ComponentType, ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { getPlatformSystemHealth, requestPlatformServiceRestart } from "@/lib/platform.system.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import {
   Activity,
   CircleAlert,
@@ -25,8 +24,8 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 
 export const Route = createFileRoute("/app/admin/system")({
   head: () => ({ meta: [{ title: "System health · Lemtik Admin" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     requireSectionAccess(access, ["lemtik_admin"]);
     return { appAccess: access };
   },

@@ -2,10 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { listOrgAuditLog } from "@/lib/audit.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import {
   Activity,
   BadgeAlert,
@@ -23,8 +22,8 @@ import {
 
 export const Route = createFileRoute("/app/audit")({
   head: () => ({ meta: [{ title: "Audit log · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    requireSectionAccess(await resolveAppAccess(supabase), [
+  beforeLoad: async ({ context }) => {
+    requireSectionAccess(context.appAccess, [
       "security_manager",
       "client_admin",
     ]);

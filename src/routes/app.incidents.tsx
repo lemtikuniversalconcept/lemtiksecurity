@@ -13,7 +13,7 @@ import { orgRoom, publishRealtimeEvent } from "@/lib/realtime.events";
 import { IncidentWizardForm } from "@/components/IncidentWizardForm";
 import { type IncidentSubmitPayload } from "@/components/IncidentReportForm";
 import * as offline from "@/lib/offlineQueue";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { loadStoredCommandIntent } from "@/lib/command-memory";
 import { Plus, Filter, Loader2, Download, WifiOff, CloudUpload, ArrowUpDown, Search, X, Eye, UserRoundPlus, ListChecks, BrainCircuit, ChevronLeft, ChevronRight } from "lucide-react";
 import type { AiQueryResult } from "@/lib/ai-commands.functions";
@@ -35,8 +35,8 @@ type IncidentRow = {
 
 export const Route = createFileRoute("/app/incidents")({
   head: () => ({ meta: [{ title: "Incidents · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, [
       "security_manager",
       "operator",

@@ -2,15 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { listPlatformAuditLog } from "@/lib/platform.audit.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { Download, FileJson, Loader2, Search, ShieldAlert } from "lucide-react";
 
 export const Route = createFileRoute("/app/admin/audit")({
   head: () => ({ meta: [{ title: "Platform audit · Lemtik Admin" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     requireSectionAccess(access, ["lemtik_admin"]);
     return { appAccess: access };
   },

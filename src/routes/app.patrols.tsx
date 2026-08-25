@@ -8,8 +8,7 @@ import { createPatrol, listCheckIns, listPatrols, listShifts, scheduleShift } fr
 import { getMapboxToken } from "@/lib/config.functions";
 import { listLocations } from "@/lib/orgs.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { supabase } from "@/integrations/supabase/client";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { loadStoredCommandIntent } from "@/lib/command-memory";
 import type { AiQueryResult } from "@/lib/ai-commands.functions";
 import {
@@ -36,8 +35,8 @@ import {
 
 export const Route = createFileRoute("/app/patrols")({
   head: () => ({ meta: [{ title: "Patrols · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },

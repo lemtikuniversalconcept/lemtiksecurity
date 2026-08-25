@@ -3,16 +3,15 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { getCameras, ingestFrame, analyzeJudgement, verifyVision, normalizeCameraList, type CCTVFrameResult } from "@/lib/cctv.functions";
 import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/cctv")({
   head: () => ({ meta: [{ title: "CCTV Control Room · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator"]);
     return { appAccess };
   },

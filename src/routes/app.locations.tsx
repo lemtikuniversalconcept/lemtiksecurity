@@ -2,15 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { listLocations, upsertLocation, deleteLocation } from "@/lib/orgs.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { Loader2, Plus, X, MapPin, Save, Radar, Layers, ShieldAlert } from "lucide-react";
 
 export const Route = createFileRoute("/app/locations")({
   head: () => ({ meta: [{ title: "Locations · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    requireSectionAccess(await resolveAppAccess(supabase), [
+  beforeLoad: async ({ context }) => {
+    requireSectionAccess(context.appAccess, [
       "security_manager",
       "client_admin",
     ]);

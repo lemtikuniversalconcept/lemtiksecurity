@@ -4,12 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { supabase } from "@/integrations/supabase/client";
 import { listIncidents } from "@/lib/incidents.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { getBriefings, generateBriefing } from "@/lib/intelligence.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { type IncidentType } from "@/lib/mockData";
 import { Download, FileText, Filter, Loader2, MapPinned, Radar, Search, ShieldAlert, Sparkles, ExternalLink, ChevronRight, X, BrainCircuit } from "lucide-react";
 
@@ -62,8 +61,8 @@ type BriefEntry = {
 
 export const Route = createFileRoute("/app/intelligence")({
   head: () => ({ meta: [{ title: "Intelligence Feed · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },

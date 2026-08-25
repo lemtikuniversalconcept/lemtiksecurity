@@ -7,7 +7,7 @@ import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols } from "@/lib/patrols.functions";
 import { generateReportSummary, sendReportDelivery } from "@/lib/reports.functions";
 import { getActiveOrg, getSettings } from "@/lib/orgs.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { type IncidentType, typeMeta } from "@/lib/mockData";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -150,8 +150,8 @@ const REPORT_TEMPLATES: ReportTemplate[] = [
 
 export const Route = createFileRoute("/app/report-centre")({
   head: () => ({ meta: [{ title: "Report Centre · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },

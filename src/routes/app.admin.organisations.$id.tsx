@@ -2,14 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import {
   deletePlatformOrganisation,
   getPlatformOrganisation,
   setPlatformOrganisationStatus,
   updatePlatformOrganisation,
 } from "@/lib/platform.organisations.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import {
   ArrowLeft,
   CalendarDays,
@@ -52,8 +51,8 @@ const STATUS_OPTIONS = [
 
 export const Route = createFileRoute("/app/admin/organisations/$id")({
   head: () => ({ meta: [{ title: "Organisation · Lemtik Admin" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     requireSectionAccess(access, ["lemtik_admin"]);
     return { appAccess: access };
   },

@@ -2,9 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { getPlatformBilling, updateTierPricing } from "@/lib/platform.billing.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { Area, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CalendarDays, Loader2, Mail, Percent, RefreshCw, SlidersHorizontal, TrendingUp } from "lucide-react";
 
@@ -27,8 +26,8 @@ function featuresList(value: unknown): string[] {
 
 export const Route = createFileRoute("/app/admin/billing")({
   head: () => ({ meta: [{ title: "Billing · Lemtik Admin" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     requireSectionAccess(access, ["lemtik_admin"]);
     return { appAccess: access };
   },

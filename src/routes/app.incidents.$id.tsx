@@ -30,7 +30,7 @@ import {
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { orgRoom, officerRoom, publishRealtimeEvent } from "@/lib/realtime.events";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import {
   ArrowLeft,
   BrainCircuit,
@@ -74,8 +74,8 @@ type AnyRecord = Record<string, any>;
 
 export const Route = createFileRoute("/app/incidents/$id")({
   head: () => ({ meta: [{ title: "Incident · Lemtik SOD" }] }),
-  beforeLoad: async ({ params }) => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ params, context }) => {
+    const access = context.appAccess;
     if (access.specRole === "field_officer") {
       const [{ data: incident }, { data: profile }] = await Promise.all([
         supabase

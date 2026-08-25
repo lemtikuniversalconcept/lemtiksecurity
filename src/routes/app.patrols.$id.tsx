@@ -11,8 +11,7 @@ import {
 import { getMapboxToken } from "@/lib/config.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { orgRoom, publishRealtimeEvent } from "@/lib/realtime.events";
-import { supabase } from "@/integrations/supabase/client";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import {
   ArrowLeft, Plus, Trash2, Save, Copy, Archive, ArchiveRestore, Loader2,
   Crosshair, CalendarPlus, CheckCircle2, AlertTriangle, Siren, PlayCircle, StopCircle, MapPin,
@@ -20,8 +19,8 @@ import {
 
 export const Route = createFileRoute("/app/patrols/$id")({
   head: () => ({ meta: [{ title: "Patrol · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, [
       "security_manager",
       "operator",

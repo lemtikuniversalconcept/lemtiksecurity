@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase } from "@/integrations/supabase/client";
 import { listPatrols } from "@/lib/patrols.functions";
 import { listIncidents } from "@/lib/incidents.functions";
 import {
@@ -21,7 +20,7 @@ import {
   getFuelReserve,
 } from "@/lib/inventory.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { severityMeta } from "@/lib/mockData";
 import {
   Activity,
@@ -127,8 +126,8 @@ type InventoryState = {
 
 export const Route = createFileRoute("/app/inventory")({
   head: () => ({ meta: [{ title: "Inventory · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },

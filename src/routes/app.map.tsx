@@ -12,7 +12,7 @@ import { getMapboxToken } from "@/lib/config.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { severityMeta, typeMeta, statusMeta, type Severity, type IncidentType, type IncidentStatus } from "@/lib/mockData";
 import { SeverityBadge } from "@/components/SeverityBadge";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
 import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 import {
@@ -23,8 +23,8 @@ import {
 
 export const Route = createFileRoute("/app/map")({
   head: () => ({ meta: [{ title: "Live Map · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const appAccess = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const appAccess = context.appAccess;
     requireSectionAccess(appAccess, [
       "security_manager",
       "operator",

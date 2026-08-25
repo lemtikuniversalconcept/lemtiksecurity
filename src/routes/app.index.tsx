@@ -4,14 +4,13 @@ import { useServerFn } from "@tanstack/react-start";
 import { getPlatformDashboard } from "@/lib/platform.functions";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { ArrowUpRight, Activity, ShieldAlert, Clock, MapPin, Radar, Building2, Globe2, Server, CircleDotDashed, AlertTriangle, ReceiptText, RefreshCw } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import { CommanderDashboard } from "@/components/dashboard/CommanderDashboard";
 
 export const Route = createFileRoute("/app/")({
   head: () => ({ meta: [{ title: "Overview · Lemtik SOD" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     if (access.specRole === "field_officer") {
       throw redirect({ to: "/officer/home" });
     }

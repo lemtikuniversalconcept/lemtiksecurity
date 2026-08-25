@@ -2,14 +2,13 @@ import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tan
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import {
   createPlatformOrganisation,
   deletePlatformOrganisation,
   listPlatformOrganisations,
   setPlatformOrganisationStatus,
 } from "@/lib/platform.organisations.functions";
-import { resolveAppAccess, requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess } from "@/lib/rbac";
 import {
   Building2,
   CalendarDays,
@@ -64,8 +63,8 @@ function fmtDate(iso?: string | null) {
 
 export const Route = createFileRoute("/app/admin/organisations")({
   head: () => ({ meta: [{ title: "Organisations · Lemtik Admin" }] }),
-  beforeLoad: async () => {
-    const access = await resolveAppAccess(supabase);
+  beforeLoad: async ({ context }) => {
+    const access = context.appAccess;
     requireSectionAccess(access, ["lemtik_admin"]);
     return { appAccess: access };
   },
