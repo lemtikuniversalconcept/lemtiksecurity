@@ -52,7 +52,7 @@ export function AppShell({ access }: { access: AppAccess }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [me, setMe] = useState<{ name: string; role: string }>({
-    name: "Operator",
+    name: access.displayName || access.email || "Operator",
     role: access.roleLabel,
   });
   const [clock, setClock] = useState<string>("");
@@ -92,18 +92,12 @@ export function AppShell({ access }: { access: AppAccess }) {
   }, []);
 
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data.user) return;
-      const { data: prof } = await supabase
-        .from("profiles").select("display_name").eq("user_id", data.user.id).maybeSingle();
-      setMe((m) => ({ ...m, name: prof?.display_name || data.user!.email || "Operator" }));
-    })();
-  }, []);
-
-  useEffect(() => {
-    setMe((m) => ({ ...m, role: access.roleLabel }));
-  }, [access.roleLabel]);
+    setMe((m) => ({
+      ...m,
+      name: access.displayName || access.email || "Operator",
+      role: access.roleLabel,
+    }));
+  }, [access.displayName, access.email, access.roleLabel]);
 
   const signOut = async () => {
     await supabase.auth.signOut();

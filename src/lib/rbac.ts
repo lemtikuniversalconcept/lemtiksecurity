@@ -6,6 +6,8 @@ export type SpecRole = "security_manager" | "operator" | "field_officer" | "clie
 
 export interface AppAccess {
   userId: string;
+  email: string | null;
+  displayName: string | null;
   orgId: string;
   orgName: string;
   dbRole: DbRole;
@@ -74,21 +76,35 @@ export function requireSectionAccess(access: AppAccess, allowedRoles: SpecRole[]
 }
 
 export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: string): Promise<AppAccess> {
+  // getUser() (not getSession()) is deliberate: it revalidates the token against the
+  // Supabase Auth server rather than trusting whatever is sitting in local storage,
+  // which matters on an access-control path like this one.
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) {
     throw redirect({ to: "/login", search: { redirect: redirectPath } });
   }
 
-  const { data: directRole } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", data.user.id)
-    .eq("role", "lemtik_admin")
-    .maybeSingle();
+  // These two only depend on the user id, not on each other, so run them together
+  // instead of waiting on one before starting the next.
+  const [{ data: directRole }, { data: profile, error: profileError }] = await Promise.all([
+    supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.user.id)
+      .eq("role", "lemtik_admin")
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("active_organisation_id, display_name")
+      .eq("user_id", data.user.id)
+      .maybeSingle(),
+  ]);
 
   if (directRole) {
     return {
       userId: data.user.id,
+      email: data.user.email ?? null,
+      displayName: profile?.display_name ?? null,
       orgId: "",
       orgName: "Lemtik Platform",
       dbRole: "lemtik_admin",
@@ -96,12 +112,6 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
       roleLabel: roleLabel("lemtik_admin"),
     };
   }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("active_organisation_id")
-    .eq("user_id", data.user.id)
-    .maybeSingle();
 
   if (profileError) {
     throw new Error("Unable to resolve active organisation.");
@@ -129,6 +139,8 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
 
   return {
     userId: data.user.id,
+    email: data.user.email ?? null,
+    displayName: profile.display_name ?? null,
     orgId: profile.active_organisation_id,
     orgName: org?.name ?? "Active organisation",
     dbRole,

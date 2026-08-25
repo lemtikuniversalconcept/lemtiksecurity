@@ -26,6 +26,10 @@ export const getRouter = () => {
     defaultPreloadStaleTime: 30 * 1000,
     // Preload routes on link hover for instant navigation feel
     defaultPreload: "intent",
+    // Route matches (incl. beforeLoad, e.g. resolveAppAccess's Supabase round trips)
+    // stay fresh for 60s instead of re-running on every single navigation.
+    // Auth changes already force a refresh via router.invalidate() in __root.tsx.
+    defaultStaleTime: 60 * 1000,
   });
 
   return router;
