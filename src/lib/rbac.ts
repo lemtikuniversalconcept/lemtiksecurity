@@ -1,5 +1,21 @@
 import { redirect } from "@tanstack/react-router";
+import { createIsomorphicFn } from "@tanstack/react-start";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createServerSupabase } from "@/integrations/supabase/server";
+
+// beforeLoad runs on the server during SSR (hard nav / refresh / deep link),
+// where the browser client passed into resolveAppAccess has no session to
+// read — its cookie jar only exists in `document`, which doesn't exist
+// server-side. createIsomorphicFn is what lets server.ts's cookie-reading
+// client (and its @tanstack/react-start/server import) exist at all without
+// the bundler rejecting it as reachable from client code: on the client this
+// resolves to the plain browser client passed in, on the server it resolves
+// to a fresh per-request client that reads/writes the same session cookies
+// the browser has, so SSR sees the real session instead of always treating
+// the request as logged out.
+const getRequestSupabase = createIsomorphicFn()
+  .server((browserClient: SupabaseClient) => createServerSupabase() as SupabaseClient)
+  .client((browserClient: SupabaseClient) => browserClient);
 
 export type DbRole = "manager" | "supervisor" | "officer" | "client_admin" | "lemtik_admin" | "security_forensic_analyst";
 export type SpecRole = "security_manager" | "operator" | "field_officer" | "client_admin" | "lemtik_admin" | "security_forensic_analyst";
@@ -76,6 +92,8 @@ export function requireSectionAccess(access: AppAccess, allowedRoles: SpecRole[]
 }
 
 export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: string): Promise<AppAccess> {
+  supabase = getRequestSupabase(supabase);
+
   // getUser() (not getSession()) is deliberate: it revalidates the token against the
   // Supabase Auth server rather than trusting whatever is sitting in local storage,
   // which matters on an access-control path like this one.
