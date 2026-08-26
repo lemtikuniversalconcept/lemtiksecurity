@@ -104,6 +104,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "icon",
         href: "/favicon.ico",
       },
+      // Mapbox GL only starts its own DNS/TLS handshake once the map component
+      // mounts (Live Map, Patrols, patrol detail, Intelligence, officer nav/patrol
+      // all embed it) — warming the connection during the initial page load
+      // instead saves that round trip off the map's cold-start time.
+      {
+        rel: "preconnect",
+        href: "https://api.mapbox.com",
+        crossOrigin: "anonymous",
+      },
+      {
+        rel: "preconnect",
+        href: "https://events.mapbox.com",
+        crossOrigin: "anonymous",
+      },
     ],
   }),
   shellComponent: RootShell,
