@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveOrgId } from "@/lib/orgs.server";
-import { requestAutonomousController } from "@/lib/autonomous-controller";
+import { requestRelationshipApi } from "@/lib/relationship-api";
 
 export type ConnectionType = "REST_API" | "MQTT" | "HARDWARE_BRIDGE";
 
@@ -42,6 +42,17 @@ export const KNOWN_DEVICE_TYPES = [
   "sensor",
 ] as const;
 
+type GatewayEnvelope<T = unknown> = { status?: string; data?: T; error?: string };
+
+// Everything here goes through relationship_api, never straight to autonomouscontroller — it's
+// the single audited/authenticated choke point for every backend service, matching the rest of
+// the dashboard's server functions (cameras, cctv, incidents, etc).
+function unwrapOrThrow<T>(result: GatewayEnvelope<T> | null, fallbackError: string): T {
+  if (!result) throw new Error(fallbackError);
+  if (result.status === "success") return result.data as T;
+  throw new Error(result.error || fallbackError);
+}
+
 const connectionConfigSchema = z.record(z.string(), z.any());
 
 const deviceInput = z.object({
@@ -68,16 +79,25 @@ function slugId(name: string) {
 
 export const listDevices = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const result = await requestAutonomousController<DeviceRecord[]>("/devices", { method: "GET" });
-    return result ?? [];
+  .handler(async ({ context }) => {
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    const result = await requestRelationshipApi<GatewayEnvelope<DeviceRecord[]>>("/api/v1/devices", {
+      method: "GET",
+      query: { org_id: orgId },
+    });
+    if (!result || result.status !== "success") return [];
+    return result.data ?? [];
   });
 
 export const getDevice = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => z.object({ device_id: z.string().min(1) }).parse(data))
   .handler(async ({ data }) => {
-    return requestAutonomousController<DeviceRecord>(`/devices/${encodeURIComponent(data.device_id)}`, { method: "GET" });
+    const result = await requestRelationshipApi<GatewayEnvelope<DeviceRecord>>(
+      `/api/v1/devices/${encodeURIComponent(data.device_id)}`,
+      { method: "GET" },
+    );
+    return unwrapOrThrow(result, "Failed to load device.");
   });
 
 export const registerDevice = createServerFn({ method: "POST" })
@@ -85,13 +105,10 @@ export const registerDevice = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => deviceInput.parse(data))
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
-    const result = await requestAutonomousController<DeviceRecord>("/devices", {
+    const result = await requestRelationshipApi<GatewayEnvelope<DeviceRecord>>("/api/v1/devices", {
       body: { ...data, id: data.id || slugId(data.name), org_id: orgId },
     });
-    if (!result) {
-      throw new Error("Autonomous Controller is not configured (AUTONOMOUS_CONTROLLER_URL/KEY missing).");
-    }
-    return result;
+    return unwrapOrThrow(result, "Relationship API is not configured (RELATIONSHIP_API_URL/KEY missing).");
   });
 
 export const updateDevice = createServerFn({ method: "POST" })
@@ -100,19 +117,21 @@ export const updateDevice = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const { id, ...payload } = data;
-    return requestAutonomousController<DeviceRecord>(`/devices/${encodeURIComponent(id)}`, {
+    const result = await requestRelationshipApi<GatewayEnvelope<DeviceRecord>>(`/api/v1/devices/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: { ...payload, org_id: orgId },
     });
+    return unwrapOrThrow(result, "Failed to update device.");
   });
 
 export const checkDeviceConnectivity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => z.object({ device_id: z.string().min(1) }).parse(data))
   .handler(async ({ data }) => {
-    return requestAutonomousController<{ device_id: string; found: boolean; connectivity?: Record<string, any> }>(
-      `/devices/${encodeURIComponent(data.device_id)}/check`,
+    const result = await requestRelationshipApi<GatewayEnvelope<{ device_id: string; found: boolean; connectivity?: Record<string, any> }>>(
+      `/api/v1/devices/${encodeURIComponent(data.device_id)}/check`,
     );
+    return unwrapOrThrow(result, "Connectivity check failed.");
   });
 
 const executeActionInput = z.object({
@@ -134,25 +153,18 @@ export const executeDeviceAction = createServerFn({ method: "POST" })
       .maybeSingle();
     const automationMode = Number((settings as any)?.automation_mode ?? 1);
 
-    const result = await requestAutonomousController<Record<string, any>>("/api/v1/execute", {
-      body: {
-        request_type: "execute_action",
-        request_id: `req-${crypto.randomUUID()}`,
-        org_id: orgId,
-        automation_mode: automationMode,
-        action: {
+    const result = await requestRelationshipApi<GatewayEnvelope<Record<string, any>>>(
+      `/api/v1/devices/${encodeURIComponent(data.device_id)}/execute`,
+      {
+        body: {
+          org_id: orgId,
+          automation_mode: automationMode,
           action_key: data.action_key,
-          device_id: data.device_id,
           parameters: data.parameters ?? {},
-        },
-        authorisation: {
           requested_by: context.userId,
           incident_id: data.incident_id ?? null,
         },
       },
-    });
-    if (!result) {
-      throw new Error("Autonomous Controller is not configured (AUTONOMOUS_CONTROLLER_URL/KEY missing).");
-    }
-    return result;
+    );
+    return unwrapOrThrow(result, "Relationship API is not configured (RELATIONSHIP_API_URL/KEY missing).");
   });

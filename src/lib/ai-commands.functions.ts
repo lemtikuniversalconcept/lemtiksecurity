@@ -2,7 +2,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveOrgId } from "@/lib/orgs.server";
-import { requestAutonomousController } from "@/lib/autonomous-controller";
 
 export type CommandScope = "incidents" | "patrols" | "targets" | "intelligence" | "system";
 
@@ -458,27 +457,15 @@ export const submitApprovalDecision = createServerFn({ method: "POST" })
     let controllerWarning: string | null = null;
 
     if (isAccepted) {
-      // Best-effort: the Relationship API approval above is the record of
-      // truth. A downstream controller failure (unreachable, misconfigured,
-      // or a request shape it rejects) must not blow up an approval that
-      // already succeeded — surface it as a warning instead.
-      try {
-        await requestAutonomousController("/api/v1/actions/execute", {
-          body: {
-            actor_id: context.userId,
-            decision: data.decision,
-            proposal_ids: data.proposal_ids,
-            note: data.note ?? null,
-            delay_minutes: data.delay_minutes ?? null,
-            modification: data.modification ?? null,
-            command_text: data.command_text ?? null,
-            source: "c4isod-dashboard",
-          },
-        });
-      } catch (err) {
-        controllerWarning = err instanceof Error ? err.message : "Autonomous controller dispatch failed.";
-        console.error("[ai-commands] autonomous controller dispatch failed", err);
-      }
+      // Dispatching an approved AI proposal to the specific device(s) it references requires
+      // resolving proposal_ids -> {device_id, action_key} pairs, which nothing in this codebase
+      // does yet. This previously called a route that never existed on autonomouscontroller
+      // (/api/v1/actions/execute, always 404) and bypassed relationship_api entirely — dead code
+      // silently swallowed by the try/catch below. Removed rather than left unreachable.
+      // Approval is still recorded via /api/v1/ai/approve above; per-device dispatch for a
+      // specific action is the working, real path — see devices.functions.ts's
+      // executeDeviceAction, which does go through relationship_api's /devices/:id/execute.
+      controllerWarning = "Approval recorded. Automatic device dispatch for AI proposals is not yet implemented — use Devices/Sensors to act on a specific device.";
     }
 
     return result ?? {
