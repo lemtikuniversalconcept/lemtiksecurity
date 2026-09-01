@@ -99,6 +99,7 @@ function OrgSettings() {
     equipment_thresholds: "",
   });
   const [devicesForm, setDevicesForm] = useState("");
+  const [automationMode, setAutomationMode] = useState(1);
   const [integrationForm, setIntegrationForm] = useState({
     resend_sender: "",
     termii_sender_id: "",
@@ -124,6 +125,7 @@ function OrgSettings() {
     });
     const devices = (settings as any)?.smart_devices ?? [];
     setDevicesForm(JSON.stringify(devices, null, 2));
+    setAutomationMode(Number((settings as any)?.automation_mode ?? 1));
     const integrations = (settings as any)?.integration_config ?? {};
     setIntegrationForm({
       resend_sender: String(integrations.resend_sender ?? ""),
@@ -148,6 +150,7 @@ function OrgSettings() {
         equipment_thresholds: parseEquipmentThresholds(thresholdForm.equipment_thresholds),
       },
       smart_devices: parseSmartDevices(devicesForm),
+      automation_mode: automationMode,
       integration_config: {
         resend_sender: integrationForm.resend_sender || null,
         termii_sender_id: integrationForm.termii_sender_id || null,
@@ -234,7 +237,7 @@ function OrgSettings() {
           ["locations", "Locations"],
           ["alerts", "Alert Configuration"],
           ["thresholds", "Thresholds"],
-          ["devices", "Smart Infrastructure"],
+          ["devices", "Autonomy & Devices"],
           ["integrations", "Integrations"],
           ["subscription", "Subscription"],
         ] as const).map(([key, label]) => (
@@ -358,11 +361,44 @@ function OrgSettings() {
       )}
 
       {activeTab === "devices" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Smart Infrastructure</h2>
-        <TextareaField label="Registered devices (JSON)" value={devicesForm} onChange={setDevicesForm} placeholder='[{"name":"NW Wing CCTV","type":"camera","enabled":true}]' />
+      <section className="rounded-lg border border-border bg-card p-5 space-y-5">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Autonomous Controller policy</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Controls how much the AI is allowed to do on its own before a human has to sign off. This applies to every device registered on the{" "}
+            <Link to="/app/devices" className="text-primary underline underline-offset-2">Devices</Link> page.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          {AUTOMATION_MODES.map((mode) => (
+            <label
+              key={mode.value}
+              className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors ${automationMode === mode.value ? "border-primary bg-primary/5" : "border-border bg-surface hover:border-primary/40"}`}
+            >
+              <input
+                type="radio"
+                name="automation_mode"
+                className="mt-1"
+                checked={automationMode === mode.value}
+                onChange={() => setAutomationMode(mode.value)}
+              />
+              <span>
+                <span className="block text-sm font-medium text-foreground">{mode.label}</span>
+                <span className="block text-xs text-muted-foreground">{mode.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
         <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-          Device entries are stored in `organisation_settings.smart_devices`. Use the JSON list to add, enable, disable, or retarget autonomous devices.
+          Policy automation (mode 2) only ever runs a fixed, pre-approved allowlist automatically: camera view/pan/snapshot and sensor on/off. Physical actuators — doors, gates, elevators, locks, barriers, turnstiles — always require a human approval, in every mode except Emergency Response with a pre-signed playbook.
+        </div>
+
+        <div className="pt-2 border-t border-border">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Legacy device list (advanced)</h3>
+          <p className="mt-1 mb-2 text-xs text-muted-foreground">
+            Superseded by the <Link to="/app/devices" className="text-primary underline underline-offset-2">Devices</Link> page, which registers devices directly with the Autonomous Controller. Kept here read/write for reference only.
+          </p>
+          <TextareaField label="Registered devices (JSON)" value={devicesForm} onChange={setDevicesForm} placeholder='[{"name":"NW Wing CCTV","type":"camera","enabled":true}]' />
         </div>
       </section>
       )}
@@ -627,6 +663,13 @@ function parseEquipmentThresholds(value: string) {
       };
     });
 }
+
+const AUTOMATION_MODES = [
+  { value: 0, label: "Advisory only", description: "The AI can suggest actions but nothing is ever executed automatically." },
+  { value: 1, label: "Human approval required (default)", description: "Every action, including camera/sensor control, needs a signed-off approval before it runs." },
+  { value: 2, label: "Policy automation", description: "A fixed allowlist of low-risk, non-physical actions (camera view/pan/snapshot, sensor on/off) runs immediately without approval. Everything else still requires one." },
+  { value: 3, label: "Emergency response", description: "Pre-approved emergency playbooks execute automatically during a declared emergency." },
+];
 
 function parseSmartDevices(value: string) {
   try {

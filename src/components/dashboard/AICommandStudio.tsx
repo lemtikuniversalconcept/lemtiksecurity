@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { BadgeAlert, CheckCircle2, Clock3, Loader2, MessageSquareMore, ShieldAlert, Sparkles, Target, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -380,13 +381,24 @@ export function HumanApprovalLayer({
         request_id: requestId ?? undefined,
         org_id: orgId ?? undefined,
       };
-      await submitDecision({ data: payload });
+      const result = (await submitDecision({ data: payload })) as { controller_warning?: string | null } | null;
+      if (result?.controller_warning) {
+        toast.warning("Approval recorded, but dispatch to the Autonomous Controller failed", {
+          description: result.controller_warning,
+        });
+      } else {
+        toast.success(decision === "reject" ? "Rejected" : "Approved");
+      }
       onDecision?.(decision, payload.proposal_ids, {
         note: payload.note,
         modification: payload.modification,
         commandText: payload.command_text,
         scope,
         priority: source.priority,
+      });
+    } catch (err) {
+      toast.error("Failed to record decision", {
+        description: err instanceof Error ? err.message : "Unknown error.",
       });
     } finally {
       setBusy(null);

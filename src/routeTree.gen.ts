@@ -37,6 +37,7 @@ import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
 import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
 import { Route as ConsumerActivateRouteImport } from './routes/consumer.activate'
 import { Route as AppUsersRouteImport } from './routes/app.users'
+import { Route as AppSensorsRouteImport } from './routes/app.sensors'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
 import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
 import { Route as AppPatrolsRouteImport } from './routes/app.patrols'
@@ -46,7 +47,7 @@ import { Route as AppLocationsRouteImport } from './routes/app.locations'
 import { Route as AppInventoryRouteImport } from './routes/app.inventory'
 import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
 import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
-import { Route as AppCctvRouteImport } from './routes/app.cctv'
+import { Route as AppDevicesRouteImport } from './routes/app.devices'
 import { Route as AppAuditRouteImport } from './routes/app.audit'
 import { Route as AppAlertsRouteImport } from './routes/app.alerts'
 import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
@@ -204,6 +205,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSensorsRoute = AppSensorsRouteImport.update({
+  id: '/sensors',
+  path: '/sensors',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppReportsRoute = AppReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
@@ -249,9 +255,9 @@ const AppIncidentsRoute = AppIncidentsRouteImport.update({
   path: '/incidents',
   getParentRoute: () => AppRoute,
 } as any)
-const AppCctvRoute = AppCctvRouteImport.update({
-  id: '/cctv',
-  path: '/cctv',
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAuditRoute = AppAuditRouteImport.update({
@@ -347,7 +353,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
-  '/app/cctv': typeof AppCctvRoute
+  '/app/devices': typeof AppDevicesRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
@@ -357,6 +363,7 @@ export interface FileRoutesByFullPath {
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/consumer/activate': typeof ConsumerActivateRoute
   '/consumer/ai': typeof ConsumerAiRoute
@@ -399,7 +406,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
-  '/app/cctv': typeof AppCctvRoute
+  '/app/devices': typeof AppDevicesRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
@@ -409,6 +416,7 @@ export interface FileRoutesByTo {
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/consumer/activate': typeof ConsumerActivateRoute
   '/consumer/ai': typeof ConsumerAiRoute
@@ -456,7 +464,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
-  '/app/cctv': typeof AppCctvRoute
+  '/app/devices': typeof AppDevicesRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
@@ -466,6 +474,7 @@ export interface FileRoutesById {
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/consumer/activate': typeof ConsumerActivateRoute
   '/consumer/ai': typeof ConsumerAiRoute
@@ -514,7 +523,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
-    | '/app/cctv'
+    | '/app/devices'
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
@@ -524,6 +533,7 @@ export interface FileRouteTypes {
     | '/app/patrols'
     | '/app/report-centre'
     | '/app/reports'
+    | '/app/sensors'
     | '/app/users'
     | '/consumer/activate'
     | '/consumer/ai'
@@ -566,7 +576,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
-    | '/app/cctv'
+    | '/app/devices'
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
@@ -576,6 +586,7 @@ export interface FileRouteTypes {
     | '/app/patrols'
     | '/app/report-centre'
     | '/app/reports'
+    | '/app/sensors'
     | '/app/users'
     | '/consumer/activate'
     | '/consumer/ai'
@@ -622,7 +633,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
-    | '/app/cctv'
+    | '/app/devices'
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
@@ -632,6 +643,7 @@ export interface FileRouteTypes {
     | '/app/patrols'
     | '/app/report-centre'
     | '/app/reports'
+    | '/app/sensors'
     | '/app/users'
     | '/consumer/activate'
     | '/consumer/ai'
@@ -877,6 +889,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/sensors': {
+      id: '/app/sensors'
+      path: '/sensors'
+      fullPath: '/app/sensors'
+      preLoaderRoute: typeof AppSensorsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/reports': {
       id: '/app/reports'
       path: '/reports'
@@ -940,11 +959,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIncidentsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/cctv': {
-      id: '/app/cctv'
-      path: '/cctv'
-      fullPath: '/app/cctv'
-      preLoaderRoute: typeof AppCctvRouteImport
+    '/app/devices': {
+      id: '/app/devices'
+      path: '/devices'
+      fullPath: '/app/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/audit': {
@@ -1114,7 +1133,7 @@ const AppAdminOrganisationsRouteWithChildren =
 interface AppRouteChildren {
   AppAlertsRoute: typeof AppAlertsRoute
   AppAuditRoute: typeof AppAuditRoute
-  AppCctvRoute: typeof AppCctvRoute
+  AppDevicesRoute: typeof AppDevicesRoute
   AppIncidentsRoute: typeof AppIncidentsRouteWithChildren
   AppIntelligenceRoute: typeof AppIntelligenceRoute
   AppInventoryRoute: typeof AppInventoryRoute
@@ -1124,6 +1143,7 @@ interface AppRouteChildren {
   AppPatrolsRoute: typeof AppPatrolsRouteWithChildren
   AppReportCentreRoute: typeof AppReportCentreRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppSensorsRoute: typeof AppSensorsRoute
   AppUsersRoute: typeof AppUsersRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
   AppAdminAuditRoute: typeof AppAdminAuditRoute
@@ -1135,7 +1155,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAlertsRoute: AppAlertsRoute,
   AppAuditRoute: AppAuditRoute,
-  AppCctvRoute: AppCctvRoute,
+  AppDevicesRoute: AppDevicesRoute,
   AppIncidentsRoute: AppIncidentsRouteWithChildren,
   AppIntelligenceRoute: AppIntelligenceRoute,
   AppInventoryRoute: AppInventoryRoute,
@@ -1145,6 +1165,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPatrolsRoute: AppPatrolsRouteWithChildren,
   AppReportCentreRoute: AppReportCentreRoute,
   AppReportsRoute: AppReportsRoute,
+  AppSensorsRoute: AppSensorsRoute,
   AppUsersRoute: AppUsersRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
   AppAdminAuditRoute: AppAdminAuditRoute,
@@ -1264,13 +1285,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

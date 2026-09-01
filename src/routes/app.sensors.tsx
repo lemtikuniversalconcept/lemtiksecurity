@@ -1,15 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard } from "lucide-react";
+import { toast } from "sonner";
+import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard, Power, RotateCcw, RotateCw, Gauge } from "lucide-react";
 import { requireSectionAccess } from "@/lib/rbac";
 import { getCameras, ingestFrame, analyzeJudgement, verifyVision, normalizeCameraList, type CCTVFrameResult } from "@/lib/cctv.functions";
+import { listDevices, executeDeviceAction, type DeviceRecord } from "@/lib/devices.functions";
 import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/app/cctv")({
-  head: () => ({ meta: [{ title: "CCTV Control Room · Lemtik SOD" }] }),
+export const Route = createFileRoute("/app/sensors")({
+  head: () => ({ meta: [{ title: "Sensors · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator"]);
@@ -113,7 +115,11 @@ function CctvControlRoom() {
     const source = secondary ?? primary ?? {};
     const summaries = [source.threat_summary, source.summary, source.explanation, source.visual_explanation, source.qwen_vision_explanation].filter(Boolean) as string[];
     const reidLogs = source.reid_matching_logs?.length
-      ? source.reid_matching_logs
+      ? source.reid_matching_logs.map((log, index) => ({
+          status: log.status ?? `match-${index + 1}`,
+          similarity: log.similarity ?? 0,
+          candidates: log.candidates ?? [],
+        }))
       : source.matches?.length
         ? source.matches.map((match, index) => ({
             status: String(match.status ?? `match-${index + 1}`),
@@ -187,10 +193,10 @@ function CctvControlRoom() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">CCTV Operations</div>
-          <h1 className="mt-1 text-2xl font-semibold">CCTV Control Room</h1>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Sensors</div>
+          <h1 className="mt-1 text-2xl font-semibold">Cameras &amp; Sensors</h1>
           <p className="text-sm text-muted-foreground">
-            Registered cameras, live streams, and AI frame analysis for {appAccess.orgName}.
+            Registered cameras, live streams, AI frame analysis, and non-visual data sensors for {appAccess.orgName}.
           </p>
         </div>
         <div className="rounded-2xl border border-border bg-card px-4 py-3">
@@ -530,7 +536,132 @@ function CctvControlRoom() {
           />
         </div>
       </section>
+
+      <DataSensorsPanel />
     </div>
+  );
+}
+
+function DataSensorsPanel() {
+  const listDevicesFn = useServerFn(listDevices);
+  const executeActionFn = useServerFn(executeDeviceAction);
+  const qc = useQueryClient();
+  const [busyDevice, setBusyDevice] = useState<string | null>(null);
+
+  const { data: devices = [], isLoading } = useQuery({
+    queryKey: ["sensor-devices"],
+    queryFn: async () => (await listDevicesFn()).filter((d) => d.type === "sensor" || d.type === "sensor_camera"),
+  });
+
+  const runAction = useMutation({
+    mutationFn: async (vars: { device_id: string; action_key: string; parameters?: Record<string, unknown> }) =>
+      executeActionFn({ data: vars }),
+    onMutate: (vars) => setBusyDevice(`${vars.device_id}:${vars.action_key}`),
+    onSuccess: (result: any) => {
+      if (result?.status === "success") {
+        toast.success("Command sent — this action never needed human approval (low-tier policy).");
+      } else {
+        toast.warning(result?.error ?? "Action did not complete", { description: result?.reason });
+      }
+      qc.invalidateQueries({ queryKey: ["sensor-devices"] });
+    },
+    onError: (err: unknown) => {
+      toast.error("Command failed", { description: err instanceof Error ? err.message : "Unknown error." });
+    },
+    onSettled: () => setBusyDevice(null),
+  });
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Data Sensors</div>
+          <h2 className="mt-1 text-lg font-semibold">Non-visual sensors &amp; camera view controls</h2>
+          <p className="text-sm text-muted-foreground">
+            On/off and camera pan controls here never touch the physical world, so they run under Policy Automation without an approval — configured on the{" "}
+            <a href="/app/org" className="text-primary underline underline-offset-2">Autonomy &amp; Devices</a> tab.
+          </p>
+        </div>
+        <RadioTower className="h-4 w-4 text-muted-foreground" />
+      </div>
+
+      {isLoading ? (
+        <div className="mt-4 text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading sensors…</div>
+      ) : devices.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+          No sensor devices registered yet. Add one from the <a href="/app/devices" className="text-primary underline underline-offset-2">Devices</a> page (type: <code>sensor</code> or <code>sensor_camera</code>).
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {devices.map((device) => (
+            <div key={device.id} className="rounded-xl border border-border bg-surface p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium">{device.name}</div>
+                  <div className="text-xs text-muted-foreground">{device.type} · {device.zone ?? device.area ?? "unassigned"}</div>
+                </div>
+                <span className={cn("rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide", device.status === "online" ? "bg-resolved/15 text-resolved" : "bg-muted text-muted-foreground")}>
+                  {device.status ?? "unknown"}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {device.type === "sensor_camera" ? (
+                  <>
+                    <SensorActionButton
+                      icon={RotateCcw}
+                      label="Pan left"
+                      busy={busyDevice === `${device.id}:ptz_move`}
+                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "ptz_move", parameters: { direction: "left", degrees: 15 } })}
+                    />
+                    <SensorActionButton
+                      icon={RotateCw}
+                      label="Pan right"
+                      busy={busyDevice === `${device.id}:ptz_move`}
+                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "ptz_move", parameters: { direction: "right", degrees: 15 } })}
+                    />
+                    <SensorActionButton
+                      icon={Gauge}
+                      label="Snapshot"
+                      busy={busyDevice === `${device.id}:snapshot`}
+                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "snapshot" })}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <SensorActionButton
+                      icon={Power}
+                      label="Power on"
+                      busy={busyDevice === `${device.id}:power_on`}
+                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "power_on" })}
+                    />
+                    <SensorActionButton
+                      icon={Power}
+                      label="Power off"
+                      busy={busyDevice === `${device.id}:power_off`}
+                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "power_off" })}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SensorActionButton({ icon: Icon, label, busy, onClick }: { icon: typeof Power; label: string; busy: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+      {label}
+    </button>
   );
 }
 

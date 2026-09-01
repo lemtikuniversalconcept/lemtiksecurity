@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveOrgId } from "@/lib/orgs.server";
+import { requestAutonomousController } from "@/lib/autonomous-controller";
 
 export type CommandScope = "incidents" | "patrols" | "targets" | "intelligence" | "system";
 
@@ -110,13 +111,6 @@ function relationshipApiConfig() {
   return { baseUrl, apiKey };
 }
 
-function controllerConfig() {
-  const baseUrl = process.env.AUTONOMOUS_CONTROLLER_URL?.trim().replace(/\/+$/, "");
-  const apiKey = process.env.AUTONOMOUS_CONTROLLER_KEY?.trim();
-  if (!baseUrl || !apiKey) return null;
-  return { baseUrl, apiKey };
-}
-
 function scoreConfidence(text: string) {
   const normalized = text.toLowerCase();
   const signalCount = [
@@ -199,25 +193,6 @@ async function sendRelationshipApi<T>(path: string, body: Record<string, unknown
   if (!response.ok) {
     const message = await response.text().catch(() => "");
     throw new Error(`Relationship API request failed: ${response.status} ${message}`.trim());
-  }
-  return response.json().catch(() => null);
-}
-
-async function sendAutonomousController<T>(path: string, body: Record<string, unknown>): Promise<T | null> {
-  const config = controllerConfig();
-  if (!config) return null;
-  const response = await fetch(`${config.baseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": config.apiKey,
-      "X-Client-Name": "c4isod-dashboard",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(`Autonomous controller request failed: ${response.status} ${message}`.trim());
   }
   return response.json().catch(() => null);
 }
@@ -451,7 +426,7 @@ export const submitApprovalDecision = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => approvalInput.parse(data))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id || (await getActiveOrgId()) || "default";
+    const orgId = data.org_id || (await getActiveOrgId(context.supabase, context.userId)) || "default";
     const decisionMap = {
       approve_all: "approved",
       approve_selected: "approved",
@@ -480,22 +455,35 @@ export const submitApprovalDecision = createServerFn({ method: "POST" })
     });
 
     const isAccepted = data.decision !== "reject";
+    let controllerWarning: string | null = null;
 
     if (isAccepted) {
-      await sendAutonomousController("/api/v1/actions/execute", {
-        actor_id: context.userId,
-        decision: data.decision,
-        proposal_ids: data.proposal_ids,
-        note: data.note ?? null,
-        delay_minutes: data.delay_minutes ?? null,
-        modification: data.modification ?? null,
-        command_text: data.command_text ?? null,
-        source: "c4isod-dashboard",
-      });
+      // Best-effort: the Relationship API approval above is the record of
+      // truth. A downstream controller failure (unreachable, misconfigured,
+      // or a request shape it rejects) must not blow up an approval that
+      // already succeeded — surface it as a warning instead.
+      try {
+        await requestAutonomousController("/api/v1/actions/execute", {
+          body: {
+            actor_id: context.userId,
+            decision: data.decision,
+            proposal_ids: data.proposal_ids,
+            note: data.note ?? null,
+            delay_minutes: data.delay_minutes ?? null,
+            modification: data.modification ?? null,
+            command_text: data.command_text ?? null,
+            source: "c4isod-dashboard",
+          },
+        });
+      } catch (err) {
+        controllerWarning = err instanceof Error ? err.message : "Autonomous controller dispatch failed.";
+        console.error("[ai-commands] autonomous controller dispatch failed", err);
+      }
     }
 
     return result ?? {
       accepted: isAccepted,
       request_id: data.request_id ?? `local-${crypto.randomUUID()}`,
+      controller_warning: controllerWarning,
     };
   });

@@ -238,7 +238,7 @@ export const getSettings = createServerFn({ method: "GET" })
     const isAdmin = adminMem?.role === "manager" || adminMem?.role === "client_admin" || adminMem?.role === "lemtik_admin";
     const cols = isAdmin
       ? "*"
-      : "organisation_id, alert_escalation_contacts, default_incident_categories, report_delivery_schedule, whatsapp_alert_numbers, webhook_url, threshold_config, smart_devices, integration_config, updated_at";
+      : "organisation_id, alert_escalation_contacts, default_incident_categories, report_delivery_schedule, whatsapp_alert_numbers, webhook_url, threshold_config, smart_devices, automation_mode, integration_config, updated_at";
     const { data, error } = await (context.supabase as any)
       .from("organisation_settings").select(cols).eq("organisation_id", orgId).maybeSingle();
     if (error) throwSafeError("orgs.settings.get", error, "Unable to load settings.");
@@ -252,6 +252,7 @@ export const getSettings = createServerFn({ method: "GET" })
       webhook_secret?: string | null;
       threshold_config?: Record<string, unknown>;
       smart_devices?: Array<Record<string, unknown>>;
+      automation_mode?: number;
       integration_config?: Record<string, unknown>;
       updated_at?: string;
     } | null;
@@ -276,6 +277,7 @@ export const updateSettings = createServerFn({ method: "POST" })
       webhook_secret: z.string().max(200).nullable().optional(),
       threshold_config: z.record(z.string(), z.any()).optional(),
       smart_devices: z.array(z.record(z.string(), z.any())).optional(),
+      automation_mode: z.number().int().min(0).max(3).optional(),
       integration_config: z.record(z.string(), z.any()).optional(),
     }).parse(d),
   )
