@@ -21,7 +21,7 @@ export async function requestAutonomousController<T>(
     method: options.method ?? "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-API-Key": config.apiKey,
+      "X-Internal-Api-Key": config.apiKey,
       "X-Client-Name": "c4isod-dashboard",
     },
   };
