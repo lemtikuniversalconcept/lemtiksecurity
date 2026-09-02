@@ -39,6 +39,9 @@ type FormState = {
   bridge_key: string;
   supported_actions: string;
   zone: string;
+  floor: string;
+  lat: string;
+  lng: string;
 };
 
 const emptyForm: FormState = {
@@ -55,7 +58,16 @@ const emptyForm: FormState = {
   bridge_key: "",
   supported_actions: "ptz_move, snapshot, activate, deactivate, get_status",
   zone: "",
+  floor: "",
+  lat: "",
+  lng: "",
 };
+
+function parseOptionalNumber(raw: string, parser: (v: string) => number): number | null {
+  if (raw.trim() === "") return null;
+  const value = parser(raw);
+  return Number.isFinite(value) ? value : null;
+}
 
 function buildConnectionConfig(form: FormState): Record<string, unknown> {
   if (form.connection_type === "REST_API") {
@@ -102,6 +114,9 @@ function DevicesPage() {
           connection_config: buildConnectionConfig(form),
           supported_actions: form.supported_actions.split(",").map((s) => s.trim()).filter(Boolean),
           zone: form.zone || null,
+          floor: parseOptionalNumber(form.floor, (v) => Number.parseInt(v, 10)),
+          lat: parseOptionalNumber(form.lat, Number.parseFloat),
+          lng: parseOptionalNumber(form.lng, Number.parseFloat),
         },
       }),
     onSuccess: () => {
@@ -168,6 +183,12 @@ function DevicesPage() {
             options={[["REST_API", "REST API"], ["MQTT", "MQTT"], ["HARDWARE_BRIDGE", "Hardware Bridge"]]}
           />
           <TextField label="Zone / area" value={form.zone} onChange={(v) => setForm((p) => ({ ...p, zone: v }))} placeholder="Lobby" />
+          <TextField label="Floor" value={form.floor} onChange={(v) => setForm((p) => ({ ...p, floor: v }))} placeholder="3" />
+          <TextField label="Latitude" value={form.lat} onChange={(v) => setForm((p) => ({ ...p, lat: v }))} placeholder="6.4281" />
+          <TextField label="Longitude" value={form.lng} onChange={(v) => setForm((p) => ({ ...p, lng: v }))} placeholder="3.4219" />
+          <p className="sm:col-span-2 -mt-1 text-xs text-muted-foreground">
+            Zone, floor, and coordinates let the master agent tell whether this device sits on an incident's path during an emergency — leave any of them blank if unknown.
+          </p>
 
           {form.connection_type === "REST_API" && (
             <>
@@ -225,6 +246,15 @@ function DevicesPage() {
                     <div className="text-sm font-medium">{device.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {device.type} · {device.connection_type} · {(device.supported_actions ?? []).join(", ") || "no actions"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {[
+                        device.zone ? `Zone: ${device.zone}` : null,
+                        typeof device.floor === "number" ? `Floor ${device.floor}` : null,
+                        typeof device.lat === "number" && typeof device.lng === "number" ? `${device.lat.toFixed(4)}, ${device.lng.toFixed(4)}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "No location set — won't be matched to an incident's path"}
                     </div>
                     {lastCommand && (
                       <div className="mt-1 flex items-center gap-1.5 text-xs">
