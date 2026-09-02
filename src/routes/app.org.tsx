@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   getActiveOrg, updateOrganisation,
   listEmergencyContacts, upsertEmergencyContact, deleteEmergencyContact, listLocations,
@@ -158,7 +159,13 @@ function OrgSettings() {
         api_key_label: integrationForm.api_key_label || null,
       },
     }}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["org-settings"] }),
+    onSuccess: () => {
+      toast.success("Settings saved");
+      qc.invalidateQueries({ queryKey: ["org-settings"] });
+    },
+    onError: (err: unknown) => {
+      toast.error("Failed to save settings", { description: err instanceof Error ? err.message : "Unknown error." });
+    },
   });
 
   if (isLoading) {
