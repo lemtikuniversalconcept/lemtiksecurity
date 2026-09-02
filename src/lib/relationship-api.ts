@@ -25,17 +25,20 @@ export async function requestRelationshipApi<T>(
     url.searchParams.set(key, String(value));
   }
 
+  const method = options.method ?? "POST";
+  const hasBody = Boolean(options.body) && method !== "GET";
+
   const init: RequestInit = {
-    method: options.method ?? "POST",
+    method,
     headers: {
-      "Content-Type": "application/json",
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
       "X-API-Key": config.apiKey,
       "X-Client-Name": "c4isod-dashboard",
       ...(options.headers ?? {}),
     },
   };
 
-  if (options.body && init.method !== "GET") {
+  if (hasBody) {
     init.body = JSON.stringify(options.body);
   }
 
