@@ -3,10 +3,10 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard, Power, RotateCcw, RotateCw, Gauge } from "lucide-react";
+import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard, Power, RotateCcw, RotateCw, Gauge, History } from "lucide-react";
 import { requireSectionAccess } from "@/lib/rbac";
 import { getCameras, ingestFrame, analyzeJudgement, verifyVision, normalizeCameraList, type CCTVFrameResult } from "@/lib/cctv.functions";
-import { listDevices, executeDeviceAction, type DeviceRecord } from "@/lib/devices.functions";
+import { listDevices, executeDeviceAction, parseLastCommandResult, formatRelativeTime, type DeviceRecord } from "@/lib/devices.functions";
 import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
 import { cn } from "@/lib/utils";
 
@@ -593,7 +593,9 @@ function DataSensorsPanel() {
         </div>
       ) : (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {devices.map((device) => (
+          {devices.map((device) => {
+            const lastCommand = parseLastCommandResult(device.last_command_result);
+            return (
             <div key={device.id} className="rounded-xl border border-border bg-surface p-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
@@ -604,6 +606,17 @@ function DataSensorsPanel() {
                   {device.status ?? "unknown"}
                 </span>
               </div>
+              {lastCommand && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs">
+                  <History className="h-3 w-3 text-muted-foreground" />
+                  <span className={lastCommand.execution_result === "success" ? "text-resolved" : lastCommand.execution_result === "failed" ? "text-critical" : "text-muted-foreground"}>
+                    {lastCommand.action_key ?? "action"}
+                    {lastCommand.parameters && Object.keys(lastCommand.parameters).length > 0 ? ` (${Object.entries(lastCommand.parameters).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}
+                    {" · "}{lastCommand.execution_result ?? "unknown"}
+                  </span>
+                  <span className="text-muted-foreground">{formatRelativeTime(device.last_command_at)}</span>
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 {device.type === "sensor_camera" ? (
                   <>
@@ -644,7 +657,8 @@ function DataSensorsPanel() {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

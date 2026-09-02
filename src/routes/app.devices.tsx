@@ -3,12 +3,14 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Cpu, Loader2, Plus, Wifi, WifiOff, PlugZap } from "lucide-react";
+import { Cpu, Loader2, Plus, Wifi, WifiOff, PlugZap, History } from "lucide-react";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
   listDevices,
   registerDevice,
   checkDeviceConnectivity,
+  parseLastCommandResult,
+  formatRelativeTime,
   KNOWN_DEVICE_TYPES,
   type DeviceRecord,
   type ConnectionType,
@@ -216,6 +218,7 @@ function DevicesPage() {
           <div className="space-y-2">
             {devices.map((device: DeviceRecord) => {
               const check = checkResults[device.id];
+              const lastCommand = parseLastCommandResult(device.last_command_result);
               return (
                 <div key={device.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface px-4 py-3">
                   <div>
@@ -223,6 +226,19 @@ function DevicesPage() {
                     <div className="text-xs text-muted-foreground">
                       {device.type} · {device.connection_type} · {(device.supported_actions ?? []).join(", ") || "no actions"}
                     </div>
+                    {lastCommand && (
+                      <div className="mt-1 flex items-center gap-1.5 text-xs">
+                        <History className="h-3 w-3 text-muted-foreground" />
+                        <span className={lastCommand.execution_result === "success" ? "text-resolved" : lastCommand.execution_result === "failed" ? "text-critical" : "text-muted-foreground"}>
+                          {lastCommand.action_key ?? "action"}
+                          {lastCommand.parameters && Object.keys(lastCommand.parameters).length > 0 ? ` (${Object.entries(lastCommand.parameters).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}
+                          {" · "}{lastCommand.execution_result ?? "unknown"}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {formatRelativeTime(device.last_command_at)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {check && (

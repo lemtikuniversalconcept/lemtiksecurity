@@ -23,7 +23,46 @@ export type DeviceRecord = {
   zone?: string | null;
   area?: string | null;
   status?: string | null;
+  last_seen?: string | null;
+  // Populated by the last successfully-dispatched command (never for a blocked/pending-approval
+  // one). A raw JSON string on the wire — {action_key, parameters, execution_result, response,
+  // at} — or, for older records, a bare "success"/"failed" word. Parse defensively.
+  last_command_at?: string | null;
+  last_command_result?: string | null;
 };
+
+export type LastCommandSummary = {
+  action_key?: string;
+  parameters?: Record<string, any>;
+  execution_result?: string;
+  response?: unknown;
+  at?: string;
+};
+
+export function parseLastCommandResult(raw: string | null | undefined): LastCommandSummary | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed as LastCommandSummary;
+  } catch {
+    // Older records just stored the bare word.
+  }
+  return { execution_result: raw };
+}
+
+export function formatRelativeTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
 
 // The 9 pre-vetted device types the Safety Constraints Engine already knows
 // how to gate (see DEVICE_ACTION_ALIASES in autonomouscontroller/constraints.py).
