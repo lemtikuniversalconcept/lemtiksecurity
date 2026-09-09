@@ -61,9 +61,51 @@ function parseBriefMarkdown(payload: OsintBriefResponse, orgId: string): BriefEn
   };
 }
 
+// osint's real scraped/classified intelligence item shape - see add_incident() in
+// osint/operations/core.py for the exact fields. Distinct from the dashboard's own logged
+// incidents (public.incidents / listIncidents), which is a different table with a different
+// purpose (customer-reported incidents, not scraped public intelligence).
+export type OsintIntelligenceItem = {
+  id: number | string;
+  org_id?: string;
+  log_id?: string;
+  collected_at?: string;
+  source?: string;
+  source_url?: string;
+  summary?: string;
+  threat_category?: string;
+  severity?: number;
+  confidence?: number;
+  geo_relevance?: string;
+  location_relevance?: string;
+  verified?: string;
+  matched_keywords?: string;
+  notes?: string;
+  status?: string;
+  quality_score?: number;
+};
+
 const getBriefsInput = z.object({
   org_id: z.string().uuid().optional(),
 });
+
+const listOsintIntelligenceInput = z.object({
+  org_id: z.string().uuid().optional(),
+  days: z.number().int().min(1).max(90).optional(),
+});
+
+export const listOsintIntelligence = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => listOsintIntelligenceInput.parse(data ?? {}))
+  .handler(async ({ data, context }) => {
+    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const days = data.days ?? 7;
+    const result = await requestRelationshipApi<{ incidents?: OsintIntelligenceItem[] }>("/api/v1/osint/intelligence", {
+      method: "GET",
+      query: { org_id: orgId, days },
+    });
+    return result?.incidents ?? [];
+  });
 
 const generateBriefInput = z.object({
   title: z.string().min(1).max(160),

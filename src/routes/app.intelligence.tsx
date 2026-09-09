@@ -4,22 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { listIncidents } from "@/lib/incidents.functions";
+import { toast } from "sonner";
 import { getMapboxToken } from "@/lib/config.functions";
-import { getBriefings, generateBriefing } from "@/lib/intelligence.functions";
-import { useRealtimeInvalidate } from "@/lib/useRealtime";
+import { getBriefings, generateBriefing, listOsintIntelligence, type OsintIntelligenceItem } from "@/lib/intelligence.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import { type IncidentType } from "@/lib/mockData";
-import { Download, FileText, Filter, Loader2, MapPinned, Radar, Search, ShieldAlert, Sparkles, ExternalLink, ChevronRight, X, BrainCircuit } from "lucide-react";
+import { Download, FileText, Filter, Loader2, MapPinned, Radar, Search, ShieldAlert, Sparkles, ExternalLink, ChevronRight, X, BrainCircuit, AlertTriangle } from "lucide-react";
 
 const LAGOS: [number, number] = [3.4219, 6.4281];
-const SOURCE_POOLS = {
-  physical: ["Channels TV", "Punch Nigeria", "Police Situation Room", "Local Radio Monitor"],
-  cyber: ["CERT Feed", "TechCabal", "Cyber Watch", "SOC Triage"],
-  political: ["Newswire", "Gov Statement Watch", "Community Monitor", "Civic Desk"],
-  macro: ["Market Watch", "Weather & Transit", "Infrastructure Watch", "Regional Radar"],
-} as const;
-const KEYWORDS = ["robbery", "intrusion", "theft", "fire", "medical", "protest", "cyber", "fraud", "vehicle", "gate", "camera", "suspect", "armed", "fence", "drone"];
 
 type IntelligenceCategory = "physical" | "cyber" | "political" | "macro";
 type SeverityFilter = "all" | "4plus" | "3plus" | "2plus";
@@ -73,25 +64,29 @@ function IntelligenceFeedPage() {
   const navigate = useNavigate();
   const { appAccess } = Route.useRouteContext();
   const canManage = appAccess.specRole === "security_manager";
-  const list = useServerFn(listIncidents);
+  const list = useServerFn(listOsintIntelligence);
   const tokenFn = useServerFn(getMapboxToken);
   const loadBriefs = useServerFn(getBriefings);
   const createBrief = useServerFn(generateBriefing);
-  const { data: incidents = [], isLoading } = useQuery({
-    queryKey: ["intelligence-feed"],
-    queryFn: () => list() as Promise<any[]>,
+  const { data: intelligenceItems = [], isLoading, isError: feedError } = useQuery({
+    queryKey: ["intelligence-feed", appAccess.orgId],
+    queryFn: () => list({ data: { org_id: appAccess.orgId } }) as Promise<OsintIntelligenceItem[]>,
+    retry: 1,
   });
   const { data: tokenData } = useQuery({
     queryKey: ["mapbox_token"],
     queryFn: () => tokenFn(),
     staleTime: Infinity,
   });
-  const { data: serverBriefs = [], refetch: refetchBriefs } = useQuery({
+  // isError distinguishes "osint is genuinely unreachable" from "osint reached, zero items" -
+  // the two used to look identical (both rendered as a silent local zero-data placeholder brief
+  // with no indication anything had failed). See the /briefs route in relationship_api: it no
+  // longer masks a real osint outage behind a fake status:200 success.
+  const { data: serverBriefs = [], isError: briefsError, refetch: refetchBriefs } = useQuery({
     queryKey: ["intelligence-briefs", appAccess.orgId],
     queryFn: () => loadBriefs({ data: { org_id: appAccess.orgId } }) as Promise<BriefEntry[]>,
+    retry: 1,
   });
-
-  useRealtimeInvalidate("incidents", [["intelligence-feed"]]);
 
   const [mode, setMode] = useState<ViewMode>("feed");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
@@ -102,13 +97,14 @@ function IntelligenceFeedPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [feedFlags, setFeedFlags] = useState<Record<string, "relevant" | "dismissed">>({});
   const [briefHistory, setBriefHistory] = useState<BriefEntry[]>([]);
+  const [generatingBrief, setGeneratingBrief] = useState(false);
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRefs = useRef<mapboxgl.Marker[]>([]);
 
   const liveItems = useMemo(() => {
-    return (incidents as any[]).map((item, index) => deriveIntelligenceItem(item, index));
-  }, [incidents]);
+    return intelligenceItems.map((item, index) => deriveOsintIntelligenceItem(item, index));
+  }, [intelligenceItems]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -169,8 +165,13 @@ function IntelligenceFeedPage() {
   const currentBrief = useMemo(() => buildBrief(filteredItems, currentAreaRisk.zone, rangeFilter), [filteredItems, currentAreaRisk.zone, rangeFilter]);
 
   useEffect(() => {
+    // Only fall back to the locally-computed brief when osint genuinely returned zero briefs -
+    // never when the fetch itself failed. Silently substituting local content for a real osint
+    // outage is exactly the bug this replaces: it rendered indistinguishably from real content,
+    // so a manager had no way to tell "nothing happening" from "we couldn't reach the service."
+    if (briefsError) return;
     setBriefHistory((serverBriefs.length ? serverBriefs : [currentBrief]).slice(0, 12));
-  }, [currentBrief, serverBriefs]);
+  }, [briefsError, currentBrief, serverBriefs]);
 
   useEffect(() => {
     if (!tokenData?.token || !mapEl.current || mapRef.current) return;
@@ -222,24 +223,33 @@ function IntelligenceFeedPage() {
   }, [filteredItems, mode]);
 
   const generateBrief = async () => {
-    const next = (await createBrief({
-      data: {
-        title: currentBrief.title,
-        summary: currentBrief.summary,
-        highlights: currentBrief.highlights,
-        score: currentBrief.score,
-        windowLabel: currentBrief.windowLabel,
-        items: filteredItems,
-        context: {
-          zone: currentAreaRisk.zone,
-          range: rangeFilter,
-          areaRiskScore: currentAreaRisk.score,
+    setGeneratingBrief(true);
+    try {
+      const next = (await createBrief({
+        data: {
+          title: currentBrief.title,
+          summary: currentBrief.summary,
+          highlights: currentBrief.highlights,
+          score: currentBrief.score,
+          windowLabel: currentBrief.windowLabel,
+          items: filteredItems,
+          context: {
+            zone: currentAreaRisk.zone,
+            range: rangeFilter,
+            areaRiskScore: currentAreaRisk.score,
+          },
+          org_id: appAccess.orgId,
         },
-        org_id: appAccess.orgId,
-      },
-    })) as BriefEntry;
-    setBriefHistory((prev) => [next, ...prev.filter((item) => item.id !== next.id)].slice(0, 12));
-    await refetchBriefs();
+      })) as BriefEntry;
+      setBriefHistory((prev) => [next, ...prev.filter((item) => item.id !== next.id)].slice(0, 12));
+      await refetchBriefs();
+    } catch (error) {
+      // Previously unhandled: a failed call here silently did nothing visible, leaving whatever
+      // (possibly fake) brief was already showing unchanged with no indication the click failed.
+      toast.error("Could not generate a new brief — the intelligence service is unreachable. Try again shortly.");
+    } finally {
+      setGeneratingBrief(false);
+    }
   };
 
   const markRelevant = (id: string) => setFeedFlags((prev) => ({ ...prev, [id]: "relevant" }));
@@ -332,11 +342,18 @@ function IntelligenceFeedPage() {
             </div>
           )}
 
+          {feedError && (
+            <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              Could not reach the intelligence service. This is a connectivity issue, not an empty feed — retry shortly.
+            </div>
+          )}
+
           {!mapView ? (
             <div className="space-y-2">
               {filteredItems.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border bg-surface p-8 text-center text-sm text-muted-foreground">
-                  No intelligence items match the current filters.
+                  {feedError ? "Unable to load intelligence items right now." : "No intelligence items match the current filters."}
                 </div>
               ) : (
                 filteredItems.map((item) => (
@@ -449,12 +466,23 @@ function IntelligenceFeedPage() {
                 <h3 className="text-sm font-semibold">Latest generated brief</h3>
               </div>
               {canManage && (
-                <button onClick={generateBrief} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-                  <Sparkles className="h-3.5 w-3.5" /> Generate new brief
+                <button
+                  onClick={generateBrief}
+                  disabled={generatingBrief}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                >
+                  {generatingBrief ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {generatingBrief ? "Generating…" : "Generate new brief"}
                 </button>
               )}
             </div>
 
+            {briefsError && briefHistory.length === 0 ? (
+              <div className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-xs text-destructive">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>Could not reach the intelligence service to load the latest brief. This is a connectivity issue — the last brief may still be available in a moment.</span>
+              </div>
+            ) : (
             <div className="mt-4 rounded-lg border border-border bg-surface p-4">
               <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
                 <FileText className="h-3.5 w-3.5" /> {briefHistory[0]?.windowLabel ?? "Current window"}
@@ -476,6 +504,7 @@ function IntelligenceFeedPage() {
                 </button>
               </div>
             </div>
+            )}
 
             <div className="mt-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Brief history</div>
@@ -502,20 +531,29 @@ function IntelligenceFeedPage() {
   );
 }
 
-function deriveIntelligenceItem(item: any, index: number): IntelligenceItem {
-  const category = categoryForType(item.type);
+// Every field below comes directly from osint's own classification (add_incident() /
+// classify_text() in osint/operations/core.py) - severity, confidence, matched_keywords,
+// verified, and source are real, not synthesized. This replaces an earlier version of this
+// function that was written for the dashboard's own incident log (a different table with a
+// different shape) and fabricated most of these fields (a formula-derived confidence, a
+// deterministic-but-fake source name, keyword matches against a hardcoded local list) because
+// that table has no equivalent real data - see the "OSINT intelligence feed shows the wrong
+// table" fix this replaces.
+function deriveOsintIntelligenceItem(item: OsintIntelligenceItem, index: number): IntelligenceItem {
+  const category = categoryForThreatType(item.threat_category);
   const severity = Math.max(1, Math.min(5, Number(item.severity ?? 3)));
-  const reportedAt = item.reported_at ?? item.reportedAt ?? new Date(Date.now() - index * 3600_000).toISOString();
-  const title = item.title?.trim() || item.code || `${item.zone ?? "Area"} signal`;
-  const summary = String(item.description ?? item.body ?? title).replace(/\s+/g, " ").trim();
-  const keywords = KEYWORDS.filter((word) => `${title} ${summary}`.toLowerCase().includes(word));
-  const zoneScore = item.zone ? zoneScoreFromText(item.zone) : 0;
-  const confidence = clamp(Math.round(58 + severity * 8 + Math.min(16, keywords.length * 4) + zoneScore / 6), 60, 98);
-  const verified = Boolean(item.status === "resolved" || item.status === "contained" || severity >= 4 || keywords.length >= 2);
-  const sourceName = pickSource(category, index, severity);
-  const sourceUrl = buildSearchUrl(title, sourceName, item.zone);
-  const relatedIncidentIds = [item.related_to, item.code, item.id].filter(Boolean).slice(0, 3) as string[];
-  const locationRelevance = clamp(Math.round(zoneScore + severity * 6 + keywords.length * 4 - (verified ? 2 : 0)), 12, 99);
+  const confidence = Math.max(0, Math.min(100, Number(item.confidence ?? 50)));
+  const qualityScore = Math.max(0, Math.min(100, Number(item.quality_score ?? 50)));
+  const reportedAt = item.collected_at ?? new Date(Date.now() - index * 3600_000).toISOString();
+  const summary = String(item.summary ?? "").replace(/\s+/g, " ").trim() || "No summary available.";
+  const title = summary.length > 90 ? `${summary.slice(0, 87).trimEnd()}...` : summary;
+  const matchedKeywords = String(item.matched_keywords ?? "")
+    .split(",")
+    .map((word) => word.trim())
+    .filter(Boolean);
+  const verified = item.verified === "Yes" || item.verified === "Partial";
+  const zone = item.geo_relevance && item.geo_relevance !== "None" ? item.geo_relevance : "Nigeria";
+  const locationRelevance = clamp(Math.round(qualityScore * 0.6 + confidence * 0.4), 10, 99);
   return {
     id: String(item.id),
     title,
@@ -524,20 +562,22 @@ function deriveIntelligenceItem(item: any, index: number): IntelligenceItem {
     severity,
     confidence,
     verified,
-    sourceName,
-    sourceUrl,
-    zone: item.zone ?? "Unknown zone",
-    location: item.location ?? "Unknown location",
+    sourceName: item.source || "Public source",
+    sourceUrl: item.source_url || "",
+    zone,
+    location: item.location_relevance || zone,
     reportedAt,
-    matchedKeywords: keywords.length ? keywords : ["signal", "public source"],
-    analystNotes: verified
-      ? "Signal is corroborated by incident or context data. Keep it in the active watch list."
-      : "Unverified signal. Verify against patrol, CCTV, or local reports before escalation.",
+    matchedKeywords: matchedKeywords.length ? matchedKeywords : ["public source"],
+    analystNotes:
+      item.notes ||
+      (verified
+        ? "Signal is corroborated by a credible public source. Keep it in the active watch list."
+        : "Unverified public signal. Verify against patrol, CCTV, or local reports before escalation."),
     locationRelevance,
-    relatedIncidentIds,
+    relatedIncidentIds: [],
     coordX: toLng(item, index)[0],
     coordY: toLng(item, index)[1],
-    statusLabel: item.status ?? "reported",
+    statusLabel: item.status || "Monitoring",
   };
 }
 
@@ -561,36 +601,18 @@ function buildBrief(items: IntelligenceItem[], zone: string, range: RangeFilter)
   };
 }
 
-function categoryForType(type: IncidentType | string | undefined): IntelligenceCategory {
+function categoryForThreatType(type: string | undefined): IntelligenceCategory {
   switch (type) {
-    case "cyber_incident":
-    case "fraud_scam":
+    case "Cyber":
       return "cyber";
-    case "civil_unrest":
+    case "Political":
       return "political";
-    case "robbery":
-    case "armed_attack":
-    case "kidnapping":
-    case "intrusion":
-    case "theft":
-    case "vandalism":
-    case "suspicious":
-    case "fire":
-    case "medical":
-      return "physical";
-    default:
+    case "Macro":
       return "macro";
+    case "Physical":
+    default:
+      return "physical";
   }
-}
-
-function pickSource(category: IntelligenceCategory, index: number, severity: number) {
-  const pool = SOURCE_POOLS[category];
-  return pool[(index + severity) % pool.length];
-}
-
-function buildSearchUrl(title: string, source: string, zone: string) {
-  const q = encodeURIComponent(`${title} ${source} ${zone}`);
-  return `https://www.google.com/search?q=${q}`;
 }
 
 function toLng(item: any, index: number): [number, number] {
