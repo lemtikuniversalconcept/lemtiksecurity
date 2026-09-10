@@ -148,18 +148,21 @@ function CaseDetailPage() {
             </section>
 
             <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Guest emergency reports</h2>
-              {(caseData as any).consumer_reports?.length ? (
-                <ul className="mt-2 space-y-2 text-sm">
-                  {(caseData as any).consumer_reports.map((r: any) => (
-                    <li key={r.id} className="rounded-md bg-black/20 p-2">
-                      <div className="text-[#e2e8f0]">{r.ai_transcription || r.description || r.report_type}</div>
-                      <div className="mt-0.5 text-[11px] text-[#94a3b8]">{new Date(r.created_at).toLocaleString()} · {r.status}</div>
-                    </li>
-                  ))}
-                </ul>
+              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Guest emergency report</h2>
+              {(caseData as any).consumer_report ? (
+                <div className="mt-2 rounded-md bg-black/20 p-2 text-sm">
+                  <div className="text-[#e2e8f0]">
+                    Reported via the guest emergency app
+                    {(caseData as any).consumer_report.guest_reference ? ` · ${(caseData as any).consumer_report.guest_reference}` : ""}
+                  </div>
+                  {(caseData as any).consumer_report.activated_at && (
+                    <div className="mt-0.5 text-[11px] text-[#94a3b8]">
+                      Session activated {new Date((caseData as any).consumer_report.activated_at).toLocaleString()}
+                    </div>
+                  )}
+                </div>
               ) : (
-                <p className="mt-2 text-sm text-[#94a3b8]">None for this case.</p>
+                <p className="mt-2 text-sm text-[#94a3b8]">Not reported via the guest app.</p>
               )}
             </section>
 

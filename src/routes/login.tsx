@@ -70,7 +70,12 @@ function LoginPage() {
         .maybeSingle();
 
       const role = String(membership?.role ?? "officer");
-      const fallback = role === "officer" ? "/officer/home" : "/app";
+      const fallback =
+        role === "officer"
+          ? "/officer/home"
+          : role === "security_forensic_analyst"
+            ? "/forensic"
+            : "/app";
       const target = role === "officer" ? fallback : safeRedirectTarget(redirectParam) ?? fallback;
       navigate({ to: target, replace: true });
     };

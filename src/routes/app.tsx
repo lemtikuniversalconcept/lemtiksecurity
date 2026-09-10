@@ -10,6 +10,9 @@ export const Route = createFileRoute("/app")({
     if (appAccess.specRole === "field_officer") {
       throw redirect({ to: "/officer/home" });
     }
+    if (appAccess.specRole === "security_forensic_analyst") {
+      throw redirect({ to: "/forensic" });
+    }
     return { appAccess };
   },
   component: AppRouteShell,
