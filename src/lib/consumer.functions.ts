@@ -167,6 +167,7 @@ export const sendIntakeTurn = createServerFn({ method: "POST" })
       report_id: z.string().min(1),
       transcript: z.string().min(1),
       conversation_history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string() })).optional(),
+      language: z.string().optional(),
     }).parse(d),
   )
   .handler(async ({ data }) => {

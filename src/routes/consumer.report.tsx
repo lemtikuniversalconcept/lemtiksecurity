@@ -11,12 +11,28 @@ type UploadState = { id: string; label: string; progress: number; done: boolean;
 
 const OPENING_LINE = "Stay calm, help is on the way. What's your emergency?";
 
+// speechLang drives the browser's own speech recognition/synthesis (Web Speech API) —
+// its actual accuracy for anything but English depends entirely on the guest's browser
+// and device, which we cannot verify here; "Type instead" always works regardless of
+// language or recognition quality. aiName is what tells the AI which language to reply
+// in (rewritten_description sent to operators always stays English regardless).
+// Pidgin has no reliable, widely-supported speech-recognition language code of its own —
+// it stays on en-NG recognition (Pidgin is English-based, so this degrades reasonably)
+// while still getting a Pidgin-language spoken reply.
+const LANGUAGES: { code: string; label: string; speechLang: string; aiName?: string }[] = [
+  { code: "en", label: "English", speechLang: "en-NG" },
+  { code: "pcm", label: "Pidgin", speechLang: "en-NG", aiName: "Nigerian Pidgin English" },
+  { code: "yo", label: "Yoruba", speechLang: "yo-NG", aiName: "Yoruba" },
+  { code: "ha", label: "Hausa", speechLang: "ha-NG", aiName: "Hausa" },
+  { code: "ig", label: "Igbo", speechLang: "ig-NG", aiName: "Igbo" },
+];
+
 // Speaking and listening are chained through promises rather than fired independently
 // so listening only ever starts once the AI has actually finished talking — starting
 // it eagerly let the mic pick up the AI's own voice through the speaker and transcribe
 // it as if the guest had spoken, which is what caused the "looping" on phones (a
 // laptop's TTS is usually quieter relative to its mic gain, so it was less visible there).
-function speak(text: string): Promise<void> {
+function speak(text: string, speechLang: string): Promise<void> {
   return new Promise((resolve) => {
     if (typeof window === "undefined" || !window.speechSynthesis) {
       resolve();
@@ -25,6 +41,7 @@ function speak(text: string): Promise<void> {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.95;
+    utterance.lang = speechLang;
     utterance.onend = () => resolve();
     utterance.onerror = () => resolve();
     window.speechSynthesis.speak(utterance);
@@ -60,10 +77,17 @@ function ReportPage() {
   const [dangerMode, setDangerMode] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [uploads, setUploads] = useState<UploadState[]>([]);
+  const [language, setLanguage] = useState("en");
+  const languageRef = useRef(language);
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
   const recognitionRef = useRef<any>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunkIndexRef = useRef(0);
   const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+
+  const currentLanguage = () => LANGUAGES.find((l) => l.code === languageRef.current) || LANGUAGES[0];
 
   const listenOnce = (): Promise<string | null> =>
     new Promise((resolve) => {
@@ -80,7 +104,7 @@ function ReportPage() {
         }
       }
       const recognition = new Recognition();
-      recognition.lang = "en-NG";
+      recognition.lang = currentLanguage().speechLang;
       recognition.continuous = false;
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
@@ -107,7 +131,13 @@ function ReportPage() {
     setAwaitingReply(true);
     try {
       const result = await sendTurn({
-        data: { token, report_id: reportId, transcript: guestText, conversation_history: historyRef.current },
+        data: {
+          token,
+          report_id: reportId,
+          transcript: guestText,
+          conversation_history: historyRef.current,
+          language: currentLanguage().aiName,
+        },
       });
       const dangerNow = dangerMode || result.danger_detected;
       if (result.danger_detected) setDangerMode(true);
@@ -124,7 +154,7 @@ function ReportPage() {
         // No audible AI voice, no mic — everything from here is silent and on-screen.
         return;
       }
-      await speak(spoken);
+      await speak(spoken, currentLanguage().speechLang);
       if (result.follow_up_question) {
         const nextAnswer = await listenOnce();
         if (nextAnswer) void runTurn(nextAnswer);
@@ -150,7 +180,7 @@ function ReportPage() {
       setLastReportId(result.report_id);
       setTranscript([{ speaker: "ai", text: OPENING_LINE }]);
       historyRef.current = [{ role: "assistant", content: OPENING_LINE }];
-      await speak(OPENING_LINE);
+      await speak(OPENING_LINE, currentLanguage().speechLang);
       if (cancelled) return;
       const firstAnswer = await listenOnce();
       if (firstAnswer && !cancelled) void runTurn(firstAnswer);
@@ -219,9 +249,23 @@ function ReportPage() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 px-4 py-6">
-      <div className="flex items-center gap-2 rounded-xl bg-red-600/15 px-4 py-3 text-sm font-medium text-red-300">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-        Emergency — sending now
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 rounded-xl bg-red-600/15 px-4 py-3 text-sm font-medium text-red-300">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+          Emergency — sending now
+        </div>
+        <select
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          aria-label="Language"
+          className="shrink-0 rounded-lg border border-white/15 bg-white/5 px-2 py-2 text-xs text-white"
+        >
+          {LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code} className="bg-[#0a0f1e]">
+              {l.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {dangerMode && (

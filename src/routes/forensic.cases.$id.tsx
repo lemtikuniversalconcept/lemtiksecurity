@@ -1,9 +1,9 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
-import { Loader2, FileStack, ScanFace, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
-import { getForensicCase, getForensicTimeline } from "@/lib/forensic.functions";
+import { Loader2, FileStack, ScanFace, Sparkles, ChevronDown, ChevronRight, Printer, Send } from "lucide-react";
+import { getForensicCase, getForensicTimeline, getForensicEvidence, addForensicCaseNote } from "@/lib/forensic.functions";
 
 export const Route = createFileRoute("/forensic/cases/$id")({
   component: CaseDetailPage,
@@ -21,6 +21,7 @@ const TIMELINE_LABELS: Record<string, string> = {
   evidence_legal_flagged: "Evidence flagged for legal hold",
   consumer_report: "Guest emergency report",
   note: "Note",
+  forensic_note: "Analyst note",
 };
 
 function TimelineCard({ event }: { event: any }) {
@@ -57,6 +58,10 @@ function CaseDetailPage() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const getCase = useServerFn(getForensicCase);
   const getTimeline = useServerFn(getForensicTimeline);
+  const getEvidence = useServerFn(getForensicEvidence);
+  const addNote = useServerFn(addForensicCaseNote);
+  const queryClient = useQueryClient();
+  const [noteText, setNoteText] = useState("");
 
   const { data: caseData, isLoading: caseLoading } = useQuery({
     queryKey: ["forensic-case", id],
@@ -65,6 +70,21 @@ function CaseDetailPage() {
   const { data: timeline = [], isLoading: timelineLoading } = useQuery({
     queryKey: ["forensic-timeline", id],
     queryFn: () => getTimeline({ data: { incident_id: id } }),
+  });
+  // Fetched here (not just in the Evidence tab) so the printable case file below
+  // can include a full evidence manifest without the analyst needing to visit
+  // every tab first.
+  const { data: evidenceData } = useQuery({
+    queryKey: ["forensic-evidence", id],
+    queryFn: () => getEvidence({ data: { incident_id: id } }),
+  });
+
+  const noteMutation = useMutation({
+    mutationFn: () => addNote({ data: { incident_id: id, note: noteText.trim() } }),
+    onSuccess: () => {
+      setNoteText("");
+      void queryClient.invalidateQueries({ queryKey: ["forensic-timeline", id] });
+    },
   });
 
   if (caseLoading) {
@@ -84,15 +104,24 @@ function CaseDetailPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-white">{incident.title || incident.code}</h1>
-          <span className="rounded-full bg-[#3b82f6]/15 px-2 py-0.5 text-[11px] text-[#3b82f6]">{incident.status}</span>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-white">{incident.title || incident.code}</h1>
+            <span className="rounded-full bg-[#3b82f6]/15 px-2 py-0.5 text-[11px] text-[#3b82f6]">{incident.status}</span>
+          </div>
+          <p className="text-sm text-[#94a3b8]">{incident.code} · {incident.type} · severity {incident.severity}</p>
         </div>
-        <p className="text-sm text-[#94a3b8]">{incident.code} · {incident.type} · severity {incident.severity}</p>
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="forensic-no-print flex shrink-0 items-center gap-1.5 rounded-md border border-[#2d3748] bg-[#1a2234] px-3 py-1.5 text-xs text-[#e2e8f0] hover:bg-white/5"
+        >
+          <Printer className="h-3.5 w-3.5" /> Print case file
+        </button>
       </div>
 
-      <div className="flex gap-1 border-b border-[#2d3748]">
+      <div className="forensic-no-print flex gap-1 border-b border-[#2d3748]">
         <Link
           to="/forensic/cases/$id"
           params={{ id }}
@@ -178,6 +207,44 @@ function CaseDetailPage() {
                 <p className="mt-2 text-sm text-[#94a3b8]">No autonomous actions taken.</p>
               )}
             </section>
+
+            <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
+              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Analyst notes</h2>
+              <div className="mt-2 space-y-2">
+                {(timeline as any[]).filter((e) => e.type === "forensic_note").length === 0 && (
+                  <p className="text-sm text-[#94a3b8]">No notes on this case yet.</p>
+                )}
+                {(timeline as any[])
+                  .filter((e) => e.type === "forensic_note")
+                  .map((e, i) => (
+                    <div key={i} className="rounded-md bg-black/20 p-2 text-sm">
+                      <div className="text-[#e2e8f0]">{e.summary}</div>
+                      <div className="mt-0.5 text-[11px] text-[#94a3b8]">{e.actor} · {new Date(e.timestamp).toLocaleString()}</div>
+                    </div>
+                  ))}
+              </div>
+              <div className="mt-3 flex flex-col gap-2">
+                <textarea
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Record a finding for the case record…"
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-[#2d3748] bg-[#0a0f1e] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#94a3b8]/60 focus:border-[#3b82f6] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => noteText.trim() && noteMutation.mutate()}
+                  disabled={!noteText.trim() || noteMutation.isPending}
+                  className="flex items-center justify-center gap-1.5 self-end rounded-md bg-[#3b82f6] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  {noteMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  Add note
+                </button>
+                {noteMutation.isError && (
+                  <p className="text-[11px] text-[#ef4444]">{(noteMutation.error as Error).message}</p>
+                )}
+              </div>
+            </section>
           </div>
 
           <div className="flex flex-col gap-2 lg:col-span-3">
@@ -194,6 +261,111 @@ function CaseDetailPage() {
       ) : (
         <Outlet />
       )}
+
+      <PrintableCaseFile caseData={caseData} timeline={timeline as any[]} evidence={evidenceData as any} />
+    </div>
+  );
+}
+
+// Rendered off-screen at all times and shown only under print media (see
+// ForensicShell's .forensic-no-print rule for the inverse) — a plain, self-
+// contained document an analyst can hand off as a case file, independent of
+// which on-screen tab was active when they hit print.
+function PrintableCaseFile({ caseData, timeline, evidence }: { caseData: any; timeline: any[]; evidence: any }) {
+  if (!caseData) return null;
+  const incident = caseData.incident;
+  const notes = timeline.filter((e) => e.type === "forensic_note");
+  const caseFiles = evidence?.case_files || [];
+  const cctvSnapshots = evidence?.cctv_snapshots || [];
+
+  return (
+    <div className="hidden print:block print:text-black">
+      <h1 className="text-xl font-bold">{incident.title || incident.code}</h1>
+      <p className="text-sm">
+        {incident.code} · {incident.type} · severity {incident.severity} · status {incident.status}
+      </p>
+      <p className="mt-1 text-xs text-black/60">Printed {new Date().toLocaleString()} · Lemtik Security forensic case file</p>
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Incident</h2>
+      <table className="mt-1 w-full text-sm">
+        <tbody>
+          <tr><td className="w-32 py-0.5 align-top text-black/60">Location</td><td>{[incident.zone, incident.location, incident.floor].filter(Boolean).join(" · ") || "—"}</td></tr>
+          <tr><td className="py-0.5 align-top text-black/60">Reported</td><td>{new Date(incident.reported_at).toLocaleString()}</td></tr>
+          {incident.occurred_at && <tr><td className="py-0.5 align-top text-black/60">Occurred</td><td>{new Date(incident.occurred_at).toLocaleString()}</td></tr>}
+          <tr><td className="py-0.5 align-top text-black/60">Description</td><td>{incident.description || "—"}</td></tr>
+          {incident.suspect_description && <tr><td className="py-0.5 align-top text-black/60">Suspect</td><td>{incident.suspect_description}</td></tr>}
+          {incident.victim_name && <tr><td className="py-0.5 align-top text-black/60">Victim</td><td>{incident.victim_name}</td></tr>}
+        </tbody>
+      </table>
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Officers involved</h2>
+      {caseData.officers_involved?.length ? (
+        <ul className="mt-1 list-disc pl-5 text-sm">
+          {caseData.officers_involved.map((o: any, i: number) => (
+            <li key={i}>{typeof o === "string" ? o : o.name || o.officer_id || JSON.stringify(o)}</li>
+          ))}
+        </ul>
+      ) : <p className="mt-1 text-sm">No officer dispatch recorded.</p>}
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Guest emergency report</h2>
+      <p className="mt-1 text-sm">
+        {caseData.consumer_report
+          ? `Reported via the guest emergency app${caseData.consumer_report.guest_reference ? ` · ${caseData.consumer_report.guest_reference}` : ""}`
+          : "Not reported via the guest app."}
+      </p>
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Autonomous actions</h2>
+      {caseData.autonomous_actions?.length ? (
+        <ul className="mt-1 list-disc pl-5 text-sm">
+          {caseData.autonomous_actions.map((a: any) => (
+            <li key={a.action_log_id}>{a.action_key} on {a.device_name} — {a.execution_result}</li>
+          ))}
+        </ul>
+      ) : <p className="mt-1 text-sm">No autonomous actions taken.</p>}
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Evidence manifest ({caseFiles.length + cctvSnapshots.length} items)</h2>
+      {caseFiles.length === 0 && cctvSnapshots.length === 0 ? (
+        <p className="mt-1 text-sm">No evidence attached.</p>
+      ) : (
+        <ul className="mt-1 list-disc pl-5 text-sm">
+          {caseFiles.map((f: any, i: number) => (
+            <li key={`f${i}`}>
+              {f.name} ({f.kind}) — added by {f.added_by_name || "—"} on {new Date(f.added_at).toLocaleString()}
+              {f.legal ? " — LEGAL HOLD" : ""}
+            </li>
+          ))}
+          {cctvSnapshots.map((s: any, i: number) => (
+            <li key={`c${i}`}>
+              CCTV snapshot, camera {s.camera_id}, target {s.target_id} — {new Date(s.timestamp).toLocaleString()}
+              {s.confidence != null ? ` (${Math.round(s.confidence * 100)}% re-id confidence)` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Analyst notes</h2>
+      {notes.length === 0 ? (
+        <p className="mt-1 text-sm">No notes recorded.</p>
+      ) : (
+        <ul className="mt-1 list-disc pl-5 text-sm">
+          {notes.map((n, i) => (
+            <li key={i}>{n.summary} — {n.actor}, {new Date(n.timestamp).toLocaleString()}</li>
+          ))}
+        </ul>
+      )}
+
+      <h2 className="mt-4 text-sm font-semibold uppercase tracking-wide">Full timeline</h2>
+      <table className="mt-1 w-full text-sm">
+        <tbody>
+          {timeline.map((e, i) => (
+            <tr key={i} className="align-top">
+              <td className="w-40 py-0.5 pr-2 text-xs text-black/60 whitespace-nowrap">{new Date(e.timestamp).toLocaleString()}</td>
+              <td className="py-0.5 pr-2 text-xs font-medium">{TIMELINE_LABELS[e.type] || e.type}</td>
+              <td className="py-0.5">{e.summary} <span className="text-black/60">— {e.actor}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

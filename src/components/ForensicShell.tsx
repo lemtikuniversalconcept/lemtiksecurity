@@ -32,8 +32,18 @@ export function ForensicShell({ children }: { children?: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] text-[#e2e8f0]">
+      {/* Case detail pages render their own printable summary in a print:block
+          element — everything else in the shell (nav, mode toggle, on-screen
+          panels) is dark-themed and pointless on paper, so it's suppressed here
+          rather than in every page that might print. */}
+      <style>{`
+        @media print {
+          .forensic-no-print { display: none !important; }
+          body { background: #fff !important; }
+        }
+      `}</style>
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px]">
-        <aside className="hidden w-64 shrink-0 border-r border-[#2d3748] bg-[#111827] px-4 py-5 lg:block">
+        <aside className="forensic-no-print hidden w-64 shrink-0 border-r border-[#2d3748] bg-[#111827] px-4 py-5 lg:block">
           <div className="flex items-center gap-2.5 px-1">
             <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#3b82f6]/15 text-[#3b82f6]">
               <ScanSearch className="h-5 w-5" />
@@ -69,7 +79,7 @@ export function ForensicShell({ children }: { children?: ReactNode }) {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between gap-3 border-b border-[#2d3748] bg-[#111827] px-4 py-3 sm:px-6">
+          <header className="forensic-no-print flex items-center justify-between gap-3 border-b border-[#2d3748] bg-[#111827] px-4 py-3 sm:px-6">
             <div className="flex items-center gap-2 text-xs text-[#94a3b8]">
               {activeCaseId ? (
                 <span className="rounded-full border border-[#2d3748] bg-[#1a2234] px-2.5 py-1 font-mono text-[11px] text-[#e2e8f0]">

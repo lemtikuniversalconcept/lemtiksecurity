@@ -11,19 +11,19 @@ import { resolveAppAccess } from "@/lib/rbac";
 // any role in the org (an officer, say) could call getForensicCase directly and
 // read case data the UI never shows them, since nothing server-side re-checked
 // the role. resolveAppAccess does a real DB-backed role lookup, not a client claim.
-async function requireForensicAccess(context: { supabase: any }): Promise<string> {
+async function requireForensicAccess(context: { supabase: any }) {
   const access = await resolveAppAccess(context.supabase);
   if (access.specRole !== "security_forensic_analyst") {
     throwSafeError("forensic.access", new Error("forbidden"), "You do not have access to forensic case review.");
   }
-  return access.orgId;
+  return access;
 }
 
 export const getForensicCase = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ incident_id: z.string().min(1) }).parse(d))
   .handler(async ({ data, context }) => {
-    const orgId = await requireForensicAccess(context);
+    const { orgId } = await requireForensicAccess(context);
     const result = await requestRelationshipApi<Record<string, any>>(
       `/forensic/case/${data.incident_id}`,
       { method: "GET", query: { org_id: orgId, analyst_id: context.userId }, headers: { "X-Org-Id": orgId } },
@@ -36,7 +36,7 @@ export const getForensicTimeline = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ incident_id: z.string().min(1) }).parse(d))
   .handler(async ({ data, context }) => {
-    const orgId = await requireForensicAccess(context);
+    const { orgId } = await requireForensicAccess(context);
     const result = await requestRelationshipApi<{ timeline: Record<string, any>[] }>(
       `/forensic/timeline/${data.incident_id}`,
       { method: "GET", query: { org_id: orgId, analyst_id: context.userId }, headers: { "X-Org-Id": orgId } },
@@ -48,12 +48,34 @@ export const getForensicEvidence = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ incident_id: z.string().min(1) }).parse(d))
   .handler(async ({ data, context }) => {
-    const orgId = await requireForensicAccess(context);
+    const { orgId } = await requireForensicAccess(context);
     const result = await requestRelationshipApi<Record<string, any>>(
       `/forensic/evidence/${data.incident_id}`,
       { method: "GET", query: { org_id: orgId, analyst_id: context.userId }, headers: { "X-Org-Id": orgId } },
     );
     if (!result) throwSafeError("forensic.evidence", new Error("relationship API unreachable"), "Unable to load evidence for this case.");
+    return result;
+  });
+
+export const addForensicCaseNote = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ incident_id: z.string().min(1), note: z.string().min(1).max(4000) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const access = await requireForensicAccess(context);
+    const result = await requestRelationshipApi<{ id: string; created_at: string }>(
+      `/forensic/case/${data.incident_id}/note`,
+      {
+        method: "POST",
+        headers: { "X-Org-Id": access.orgId },
+        body: {
+          org_id: access.orgId,
+          analyst_id: context.userId,
+          analyst_name: access.displayName || access.email || "Forensic analyst",
+          note: data.note,
+        },
+      },
+    );
+    if (!result) throwSafeError("forensic.note.add", new Error("relationship API unreachable"), "Could not save that note right now.");
     return result;
   });
 
@@ -68,7 +90,7 @@ export const queryForensicAi = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const orgId = await requireForensicAccess(context);
+    const { orgId } = await requireForensicAccess(context);
     const result = await requestRelationshipApi<{
       response: string;
       sources: { type: string; id: string; timestamp: string | null }[];
