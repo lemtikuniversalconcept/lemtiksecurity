@@ -16,6 +16,13 @@ export function ConsumerShell({ children }: { children?: ReactNode }) {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js", { scope: "/consumer" }).catch(() => {});
     }
+    // Also drain on mount, not just on the 'online' event — a guest who closes the
+    // app while offline and reopens it later after connectivity is already back
+    // never fires an 'online' transition, so anything queued from last time would
+    // otherwise sit in IndexedDB forever.
+    if (typeof navigator === "undefined" || navigator.onLine) {
+      void drainMediaQueue();
+    }
     const goOnline = () => {
       setOnline(true);
       void drainMediaQueue();

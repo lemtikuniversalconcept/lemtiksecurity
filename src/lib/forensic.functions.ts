@@ -12,7 +12,7 @@ export const getForensicCase = createServerFn({ method: "POST" })
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<Record<string, any>>(
       `/forensic/case/${data.incident_id}`,
-      { method: "GET", query: { org_id: orgId }, headers: { "X-Org-Id": orgId } },
+      { method: "GET", query: { org_id: orgId, analyst_id: context.userId }, headers: { "X-Org-Id": orgId } },
     );
     if (!result) throwSafeError("forensic.case", new Error("relationship API unreachable"), "Unable to load this case.");
     return result;
@@ -25,7 +25,7 @@ export const getForensicTimeline = createServerFn({ method: "POST" })
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<{ timeline: Record<string, any>[] }>(
       `/forensic/timeline/${data.incident_id}`,
-      { method: "GET", query: { org_id: orgId }, headers: { "X-Org-Id": orgId } },
+      { method: "GET", query: { org_id: orgId, analyst_id: context.userId }, headers: { "X-Org-Id": orgId } },
     );
     return result?.timeline ?? [];
   });
@@ -37,7 +37,7 @@ export const getForensicEvidence = createServerFn({ method: "POST" })
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<Record<string, any>>(
       `/forensic/evidence/${data.incident_id}`,
-      { method: "GET", query: { org_id: orgId }, headers: { "X-Org-Id": orgId } },
+      { method: "GET", query: { org_id: orgId, analyst_id: context.userId }, headers: { "X-Org-Id": orgId } },
     );
     if (!result) throwSafeError("forensic.evidence", new Error("relationship API unreachable"), "Unable to load evidence for this case.");
     return result;
