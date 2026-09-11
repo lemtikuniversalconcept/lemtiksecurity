@@ -2,8 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { throwSafeError } from "@/lib/server-errors";
-import { getActiveOrgId } from "@/lib/orgs.server";
 import { requestRelationshipApi, relationshipApiConfig } from "@/lib/relationship-api";
+import { resolveAppAccess } from "@/lib/rbac";
 
 // ---------------------------------------------------------------------------
 // Operator-facing: issue a guest session token. Everything below this point
@@ -23,7 +23,15 @@ export const issueConsumerSession = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    // /app/org (the only UI surface for this) is gated to security_manager/client_admin
+    // client-side, but this server function is its own independently callable endpoint —
+    // without this check, any signed-in user of any role could mint a valid, geofenced
+    // guest access code themselves.
+    const access = await resolveAppAccess(context.supabase);
+    if (access.specRole !== "security_manager" && access.specRole !== "client_admin") {
+      throwSafeError("consumer.session.issue", new Error("forbidden"), "You do not have permission to issue guest access codes.");
+    }
+    const orgId = access.orgId;
     const expiresAt = new Date(Date.now() + data.expires_in_hours * 3600 * 1000).toISOString();
     const result = await requestRelationshipApi<{ token: string; qr_code_url: string; expires_at: string }>(
       "/consumer/session/issue",
