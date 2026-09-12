@@ -464,7 +464,7 @@ export const calculateRoute = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? await getActiveOrgId(context.supabase, context.userId);
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<{
       geometry?: { coordinates?: [number, number][] };
       duration?: number;

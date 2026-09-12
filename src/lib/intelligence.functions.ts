@@ -98,7 +98,7 @@ export const listOsintIntelligence = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => listOsintIntelligenceInput.parse(data ?? {}))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const days = data.days ?? 7;
     const result = await requestRelationshipApi<{ incidents?: OsintIntelligenceItem[] }>("/api/v1/osint/intelligence", {
       method: "GET",
@@ -122,7 +122,7 @@ export const getBriefs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => getBriefsInput.parse(data ?? {}))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     // osint's /briefs returns the single latest brief for the window, not a list - there's no
     // "list brief history" endpoint on osint yet, so this wraps the one available brief in an
     // array rather than pretending a fuller history exists.
@@ -138,7 +138,7 @@ export const generateBrief = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => generateBriefInput.parse(data))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<OsintBriefResponse>("/api/v1/briefs/generate", {
       body: {
         org_id: orgId,

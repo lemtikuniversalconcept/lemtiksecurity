@@ -398,7 +398,7 @@ export const findProximityMembers = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }): Promise<any[]> => {
-    const orgId = data.org_id ?? await getActiveOrgId(context.supabase, context.userId);
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     // relationship_api's /api/v1/proximity/find is the same "find_responders" endpoint
     // the incident-orchestration pipeline uses — it always expects a full request_type +
     // incident envelope, not a flat coordinate query, or it 500s on schema validation.

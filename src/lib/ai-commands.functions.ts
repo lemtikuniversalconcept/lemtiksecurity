@@ -309,7 +309,7 @@ export const submitAiRecommendation = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => recommendationInput.parse(data))
   .handler(async ({ data, context }) => {
     const commandText = data.command_text ?? data.incident_id ?? "recommend response";
-    const orgId = data.org_id ?? "";
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     let incidentObj: any = null;
 
     if (data.incident_id) {
@@ -317,6 +317,7 @@ export const submitAiRecommendation = createServerFn({ method: "POST" })
         .from("incidents")
         .select("*")
         .eq("id", data.incident_id)
+        .eq("organisation_id", orgId)
         .maybeSingle();
 
       if (!incErr && incident) {
@@ -425,7 +426,7 @@ export const submitApprovalDecision = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => approvalInput.parse(data))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id || (await getActiveOrgId(context.supabase, context.userId)) || "default";
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const decisionMap = {
       approve_all: "approved",
       approve_selected: "approved",

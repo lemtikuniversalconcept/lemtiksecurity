@@ -63,7 +63,7 @@ export const generateReportSummary = createServerFn({ method: "POST" })
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? await getActiveOrgId(context.supabase, context.userId);
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<{ summary?: string }>("/api/v1/ai/generate-summary", {
       body: {
         org_id: orgId,

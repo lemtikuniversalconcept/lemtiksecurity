@@ -231,7 +231,7 @@ export const ingestFrame = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => commonFrameInput.parse(data))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<GatewayEnvelope<AnyRecord>>("/api/v1/frames/ingest", {
       body: {
         ...data,
@@ -323,7 +323,7 @@ export const analyzeJudgement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => commonFrameInput.parse(data))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<GatewayEnvelope<AnyRecord>>("/api/v1/judgement/analyze", {
       body: {
         ...data,
@@ -349,7 +349,7 @@ export const verifyVision = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => verifyInput.parse(data))
   .handler(async ({ data, context }) => {
-    const orgId = data.org_id ?? (await getActiveOrgId(context.supabase, context.userId));
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
     const result = await requestRelationshipApi<GatewayEnvelope<AnyRecord>>("/api/v1/vision/verify", {
       body: {
         ...data,
