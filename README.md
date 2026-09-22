@@ -407,19 +407,20 @@ _To be added — a walkthrough video will be linked here for the Devpost submiss
 - [ ] Broader correlation logic behind `/ai/correlate-events`
 - [ ] Formal audit log migration for AI-approval decisions
 
-## 👥 Contributors
+## 👥 Team
 
 | Name | Role |
 |---|---|
-| Amisu Abdulsemiu Omotoyosi | Founder & CEO — Product vision, platform architecture |
-| Honourable Onovwiome | Lead Software Engineer — Backend systems, API architecture |
-| Ridwanulah Pedro | Frontend UI Engineer — C4I dashboard, AI Command Studio |
-| Mariana Olufunke | Growth & Product Marketing |
-| Benita Ochokoma | Strategy & Operations |
+| Amisu Abdulsemiu Omotoyosi | Founder & CTO |
+| Ridwanulah Pedro | Co-Founder & CEO |
+| Onovwiome Honourable Onome | AI/ML Data Engineer |
+| Benita Ochokoma | Product Manager & Legal |
+| Mariana Olufunke | Customer Outreach & Research |
+| Susan Moyinoluwa David | Growth & Marketing Lead |
 
 ## 📄 License
 
-Proprietary and confidential. Unauthorised access, reproduction, or distribution is strictly prohibited. © 2026 Lemtik Security. All rights reserved.
+Proprietary — All Rights Reserved. See [LICENSE](./LICENSE). This code is shared publicly for evaluation purposes only (e.g. hackathon/grant judging, technical review); it is not licensed for reuse, modification, or redistribution. © 2026 Lemtik Security. All rights reserved.
 
 ## 🙏 Acknowledgements
 
