@@ -14,6 +14,7 @@
 <br/>
 
 <p align="center">
+  <a href="https://app.lemtik.com.ng"><img src="https://img.shields.io/badge/LIVE%20DEMO-app.lemtik.com.ng-00D4FF?style=for-the-badge&labelColor=080D1A" /></a>
   <img src="https://img.shields.io/badge/HACKATHON-OpenAI%20Build%20Week-00D4FF?style=for-the-badge&labelColor=080D1A" />
   <img src="https://img.shields.io/badge/DEV%20TOOLING-Codex%20Desktop-FF6B35?style=for-the-badge&labelColor=080D1A" />
   <img src="https://img.shields.io/badge/RUNTIME%20INFERENCE-Groq%20%2F%20Llama%203.3-00D4FF?style=for-the-badge&labelColor=080D1A" />
@@ -21,10 +22,15 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=61DAFB&labelColor=080D1A" />
+  <img src="https://img.shields.io/badge/TanStack%20Start-Router%20%2F%20Query-FF4154?style=for-the-badge&logo=react&logoColor=FF4154&labelColor=080D1A" />
   <img src="https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=3178C6&labelColor=080D1A" />
   <img src="https://img.shields.io/badge/Fastify-Gateway-000000?style=for-the-badge&logo=fastify&logoColor=white&labelColor=080D1A" />
   <img src="https://img.shields.io/badge/Python-Services-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=080D1A" />
   <img src="https://img.shields.io/badge/Supabase-Backend-3ECF8E?style=for-the-badge&logo=supabase&logoColor=3ECF8E&labelColor=080D1A" />
+</p>
+
+<p align="center">
+  <a href="https://app.lemtik.com.ng"><strong>🔗 Live Demo: app.lemtik.com.ng</strong></a>
 </p>
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:080D1A,50:0D1A2E,100:00D4FF&height=80&section=header&reversal=true" width="100%"/>
@@ -48,6 +54,7 @@ This project makes a deliberate distinction that judges, contributors, and inves
 
 ## 📑 Table of Contents
 
+- [Live Demo](#-live-demo)
 - [Overview](#-overview)
 - [Problem](#-problem)
 - [Solution](#-solution)
@@ -70,6 +77,15 @@ This project makes a deliberate distinction that judges, contributors, and inves
 - [Contributors](#-contributors)
 - [License](#-license)
 - [Acknowledgements](#-acknowledgements)
+
+---
+
+## 🔗 Live Demo
+
+**[app.lemtik.com.ng](https://app.lemtik.com.ng)**
+
+The platform is live and deployed, not a local-only prototype. Demo access for
+judges/reviewers is provided separately — see [Demo Credentials](#-demo-credentials).
 
 ---
 
@@ -134,7 +150,7 @@ The result is a shorter path from "something happened in the field" to "a verifi
 │     AI Command Studio · Confidence Visualization         │
 │           Approval Workflow · Live Incident Map          │
 └──────────────────────────┬──────────────────────────────┘
-                           │ HTTPS + WebSocket / JWT
+                           │ HTTPS / JWT (polling-based live updates)
 ┌──────────────────────────▼──────────────────────────────┐
 │              RELATIONSHIP API  (Fastify Gateway)          │
 │   /ai/query · /ai/parse-report                            │
@@ -287,13 +303,15 @@ GPT-5.6 is the model underlying OpenAI Codex Desktop for this project. It is a *
 | Technology | Purpose |
 |---|---|
 | React 19 | UI framework |
+| TanStack Start / Router | File-based routing, SSR |
+| TanStack Query | Server state, polling-based live updates |
 | TypeScript | Type safety, strict mode |
 | Vite | Build tool |
-| Tailwind CSS | Styling |
-| TanStack Query | Server state |
-| Zustand | Client state |
+| Tailwind CSS v4 | Styling |
+| Radix UI + shadcn-style components | Accessible UI primitives |
+| React Hook Form + Zod | Form state and validation |
 | Mapbox GL JS | Interactive maps |
-| Socket.io | Real-time updates |
+| Recharts | Analytics charts |
 
 </td>
 <td width="50%">
