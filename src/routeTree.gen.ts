@@ -9,95 +9,65 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
-import { Route as OfficerRouteImport } from './routes/officer'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as ForensicRouteImport } from './routes/forensic'
-import { Route as ConsumerRouteImport } from './routes/consumer'
-import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as OfficerIndexRouteImport } from './routes/officer.index'
-import { Route as ForensicIndexRouteImport } from './routes/forensic.index'
-import { Route as ConsumerIndexRouteImport } from './routes/consumer.index'
+import { Route as AppRouteImport } from './routes/app'
+import { Route as ConsumerRouteImport } from './routes/consumer'
+import { Route as ForensicRouteImport } from './routes/forensic'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as OfficerRouteImport } from './routes/officer'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AppIndexRouteImport } from './routes/app.index'
-import { Route as OfficerSosRouteImport } from './routes/officer.sos'
-import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
-import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
-import { Route as OfficerNotificationsRouteImport } from './routes/officer.notifications'
-import { Route as OfficerNavigationRouteImport } from './routes/officer.navigation'
-import { Route as OfficerHomeRouteImport } from './routes/officer.home'
-import { Route as OfficerDispatchRouteImport } from './routes/officer.dispatch'
-import { Route as ForensicQueriesRouteImport } from './routes/forensic.queries'
-import { Route as ForensicCasesRouteImport } from './routes/forensic.cases'
-import { Route as ConsumerStatusRouteImport } from './routes/consumer.status'
-import { Route as ConsumerReportRouteImport } from './routes/consumer.report'
-import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
-import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
-import { Route as ConsumerActivateRouteImport } from './routes/consumer.activate'
-import { Route as AppUsersRouteImport } from './routes/app.users'
-import { Route as AppSensorsRouteImport } from './routes/app.sensors'
-import { Route as AppReportsRouteImport } from './routes/app.reports'
-import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
-import { Route as AppPatrolsRouteImport } from './routes/app.patrols'
-import { Route as AppOrgRouteImport } from './routes/app.org'
-import { Route as AppMapRouteImport } from './routes/app.map'
-import { Route as AppLocationsRouteImport } from './routes/app.locations'
-import { Route as AppInventoryRouteImport } from './routes/app.inventory'
-import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
-import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
-import { Route as AppDevicesRouteImport } from './routes/app.devices'
-import { Route as AppAuditRouteImport } from './routes/app.audit'
 import { Route as AppAlertsRouteImport } from './routes/app.alerts'
-import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
-import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
-import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id'
-import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
-import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
-import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
-import { Route as AppAdminSystemRouteImport } from './routes/app.admin.system'
-import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
-import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
+import { Route as AppAuditRouteImport } from './routes/app.audit'
+import { Route as AppDevicesRouteImport } from './routes/app.devices'
+import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
+import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
+import { Route as AppInventoryRouteImport } from './routes/app.inventory'
+import { Route as AppLocationsRouteImport } from './routes/app.locations'
+import { Route as AppMapRouteImport } from './routes/app.map'
+import { Route as AppOrgRouteImport } from './routes/app.org'
+import { Route as AppPatrolsRouteImport } from './routes/app.patrols'
+import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
+import { Route as AppReportsRouteImport } from './routes/app.reports'
+import { Route as AppSensorsRouteImport } from './routes/app.sensors'
+import { Route as AppUsersRouteImport } from './routes/app.users'
+import { Route as ConsumerIndexRouteImport } from './routes/consumer.index'
+import { Route as ConsumerActivateRouteImport } from './routes/consumer.activate'
+import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
+import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
+import { Route as ConsumerReportRouteImport } from './routes/consumer.report'
+import { Route as ConsumerStatusRouteImport } from './routes/consumer.status'
+import { Route as ForensicIndexRouteImport } from './routes/forensic.index'
+import { Route as ForensicCasesRouteImport } from './routes/forensic.cases'
+import { Route as ForensicQueriesRouteImport } from './routes/forensic.queries'
+import { Route as OfficerIndexRouteImport } from './routes/officer.index'
+import { Route as OfficerDispatchRouteImport } from './routes/officer.dispatch'
+import { Route as OfficerHomeRouteImport } from './routes/officer.home'
+import { Route as OfficerNavigationRouteImport } from './routes/officer.navigation'
+import { Route as OfficerNotificationsRouteImport } from './routes/officer.notifications'
+import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
+import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
+import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
-import { Route as ForensicCasesIdReidRouteImport } from './routes/forensic.cases.$id.reid'
-import { Route as ForensicCasesIdEvidenceRouteImport } from './routes/forensic.cases.$id.evidence'
-import { Route as ForensicCasesIdAiRouteImport } from './routes/forensic.cases.$id.ai'
+import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
+import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
+import { Route as AppAdminSystemRouteImport } from './routes/app.admin.system'
+import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
+import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
+import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
+import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id'
+import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
+import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
 import { Route as AppAdminOrganisationsIdRouteImport } from './routes/app.admin.organisations.$id'
+import { Route as ForensicCasesIdAiRouteImport } from './routes/forensic.cases.$id.ai'
+import { Route as ForensicCasesIdEvidenceRouteImport } from './routes/forensic.cases.$id.evidence'
+import { Route as ForensicCasesIdReidRouteImport } from './routes/forensic.cases.$id.reid'
 
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OfficerRoute = OfficerRouteImport.update({
-  id: '/officer',
-  path: '/officer',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ForensicRoute = ForensicRouteImport.update({
-  id: '/forensic',
-  path: '/forensic',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConsumerRoute = ConsumerRouteImport.update({
-  id: '/consumer',
-  path: '/consumer',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppRoute = AppRouteImport.update({
@@ -105,164 +75,44 @@ const AppRoute = AppRouteImport.update({
   path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const ConsumerRoute = ConsumerRouteImport.update({
+  id: '/consumer',
+  path: '/consumer',
   getParentRoute: () => rootRouteImport,
 } as any)
-const OfficerIndexRoute = OfficerIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => OfficerRoute,
+const ForensicRoute = ForensicRouteImport.update({
+  id: '/forensic',
+  path: '/forensic',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const ForensicIndexRoute = ForensicIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ForensicRoute,
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const ConsumerIndexRoute = ConsumerIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ConsumerRoute,
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OfficerRoute = OfficerRouteImport.update({
+  id: '/officer',
+  path: '/officer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppRoute,
-} as any)
-const OfficerSosRoute = OfficerSosRouteImport.update({
-  id: '/sos',
-  path: '/sos',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerScheduleRoute = OfficerScheduleRouteImport.update({
-  id: '/schedule',
-  path: '/schedule',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerPatrolRoute = OfficerPatrolRouteImport.update({
-  id: '/patrol',
-  path: '/patrol',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerNotificationsRoute = OfficerNotificationsRouteImport.update({
-  id: '/notifications',
-  path: '/notifications',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerNavigationRoute = OfficerNavigationRouteImport.update({
-  id: '/navigation',
-  path: '/navigation',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerHomeRoute = OfficerHomeRouteImport.update({
-  id: '/home',
-  path: '/home',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerDispatchRoute = OfficerDispatchRouteImport.update({
-  id: '/dispatch',
-  path: '/dispatch',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const ForensicQueriesRoute = ForensicQueriesRouteImport.update({
-  id: '/queries',
-  path: '/queries',
-  getParentRoute: () => ForensicRoute,
-} as any)
-const ForensicCasesRoute = ForensicCasesRouteImport.update({
-  id: '/cases',
-  path: '/cases',
-  getParentRoute: () => ForensicRoute,
-} as any)
-const ConsumerStatusRoute = ConsumerStatusRouteImport.update({
-  id: '/status',
-  path: '/status',
-  getParentRoute: () => ConsumerRoute,
-} as any)
-const ConsumerReportRoute = ConsumerReportRouteImport.update({
-  id: '/report',
-  path: '/report',
-  getParentRoute: () => ConsumerRoute,
-} as any)
-const ConsumerHomeRoute = ConsumerHomeRouteImport.update({
-  id: '/home',
-  path: '/home',
-  getParentRoute: () => ConsumerRoute,
-} as any)
-const ConsumerAiRoute = ConsumerAiRouteImport.update({
-  id: '/ai',
-  path: '/ai',
-  getParentRoute: () => ConsumerRoute,
-} as any)
-const ConsumerActivateRoute = ConsumerActivateRouteImport.update({
-  id: '/activate',
-  path: '/activate',
-  getParentRoute: () => ConsumerRoute,
-} as any)
-const AppUsersRoute = AppUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSensorsRoute = AppSensorsRouteImport.update({
-  id: '/sensors',
-  path: '/sensors',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppReportsRoute = AppReportsRouteImport.update({
-  id: '/reports',
-  path: '/reports',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppReportCentreRoute = AppReportCentreRouteImport.update({
-  id: '/report-centre',
-  path: '/report-centre',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPatrolsRoute = AppPatrolsRouteImport.update({
-  id: '/patrols',
-  path: '/patrols',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppOrgRoute = AppOrgRouteImport.update({
-  id: '/org',
-  path: '/org',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppMapRoute = AppMapRouteImport.update({
-  id: '/map',
-  path: '/map',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLocationsRoute = AppLocationsRouteImport.update({
-  id: '/locations',
-  path: '/locations',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppInventoryRoute = AppInventoryRouteImport.update({
-  id: '/inventory',
-  path: '/inventory',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppIntelligenceRoute = AppIntelligenceRouteImport.update({
-  id: '/intelligence',
-  path: '/intelligence',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppIncidentsRoute = AppIncidentsRouteImport.update({
-  id: '/incidents',
-  path: '/incidents',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDevicesRoute = AppDevicesRouteImport.update({
-  id: '/devices',
-  path: '/devices',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAuditRoute = AppAuditRouteImport.update({
-  id: '/audit',
-  path: '/audit',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAlertsRoute = AppAlertsRouteImport.update({
@@ -270,44 +120,159 @@ const AppAlertsRoute = AppAlertsRouteImport.update({
   path: '/alerts',
   getParentRoute: () => AppRoute,
 } as any)
-const OfficerIncidentNewRoute = OfficerIncidentNewRouteImport.update({
-  id: '/incident/new',
-  path: '/incident/new',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const OfficerIncidentIdRoute = OfficerIncidentIdRouteImport.update({
-  id: '/incident/$id',
-  path: '/incident/$id',
-  getParentRoute: () => OfficerRoute,
-} as any)
-const ForensicCasesIdRoute = ForensicCasesIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => ForensicCasesRoute,
-} as any)
-const AppUsersIdRoute = AppUsersIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AppUsersRoute,
-} as any)
-const AppPatrolsIdRoute = AppPatrolsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AppPatrolsRoute,
-} as any)
-const AppIncidentsIdRoute = AppIncidentsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AppIncidentsRoute,
-} as any)
-const AppAdminSystemRoute = AppAdminSystemRouteImport.update({
-  id: '/admin/system',
-  path: '/admin/system',
+const AppAuditRoute = AppAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAdminOrganisationsRoute = AppAdminOrganisationsRouteImport.update({
-  id: '/admin/organisations',
-  path: '/admin/organisations',
+const AppDevicesRoute = AppDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIncidentsRoute = AppIncidentsRouteImport.update({
+  id: '/incidents',
+  path: '/incidents',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIntelligenceRoute = AppIntelligenceRouteImport.update({
+  id: '/intelligence',
+  path: '/intelligence',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInventoryRoute = AppInventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLocationsRoute = AppLocationsRouteImport.update({
+  id: '/locations',
+  path: '/locations',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMapRoute = AppMapRouteImport.update({
+  id: '/map',
+  path: '/map',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOrgRoute = AppOrgRouteImport.update({
+  id: '/org',
+  path: '/org',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPatrolsRoute = AppPatrolsRouteImport.update({
+  id: '/patrols',
+  path: '/patrols',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportCentreRoute = AppReportCentreRouteImport.update({
+  id: '/report-centre',
+  path: '/report-centre',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsRoute = AppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSensorsRoute = AppSensorsRouteImport.update({
+  id: '/sensors',
+  path: '/sensors',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppUsersRoute = AppUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppRoute,
+} as any)
+const ConsumerIndexRoute = ConsumerIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerActivateRoute = ConsumerActivateRouteImport.update({
+  id: '/activate',
+  path: '/activate',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerAiRoute = ConsumerAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerHomeRoute = ConsumerHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerReportRoute = ConsumerReportRouteImport.update({
+  id: '/report',
+  path: '/report',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ConsumerStatusRoute = ConsumerStatusRouteImport.update({
+  id: '/status',
+  path: '/status',
+  getParentRoute: () => ConsumerRoute,
+} as any)
+const ForensicIndexRoute = ForensicIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ForensicRoute,
+} as any)
+const ForensicCasesRoute = ForensicCasesRouteImport.update({
+  id: '/cases',
+  path: '/cases',
+  getParentRoute: () => ForensicRoute,
+} as any)
+const ForensicQueriesRoute = ForensicQueriesRouteImport.update({
+  id: '/queries',
+  path: '/queries',
+  getParentRoute: () => ForensicRoute,
+} as any)
+const OfficerIndexRoute = OfficerIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerDispatchRoute = OfficerDispatchRouteImport.update({
+  id: '/dispatch',
+  path: '/dispatch',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerHomeRoute = OfficerHomeRouteImport.update({
+  id: '/home',
+  path: '/home',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerNavigationRoute = OfficerNavigationRouteImport.update({
+  id: '/navigation',
+  path: '/navigation',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerNotificationsRoute = OfficerNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerPatrolRoute = OfficerPatrolRouteImport.update({
+  id: '/patrol',
+  path: '/patrol',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerScheduleRoute = OfficerScheduleRouteImport.update({
+  id: '/schedule',
+  path: '/schedule',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerSosRoute = OfficerSosRouteImport.update({
+  id: '/sos',
+  path: '/sos',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
+  id: '/admin/audit',
+  path: '/admin/audit',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAdminBillingRoute = AppAdminBillingRouteImport.update({
@@ -315,14 +280,54 @@ const AppAdminBillingRoute = AppAdminBillingRouteImport.update({
   path: '/admin/billing',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
-  id: '/admin/audit',
-  path: '/admin/audit',
+const AppAdminOrganisationsRoute = AppAdminOrganisationsRouteImport.update({
+  id: '/admin/organisations',
+  path: '/admin/organisations',
   getParentRoute: () => AppRoute,
 } as any)
-const ForensicCasesIdReidRoute = ForensicCasesIdReidRouteImport.update({
-  id: '/reid',
-  path: '/reid',
+const AppAdminSystemRoute = AppAdminSystemRouteImport.update({
+  id: '/admin/system',
+  path: '/admin/system',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIncidentsIdRoute = AppIncidentsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AppIncidentsRoute,
+} as any)
+const AppPatrolsIdRoute = AppPatrolsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AppPatrolsRoute,
+} as any)
+const AppUsersIdRoute = AppUsersIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AppUsersRoute,
+} as any)
+const ForensicCasesIdRoute = ForensicCasesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ForensicCasesRoute,
+} as any)
+const OfficerIncidentIdRoute = OfficerIncidentIdRouteImport.update({
+  id: '/incident/$id',
+  path: '/incident/$id',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerIncidentNewRoute = OfficerIncidentNewRouteImport.update({
+  id: '/incident/new',
+  path: '/incident/new',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AppAdminOrganisationsRoute,
+} as any)
+const ForensicCasesIdAiRoute = ForensicCasesIdAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
   getParentRoute: () => ForensicCasesIdRoute,
 } as any)
 const ForensicCasesIdEvidenceRoute = ForensicCasesIdEvidenceRouteImport.update({
@@ -330,15 +335,10 @@ const ForensicCasesIdEvidenceRoute = ForensicCasesIdEvidenceRouteImport.update({
   path: '/evidence',
   getParentRoute: () => ForensicCasesIdRoute,
 } as any)
-const ForensicCasesIdAiRoute = ForensicCasesIdAiRouteImport.update({
-  id: '/ai',
-  path: '/ai',
+const ForensicCasesIdReidRoute = ForensicCasesIdReidRouteImport.update({
+  id: '/reid',
+  path: '/reid',
   getParentRoute: () => ForensicCasesIdRoute,
-} as any)
-const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => AppAdminOrganisationsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -693,53 +693,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/officer': {
-      id: '/officer'
-      path: '/officer'
-      fullPath: '/officer'
-      preLoaderRoute: typeof OfficerRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forgot-password': {
-      id: '/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/forensic': {
-      id: '/forensic'
-      path: '/forensic'
-      fullPath: '/forensic'
-      preLoaderRoute: typeof ForensicRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/consumer': {
-      id: '/consumer'
-      path: '/consumer'
-      fullPath: '/consumer'
-      preLoaderRoute: typeof ConsumerRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app': {
@@ -749,228 +707,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/consumer': {
+      id: '/consumer'
+      path: '/consumer'
+      fullPath: '/consumer'
+      preLoaderRoute: typeof ConsumerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/officer/': {
-      id: '/officer/'
-      path: '/'
-      fullPath: '/officer/'
-      preLoaderRoute: typeof OfficerIndexRouteImport
-      parentRoute: typeof OfficerRoute
+    '/forensic': {
+      id: '/forensic'
+      path: '/forensic'
+      fullPath: '/forensic'
+      preLoaderRoute: typeof ForensicRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/forensic/': {
-      id: '/forensic/'
-      path: '/'
-      fullPath: '/forensic/'
-      preLoaderRoute: typeof ForensicIndexRouteImport
-      parentRoute: typeof ForensicRoute
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/consumer/': {
-      id: '/consumer/'
-      path: '/'
-      fullPath: '/consumer/'
-      preLoaderRoute: typeof ConsumerIndexRouteImport
-      parentRoute: typeof ConsumerRoute
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/officer': {
+      id: '/officer'
+      path: '/officer'
+      fullPath: '/officer'
+      preLoaderRoute: typeof OfficerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/app/': {
       id: '/app/'
       path: '/'
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/officer/sos': {
-      id: '/officer/sos'
-      path: '/sos'
-      fullPath: '/officer/sos'
-      preLoaderRoute: typeof OfficerSosRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/schedule': {
-      id: '/officer/schedule'
-      path: '/schedule'
-      fullPath: '/officer/schedule'
-      preLoaderRoute: typeof OfficerScheduleRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/patrol': {
-      id: '/officer/patrol'
-      path: '/patrol'
-      fullPath: '/officer/patrol'
-      preLoaderRoute: typeof OfficerPatrolRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/notifications': {
-      id: '/officer/notifications'
-      path: '/notifications'
-      fullPath: '/officer/notifications'
-      preLoaderRoute: typeof OfficerNotificationsRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/navigation': {
-      id: '/officer/navigation'
-      path: '/navigation'
-      fullPath: '/officer/navigation'
-      preLoaderRoute: typeof OfficerNavigationRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/home': {
-      id: '/officer/home'
-      path: '/home'
-      fullPath: '/officer/home'
-      preLoaderRoute: typeof OfficerHomeRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/dispatch': {
-      id: '/officer/dispatch'
-      path: '/dispatch'
-      fullPath: '/officer/dispatch'
-      preLoaderRoute: typeof OfficerDispatchRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/forensic/queries': {
-      id: '/forensic/queries'
-      path: '/queries'
-      fullPath: '/forensic/queries'
-      preLoaderRoute: typeof ForensicQueriesRouteImport
-      parentRoute: typeof ForensicRoute
-    }
-    '/forensic/cases': {
-      id: '/forensic/cases'
-      path: '/cases'
-      fullPath: '/forensic/cases'
-      preLoaderRoute: typeof ForensicCasesRouteImport
-      parentRoute: typeof ForensicRoute
-    }
-    '/consumer/status': {
-      id: '/consumer/status'
-      path: '/status'
-      fullPath: '/consumer/status'
-      preLoaderRoute: typeof ConsumerStatusRouteImport
-      parentRoute: typeof ConsumerRoute
-    }
-    '/consumer/report': {
-      id: '/consumer/report'
-      path: '/report'
-      fullPath: '/consumer/report'
-      preLoaderRoute: typeof ConsumerReportRouteImport
-      parentRoute: typeof ConsumerRoute
-    }
-    '/consumer/home': {
-      id: '/consumer/home'
-      path: '/home'
-      fullPath: '/consumer/home'
-      preLoaderRoute: typeof ConsumerHomeRouteImport
-      parentRoute: typeof ConsumerRoute
-    }
-    '/consumer/ai': {
-      id: '/consumer/ai'
-      path: '/ai'
-      fullPath: '/consumer/ai'
-      preLoaderRoute: typeof ConsumerAiRouteImport
-      parentRoute: typeof ConsumerRoute
-    }
-    '/consumer/activate': {
-      id: '/consumer/activate'
-      path: '/activate'
-      fullPath: '/consumer/activate'
-      preLoaderRoute: typeof ConsumerActivateRouteImport
-      parentRoute: typeof ConsumerRoute
-    }
-    '/app/users': {
-      id: '/app/users'
-      path: '/users'
-      fullPath: '/app/users'
-      preLoaderRoute: typeof AppUsersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/sensors': {
-      id: '/app/sensors'
-      path: '/sensors'
-      fullPath: '/app/sensors'
-      preLoaderRoute: typeof AppSensorsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/reports': {
-      id: '/app/reports'
-      path: '/reports'
-      fullPath: '/app/reports'
-      preLoaderRoute: typeof AppReportsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/report-centre': {
-      id: '/app/report-centre'
-      path: '/report-centre'
-      fullPath: '/app/report-centre'
-      preLoaderRoute: typeof AppReportCentreRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/patrols': {
-      id: '/app/patrols'
-      path: '/patrols'
-      fullPath: '/app/patrols'
-      preLoaderRoute: typeof AppPatrolsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/org': {
-      id: '/app/org'
-      path: '/org'
-      fullPath: '/app/org'
-      preLoaderRoute: typeof AppOrgRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/map': {
-      id: '/app/map'
-      path: '/map'
-      fullPath: '/app/map'
-      preLoaderRoute: typeof AppMapRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/locations': {
-      id: '/app/locations'
-      path: '/locations'
-      fullPath: '/app/locations'
-      preLoaderRoute: typeof AppLocationsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/inventory': {
-      id: '/app/inventory'
-      path: '/inventory'
-      fullPath: '/app/inventory'
-      preLoaderRoute: typeof AppInventoryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/intelligence': {
-      id: '/app/intelligence'
-      path: '/intelligence'
-      fullPath: '/app/intelligence'
-      preLoaderRoute: typeof AppIntelligenceRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/incidents': {
-      id: '/app/incidents'
-      path: '/incidents'
-      fullPath: '/app/incidents'
-      preLoaderRoute: typeof AppIncidentsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/devices': {
-      id: '/app/devices'
-      path: '/devices'
-      fullPath: '/app/devices'
-      preLoaderRoute: typeof AppDevicesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/audit': {
-      id: '/app/audit'
-      path: '/audit'
-      fullPath: '/app/audit'
-      preLoaderRoute: typeof AppAuditRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/alerts': {
@@ -980,60 +770,221 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAlertsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/officer/incident/new': {
-      id: '/officer/incident/new'
-      path: '/incident/new'
-      fullPath: '/officer/incident/new'
-      preLoaderRoute: typeof OfficerIncidentNewRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/officer/incident/$id': {
-      id: '/officer/incident/$id'
-      path: '/incident/$id'
-      fullPath: '/officer/incident/$id'
-      preLoaderRoute: typeof OfficerIncidentIdRouteImport
-      parentRoute: typeof OfficerRoute
-    }
-    '/forensic/cases/$id': {
-      id: '/forensic/cases/$id'
-      path: '/$id'
-      fullPath: '/forensic/cases/$id'
-      preLoaderRoute: typeof ForensicCasesIdRouteImport
-      parentRoute: typeof ForensicCasesRoute
-    }
-    '/app/users/$id': {
-      id: '/app/users/$id'
-      path: '/$id'
-      fullPath: '/app/users/$id'
-      preLoaderRoute: typeof AppUsersIdRouteImport
-      parentRoute: typeof AppUsersRoute
-    }
-    '/app/patrols/$id': {
-      id: '/app/patrols/$id'
-      path: '/$id'
-      fullPath: '/app/patrols/$id'
-      preLoaderRoute: typeof AppPatrolsIdRouteImport
-      parentRoute: typeof AppPatrolsRoute
-    }
-    '/app/incidents/$id': {
-      id: '/app/incidents/$id'
-      path: '/$id'
-      fullPath: '/app/incidents/$id'
-      preLoaderRoute: typeof AppIncidentsIdRouteImport
-      parentRoute: typeof AppIncidentsRoute
-    }
-    '/app/admin/system': {
-      id: '/app/admin/system'
-      path: '/admin/system'
-      fullPath: '/app/admin/system'
-      preLoaderRoute: typeof AppAdminSystemRouteImport
+    '/app/audit': {
+      id: '/app/audit'
+      path: '/audit'
+      fullPath: '/app/audit'
+      preLoaderRoute: typeof AppAuditRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/admin/organisations': {
-      id: '/app/admin/organisations'
-      path: '/admin/organisations'
-      fullPath: '/app/admin/organisations'
-      preLoaderRoute: typeof AppAdminOrganisationsRouteImport
+    '/app/devices': {
+      id: '/app/devices'
+      path: '/devices'
+      fullPath: '/app/devices'
+      preLoaderRoute: typeof AppDevicesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/incidents': {
+      id: '/app/incidents'
+      path: '/incidents'
+      fullPath: '/app/incidents'
+      preLoaderRoute: typeof AppIncidentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/intelligence': {
+      id: '/app/intelligence'
+      path: '/intelligence'
+      fullPath: '/app/intelligence'
+      preLoaderRoute: typeof AppIntelligenceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/inventory': {
+      id: '/app/inventory'
+      path: '/inventory'
+      fullPath: '/app/inventory'
+      preLoaderRoute: typeof AppInventoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/locations': {
+      id: '/app/locations'
+      path: '/locations'
+      fullPath: '/app/locations'
+      preLoaderRoute: typeof AppLocationsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/map': {
+      id: '/app/map'
+      path: '/map'
+      fullPath: '/app/map'
+      preLoaderRoute: typeof AppMapRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/org': {
+      id: '/app/org'
+      path: '/org'
+      fullPath: '/app/org'
+      preLoaderRoute: typeof AppOrgRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/patrols': {
+      id: '/app/patrols'
+      path: '/patrols'
+      fullPath: '/app/patrols'
+      preLoaderRoute: typeof AppPatrolsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/report-centre': {
+      id: '/app/report-centre'
+      path: '/report-centre'
+      fullPath: '/app/report-centre'
+      preLoaderRoute: typeof AppReportCentreRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/reports': {
+      id: '/app/reports'
+      path: '/reports'
+      fullPath: '/app/reports'
+      preLoaderRoute: typeof AppReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/sensors': {
+      id: '/app/sensors'
+      path: '/sensors'
+      fullPath: '/app/sensors'
+      preLoaderRoute: typeof AppSensorsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/users': {
+      id: '/app/users'
+      path: '/users'
+      fullPath: '/app/users'
+      preLoaderRoute: typeof AppUsersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/consumer/': {
+      id: '/consumer/'
+      path: '/'
+      fullPath: '/consumer/'
+      preLoaderRoute: typeof ConsumerIndexRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/activate': {
+      id: '/consumer/activate'
+      path: '/activate'
+      fullPath: '/consumer/activate'
+      preLoaderRoute: typeof ConsumerActivateRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/ai': {
+      id: '/consumer/ai'
+      path: '/ai'
+      fullPath: '/consumer/ai'
+      preLoaderRoute: typeof ConsumerAiRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/home': {
+      id: '/consumer/home'
+      path: '/home'
+      fullPath: '/consumer/home'
+      preLoaderRoute: typeof ConsumerHomeRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/report': {
+      id: '/consumer/report'
+      path: '/report'
+      fullPath: '/consumer/report'
+      preLoaderRoute: typeof ConsumerReportRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/consumer/status': {
+      id: '/consumer/status'
+      path: '/status'
+      fullPath: '/consumer/status'
+      preLoaderRoute: typeof ConsumerStatusRouteImport
+      parentRoute: typeof ConsumerRoute
+    }
+    '/forensic/': {
+      id: '/forensic/'
+      path: '/'
+      fullPath: '/forensic/'
+      preLoaderRoute: typeof ForensicIndexRouteImport
+      parentRoute: typeof ForensicRoute
+    }
+    '/forensic/cases': {
+      id: '/forensic/cases'
+      path: '/cases'
+      fullPath: '/forensic/cases'
+      preLoaderRoute: typeof ForensicCasesRouteImport
+      parentRoute: typeof ForensicRoute
+    }
+    '/forensic/queries': {
+      id: '/forensic/queries'
+      path: '/queries'
+      fullPath: '/forensic/queries'
+      preLoaderRoute: typeof ForensicQueriesRouteImport
+      parentRoute: typeof ForensicRoute
+    }
+    '/officer/': {
+      id: '/officer/'
+      path: '/'
+      fullPath: '/officer/'
+      preLoaderRoute: typeof OfficerIndexRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/dispatch': {
+      id: '/officer/dispatch'
+      path: '/dispatch'
+      fullPath: '/officer/dispatch'
+      preLoaderRoute: typeof OfficerDispatchRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/home': {
+      id: '/officer/home'
+      path: '/home'
+      fullPath: '/officer/home'
+      preLoaderRoute: typeof OfficerHomeRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/navigation': {
+      id: '/officer/navigation'
+      path: '/navigation'
+      fullPath: '/officer/navigation'
+      preLoaderRoute: typeof OfficerNavigationRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/notifications': {
+      id: '/officer/notifications'
+      path: '/notifications'
+      fullPath: '/officer/notifications'
+      preLoaderRoute: typeof OfficerNotificationsRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/patrol': {
+      id: '/officer/patrol'
+      path: '/patrol'
+      fullPath: '/officer/patrol'
+      preLoaderRoute: typeof OfficerPatrolRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/schedule': {
+      id: '/officer/schedule'
+      path: '/schedule'
+      fullPath: '/officer/schedule'
+      preLoaderRoute: typeof OfficerScheduleRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/sos': {
+      id: '/officer/sos'
+      path: '/sos'
+      fullPath: '/officer/sos'
+      preLoaderRoute: typeof OfficerSosRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/app/admin/audit': {
+      id: '/app/admin/audit'
+      path: '/admin/audit'
+      fullPath: '/app/admin/audit'
+      preLoaderRoute: typeof AppAdminAuditRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/admin/billing': {
@@ -1043,18 +994,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminBillingRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/admin/audit': {
-      id: '/app/admin/audit'
-      path: '/admin/audit'
-      fullPath: '/app/admin/audit'
-      preLoaderRoute: typeof AppAdminAuditRouteImport
+    '/app/admin/organisations': {
+      id: '/app/admin/organisations'
+      path: '/admin/organisations'
+      fullPath: '/app/admin/organisations'
+      preLoaderRoute: typeof AppAdminOrganisationsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/forensic/cases/$id/reid': {
-      id: '/forensic/cases/$id/reid'
-      path: '/reid'
-      fullPath: '/forensic/cases/$id/reid'
-      preLoaderRoute: typeof ForensicCasesIdReidRouteImport
+    '/app/admin/system': {
+      id: '/app/admin/system'
+      path: '/admin/system'
+      fullPath: '/app/admin/system'
+      preLoaderRoute: typeof AppAdminSystemRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/incidents/$id': {
+      id: '/app/incidents/$id'
+      path: '/$id'
+      fullPath: '/app/incidents/$id'
+      preLoaderRoute: typeof AppIncidentsIdRouteImport
+      parentRoute: typeof AppIncidentsRoute
+    }
+    '/app/patrols/$id': {
+      id: '/app/patrols/$id'
+      path: '/$id'
+      fullPath: '/app/patrols/$id'
+      preLoaderRoute: typeof AppPatrolsIdRouteImport
+      parentRoute: typeof AppPatrolsRoute
+    }
+    '/app/users/$id': {
+      id: '/app/users/$id'
+      path: '/$id'
+      fullPath: '/app/users/$id'
+      preLoaderRoute: typeof AppUsersIdRouteImport
+      parentRoute: typeof AppUsersRoute
+    }
+    '/forensic/cases/$id': {
+      id: '/forensic/cases/$id'
+      path: '/$id'
+      fullPath: '/forensic/cases/$id'
+      preLoaderRoute: typeof ForensicCasesIdRouteImport
+      parentRoute: typeof ForensicCasesRoute
+    }
+    '/officer/incident/$id': {
+      id: '/officer/incident/$id'
+      path: '/incident/$id'
+      fullPath: '/officer/incident/$id'
+      preLoaderRoute: typeof OfficerIncidentIdRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/incident/new': {
+      id: '/officer/incident/new'
+      path: '/incident/new'
+      fullPath: '/officer/incident/new'
+      preLoaderRoute: typeof OfficerIncidentNewRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/app/admin/organisations/$id': {
+      id: '/app/admin/organisations/$id'
+      path: '/$id'
+      fullPath: '/app/admin/organisations/$id'
+      preLoaderRoute: typeof AppAdminOrganisationsIdRouteImport
+      parentRoute: typeof AppAdminOrganisationsRoute
+    }
+    '/forensic/cases/$id/ai': {
+      id: '/forensic/cases/$id/ai'
+      path: '/ai'
+      fullPath: '/forensic/cases/$id/ai'
+      preLoaderRoute: typeof ForensicCasesIdAiRouteImport
       parentRoute: typeof ForensicCasesIdRoute
     }
     '/forensic/cases/$id/evidence': {
@@ -1064,19 +1071,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForensicCasesIdEvidenceRouteImport
       parentRoute: typeof ForensicCasesIdRoute
     }
-    '/forensic/cases/$id/ai': {
-      id: '/forensic/cases/$id/ai'
-      path: '/ai'
-      fullPath: '/forensic/cases/$id/ai'
-      preLoaderRoute: typeof ForensicCasesIdAiRouteImport
+    '/forensic/cases/$id/reid': {
+      id: '/forensic/cases/$id/reid'
+      path: '/reid'
+      fullPath: '/forensic/cases/$id/reid'
+      preLoaderRoute: typeof ForensicCasesIdReidRouteImport
       parentRoute: typeof ForensicCasesIdRoute
-    }
-    '/app/admin/organisations/$id': {
-      id: '/app/admin/organisations/$id'
-      path: '/$id'
-      fullPath: '/app/admin/organisations/$id'
-      preLoaderRoute: typeof AppAdminOrganisationsIdRouteImport
-      parentRoute: typeof AppAdminOrganisationsRoute
     }
   }
 }
