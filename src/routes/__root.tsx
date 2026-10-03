@@ -89,8 +89,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:site", content: "@LemtikSecurity" },
       { name: "twitter:title", content: "Lemtik Security" },
       { name: "twitter:description", content: "**Lemtik Security** builds urban intelligence software that gives Lagos security managers real-time incident mapping, patrol tracking, and threat alerts." },
-      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d1596996-6a43-4ee6-9183-86c015e8effb" },
-      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/d1596996-6a43-4ee6-9183-86c015e8effb" },
+      { property: "og:image", content: "https://app.lemtik.com.ng/favicon.png" },
+      { name: "twitter:image", content: "https://app.lemtik.com.ng/favicon.png" },
     ],
     links: [
       {
