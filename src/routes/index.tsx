@@ -156,6 +156,12 @@ function Landing() {
       <footer className="border-t border-border">
         <div className="mx-auto max-w-6xl px-6 py-8 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
           <div>© {new Date().getFullYear()} Lemtik Security · Lagos, Nigeria</div>
+          <a
+            href="https://lemtik.com.ng"
+            className="hover:text-foreground transition-colors"
+          >
+            lemtik.com.ng
+          </a>
           <div className="font-mono">SOD v1.0</div>
         </div>
       </footer>
