@@ -2,8 +2,10 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { ShieldHalf, Loader2, Mail, ArrowLeft } from "lucide-react";
+import { Loader2, Mail, ArrowLeft } from "lucide-react";
 import { verifyGoogleLogin } from "@/lib/users.functions";
+import { AuthLayout } from "@/components/AuthLayout";
+import { Notice } from "@/components/nw";
 
 export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: "Sign in · Lemtik SOD" }] }),
@@ -168,171 +170,121 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen grid place-items-center bg-background px-4 grid-bg">
-      <div className="w-full max-w-sm">
-        <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-          <div className="grid h-10 w-10 place-items-center rounded-md bg-primary/15 border border-primary/40">
-            <ShieldHalf className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold tracking-tight">LEMTIK</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Security Ops</div>
-          </div>
-        </Link>
-
-        <div className="rounded-lg border border-border bg-card p-6">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Restricted access
-          </div>
-          <h1 className="mt-1 text-xl font-semibold">Sign in to console</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Lagos urban intelligence platform. Authorised personnel only.
-          </p>
-
-          <form onSubmit={submit} className="mt-5 space-y-3">
-            <Field label="Email">
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input"
-                placeholder="ops@lemtik.com"
-              />
-            </Field>
-            <Field label="Password">
-              <input
-                type="password"
-                required
-                minLength={8}
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="input"
-                placeholder="••••••••"
-              />
-            </Field>
-
-            {error && (
-              <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-            >
-              {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Sign in
-            </button>
-
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-              <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
-            </div>
-
-            <button
-              type="button"
-              onClick={signInWithGoogle}
-              disabled={loading || googleLoading}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface/70 disabled:opacity-60"
-            >
-              {googleLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              <GoogleIcon /> Continue with Google
-            </button>
-
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setRecoveryMessage(null);
-                  setShowRecovery((current) => !current);
-                }}
-                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
-              >
-                Forgot password?
-              </button>
-            </div>
-          </form>
-
-          {showRecovery && (
-            <div className="mt-4 rounded-md border border-border bg-surface px-3 py-3">
-              <div className="flex items-center gap-2 text-xs font-medium">
-                <Mail className="h-3.5 w-3.5 text-primary" />
-                Send a reset link
-              </div>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                We&apos;ll send the reset link to the email above and open the password recovery flow.
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={sendPasswordReset}
-                  disabled={resetLoading}
-                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-                >
-                  {resetLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Send reset link
-                </button>
-                <Link
-                  to="/forgot-password"
-                  className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface/70"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Open page
-                </Link>
-              </div>
-            </div>
-          )}
-
-          {recoveryMessage && (
-            <div className="mt-4 rounded-md border border-resolved/40 bg-resolved/10 px-3 py-2 text-xs text-resolved">
-              {recoveryMessage}
-            </div>
-          )}
-
-          <p className="mt-4 text-center text-[11px] text-muted-foreground">
-            Accounts are provisioned by a manager. Contact ops to request access.
-          </p>
-        </div>
-
-        <p className="mt-4 text-center text-[10px] font-mono text-muted-foreground">
-          All actions are logged · Lemtik Security · Lagos Ops
+    <AuthLayout>
+      <div className="col g8">
+        <h1 style={{ fontSize: 28, fontWeight: 650, fontStretch: "110%", letterSpacing: "-.01em", lineHeight: 1.2 }}>
+          Sign in to your command centre
+        </h1>
+        <p className="t2" style={{ fontSize: 14 }}>
+          Authorised personnel only. Every sign-in is logged.
         </p>
       </div>
 
-      <style>{`
-        .input {
-          width: 100%;
-          border-radius: 0.375rem;
-          border: 1px solid var(--border);
-          background: var(--surface);
-          padding: 0.5rem 0.75rem;
-          font-size: 0.8125rem;
-          color: var(--foreground);
-        }
-        .input:focus { outline: none; box-shadow: 0 0 0 1px var(--ring); }
-        .input::placeholder { color: var(--muted-foreground); }
-      `}</style>
-    </div>
-  );
-}
+      <button type="button" onClick={signInWithGoogle} disabled={loading || googleLoading} className="b b-sec b-lg w-full">
+        {googleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
+        Continue with Google
+      </button>
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      {children}
-    </label>
+      <div className="row g10 t3" style={{ fontSize: 12 }}>
+        <span className="hr f1" />
+        or
+        <span className="hr f1" />
+      </div>
+
+      <form onSubmit={submit} className="col g20">
+        <div className="fl">
+          <label htmlFor="login-email">Work email</label>
+          <input
+            id="login-email"
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="in"
+            style={{ height: 42 }}
+            placeholder="you@yourorganisation.com"
+          />
+        </div>
+        <div className="fl">
+          <div className="row sb">
+            <label htmlFor="login-password">Password</label>
+            <button
+              type="button"
+              className="lnk"
+              style={{ fontSize: 12 }}
+              aria-expanded={showRecovery}
+              onClick={() => {
+                setRecoveryMessage(null);
+                setShowRecovery((current) => !current);
+              }}
+            >
+              Forgot password?
+            </button>
+          </div>
+          <input
+            id="login-password"
+            type="password"
+            required
+            minLength={8}
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="in"
+            style={{ height: 42 }}
+          />
+        </div>
+
+        {showRecovery && (
+          <div className="card col g8" style={{ padding: "12px 14px" }}>
+            <div className="row g8" style={{ fontWeight: 600 }}>
+              <Mail size={15} strokeWidth={1.75} className="ic lnk" />
+              Send a reset link
+            </div>
+            <p className="t2" style={{ fontSize: 12.5 }}>
+              We&apos;ll email a reset link to the address above.
+            </p>
+            <div className="row g8">
+              <button type="button" onClick={sendPasswordReset} disabled={resetLoading} className="b b-pri f1">
+                {resetLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Send reset link
+              </button>
+              <Link to="/forgot-password" className="b b-sec">
+                <ArrowLeft size={14} strokeWidth={1.75} />
+                Open page
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {recoveryMessage && (
+          <Notice tone="ok">{recoveryMessage}</Notice>
+        )}
+
+        {error && (
+          <Notice tone="fail">{error}</Notice>
+        )}
+
+        <button type="submit" disabled={loading} className="b b-pri b-lg w-full" style={{ height: 44 }}>
+          {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+          Sign in
+        </button>
+      </form>
+
+      <p className="t3" style={{ fontSize: 12.5 }}>
+        No account? Your security manager adds you. Field officers use this same sign-in and go straight to the officer app.
+      </p>
+    </AuthLayout>
   );
 }
 
 function GoogleIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden>
-      <path fill="#EA4335" d="M12 10.2v3.9h5.5c-.24 1.4-1.7 4.1-5.5 4.1-3.3 0-6-2.7-6-6.1s2.7-6.1 6-6.1c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.7 3.5 14.6 2.6 12 2.6 6.8 2.6 2.6 6.8 2.6 12s4.2 9.4 9.4 9.4c5.4 0 9-3.8 9-9.2 0-.6-.1-1.1-.2-1.6H12z" />
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" className="ic">
+      <path fill="#E9EDF5" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3Z" />
+      <path fill="#AAB2C4" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22Z" />
+      <path fill="#8790A5" d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1a10 10 0 0 0 0 9.2L6.4 14Z" />
+      <path fill="#C9D1DE" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10C7.2 7.7 9.4 6 12 6Z" />
     </svg>
   );
 }

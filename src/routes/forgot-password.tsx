@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { ShieldHalf, Loader2, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowLeft } from "lucide-react";
+import { AuthLayout } from "@/components/AuthLayout";
+import { Notice } from "@/components/nw";
 
 export const Route = createFileRoute("/forgot-password")({
   head: () => ({ meta: [{ title: "Reset password · Lemtik SOD" }] }),
@@ -32,66 +34,46 @@ function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen grid place-items-center bg-background px-4">
-      <div className="w-full max-w-sm">
-        <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-          <div className="grid h-10 w-10 place-items-center rounded-md bg-primary/15 border border-primary/40">
-            <ShieldHalf className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold tracking-tight">LEMTIK</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Security Ops</div>
-          </div>
-        </Link>
-
-        <div className="rounded-lg border border-border bg-card p-6">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Account recovery</div>
-          <h1 className="mt-1 text-xl font-semibold">Forgot password</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Enter your email and we&apos;ll send a reset link. The link expires in 1 hour.
-          </p>
-
-          {sent ? (
-            <div className="mt-5 rounded-md border border-resolved/40 bg-resolved/10 px-3 py-3 text-xs text-resolved">
-              If an account exists for <strong>{email}</strong>, a password reset link has been sent. Check your inbox.
-            </div>
-          ) : (
-            <form onSubmit={submit} className="mt-5 space-y-3">
-              <label className="block">
-                <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Email</div>
-                <input
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ops@lemtik.com"
-                  className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </label>
-
-              {error && (
-                <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">{error}</div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-              >
-                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                Send reset link
-              </button>
-            </form>
-          )}
-
-          <div className="mt-4 text-center">
-            <Link to="/login" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-3 w-3" /> Back to sign in
-            </Link>
-          </div>
-        </div>
+    <AuthLayout>
+      <div className="col g8">
+        <span className="eyebrow">Account recovery</span>
+        <h1 style={{ fontSize: 28, fontWeight: 650, fontStretch: "110%", letterSpacing: "-.01em", lineHeight: 1.2 }}>Forgot your password?</h1>
+        <p className="t2" style={{ fontSize: 14 }}>
+          Enter your work email and we&apos;ll send a reset link. The link expires in 1 hour.
+        </p>
       </div>
-    </div>
+
+      {sent ? (
+        <Notice tone="ok">
+          If an account exists for <strong>{email}</strong>, a password reset link has been sent. Check your inbox.
+        </Notice>
+      ) : (
+        <form onSubmit={submit} className="col g20">
+          <div className="fl">
+            <label htmlFor="forgot-email">Work email</label>
+            <input
+              id="forgot-email"
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@yourorganisation.com"
+              className="in"
+              style={{ height: 42 }}
+            />
+          </div>
+          {error && <Notice tone="fail">{error}</Notice>}
+          <button type="submit" disabled={loading} className="b b-pri b-lg w-full" style={{ height: 44 }}>
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            Send reset link
+          </button>
+        </form>
+      )}
+
+      <Link to="/login" search={{ redirect: undefined }} className="lnk row g6 self-start" style={{ fontSize: 12.5 }}>
+        <ArrowLeft size={14} strokeWidth={1.75} /> Back to sign in
+      </Link>
+    </AuthLayout>
   );
 }

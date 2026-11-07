@@ -1,4 +1,14 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+
+/** Re-renders the caller every `ms` (default 1s) for live timers. */
+export function useNow(ms = 1000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+  return now;
+}
 
 /* Night Watch primitives — thin wrappers over the component classes in styles.css. */
 
@@ -152,16 +162,17 @@ export function Panel({
   );
 }
 
-export function Kpi({ label, icon, value, unit, delta, deltaClass = "" }: {
+export function Kpi({ label, icon, value, unit, delta, deltaClass = "", title }: {
   label: ReactNode;
   icon?: ReactNode;
   value: ReactNode;
   unit?: ReactNode;
   delta?: ReactNode;
   deltaClass?: string;
+  title?: string;
 }) {
   return (
-    <div className="kpi">
+    <div className="kpi" title={title}>
       <span className="k">{icon}{label}</span>
       <span className="v">
         {value}
@@ -237,6 +248,15 @@ export function Switch({ on, onChange, label, disabled }: { on: boolean; onChang
       className={`sw${on ? " on" : ""}`}
       onClick={() => onChange(!on)}
     />
+  );
+}
+
+/** Inline message block: success, problem, or caution. */
+export function Notice({ tone, children, live = tone === "fail" ? "alert" : "status" }: { tone: "ok" | "fail" | "warn" | "blue" | "ai"; children: ReactNode; live?: "alert" | "status" }) {
+  return (
+    <div className={`tg tg-${tone}`} role={live} style={{ height: "auto", padding: "8px 10px", fontSize: 12.5, whiteSpace: "normal", alignItems: "flex-start", lineHeight: 1.45 }}>
+      {children}
+    </div>
   );
 }
 

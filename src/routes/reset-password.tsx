@@ -2,7 +2,9 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
-import { ShieldHalf, Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
+import { Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
+import { AuthLayout } from "@/components/AuthLayout";
+import { Notice } from "@/components/nw";
 
 export const Route = createFileRoute("/reset-password")({
   head: () => ({ meta: [{ title: "Set new password · Lemtik SOD" }] }),
@@ -79,87 +81,66 @@ function ResetPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen grid place-items-center bg-background px-4">
-      <div className="w-full max-w-sm">
-        <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-          <div className="grid h-10 w-10 place-items-center rounded-md bg-primary/15 border border-primary/40">
-            <ShieldHalf className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold tracking-tight">LEMTIK</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Security Ops</div>
-          </div>
-        </Link>
-
-        <div className="rounded-lg border border-border bg-card p-6">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Account recovery</div>
-          <h1 className="mt-1 text-xl font-semibold">Set new password</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Must be 8+ characters with one uppercase letter and one number.
-          </p>
-
-          {done ? (
-            <div className="mt-5 rounded-md border border-resolved/40 bg-resolved/10 px-3 py-3 text-xs text-resolved flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4" /> Password updated. Redirecting…
-            </div>
-          ) : !ready ? (
-            <div className="mt-5 text-xs text-muted-foreground flex items-center gap-2">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Validating recovery link…
-            </div>
-          ) : linkState === "missing" ? (
-            <div className="mt-5 space-y-3">
-              <div className="rounded-md border border-amber-300/40 bg-amber-300/10 px-3 py-3 text-xs text-amber-200">
-                This recovery link is missing, expired, or already used. Request a fresh reset email to continue.
-              </div>
-              <Link
-                to="/forgot-password"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface/70"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Request a new reset link
-              </Link>
-            </div>
-          ) : (
-            <form onSubmit={submit} className="mt-5 space-y-3">
-              <label className="block">
-                <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">New password</div>
-                <input
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </label>
-              <label className="block">
-                <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">Confirm password</div>
-                <input
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </label>
-
-              {error && (
-                <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">{error}</div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-              >
-                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                Update password
-              </button>
-            </form>
-          )}
-        </div>
+    <AuthLayout>
+      <div className="col g8">
+        <span className="eyebrow">Account recovery</span>
+        <h1 style={{ fontSize: 28, fontWeight: 650, fontStretch: "110%", letterSpacing: "-.01em", lineHeight: 1.2 }}>Set a new password</h1>
+        <p className="t2" style={{ fontSize: 14 }}>
+          At least 8 characters, with one uppercase letter and one number.
+        </p>
       </div>
-    </div>
+
+      {done ? (
+        <Notice tone="ok">
+          <CheckCircle2 size={15} strokeWidth={2} className="ic mt-px" /> Password updated. Signing you in…
+        </Notice>
+      ) : linkState === "missing" ? (
+        <div className="col g12">
+          <Notice tone="warn">This recovery link is missing, expired, or already used. Request a fresh reset email to continue.</Notice>
+          <Link to="/forgot-password" className="b b-sec b-lg w-full">
+            <ArrowLeft size={15} strokeWidth={1.75} />
+            Request a new reset link
+          </Link>
+        </div>
+      ) : !ready ? (
+        <div className="row g8 t2" role="status">
+          <Loader2 className="h-4 w-4 animate-spin" /> Checking your recovery link…
+        </div>
+      ) : (
+        <form onSubmit={submit} className="col g20">
+          <div className="fl">
+            <label htmlFor="reset-password">New password</label>
+            <input
+              id="reset-password"
+              type="password"
+              required
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="in"
+              style={{ height: 42 }}
+            />
+          </div>
+          <div className="fl">
+            <label htmlFor="reset-confirm">Confirm password</label>
+            <input
+              id="reset-confirm"
+              type="password"
+              required
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              className="in"
+              style={{ height: 42 }}
+            />
+          </div>
+          {error && <Notice tone="fail">{error}</Notice>}
+          <button type="submit" disabled={loading} className="b b-pri b-lg w-full" style={{ height: 44 }}>
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            Update password
+          </button>
+        </form>
+      )}
+    </AuthLayout>
   );
 }
