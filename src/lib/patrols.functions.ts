@@ -32,6 +32,23 @@ export const getPatrol = createServerFn({ method: "GET" })
     return { patrol: p.data, waypoints: w.data ?? [] };
   });
 
+// Every waypoint in the org in one read, so the live map can draw real routes without a
+// request per patrol.
+export const listPatrolWaypoints = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    const { data, error } = await context.supabase
+      .from("patrol_waypoints" as any)
+      .select("patrol_id, ord, name, coord_x, coord_y")
+      .eq("organisation_id", orgId)
+      .order("patrol_id", { ascending: true })
+      .order("ord", { ascending: true })
+      .limit(2000);
+    if (error) throwSafeError("wp.listAll", error, "Unable to load patrol routes.");
+    return (data ?? []) as unknown as { patrol_id: string; ord: number; name: string | null; coord_x: number | null; coord_y: number | null }[];
+  });
+
 export const createPatrol = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>

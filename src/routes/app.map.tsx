@@ -1,1715 +1,1052 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
+import {
+  Cpu,
+  Flame,
+  Hexagon,
+  ListFilter,
+  Loader2,
+  LocateFixed,
+  Maximize2,
+  Minimize2,
+  Minus,
+  PanelRightOpen,
+  Pin,
+  Plus,
+  Route as RouteIcon,
+  ScanEye,
+  Search,
+  Siren,
+  UserCheck,
+  Users,
+  X,
+} from "lucide-react";
 import { listIncidents, assignIncidentToMe, updateIncidentStatus } from "@/lib/incidents.functions";
-import { listPatrols } from "@/lib/patrols.functions";
-import { listLocations, listMembers } from "@/lib/orgs.functions";
+import { listPatrols, listPatrolWaypoints } from "@/lib/patrols.functions";
+import { listLocations } from "@/lib/orgs.functions";
+import { listOfficers } from "@/lib/inventory.functions";
+import { listDevices, type DeviceRecord } from "@/lib/devices.functions";
 import { listCameras, type CameraRecord } from "@/lib/cameras.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { supabase } from "@/integrations/supabase/client";
-import { severityMeta, typeMeta, statusMeta, type Severity, type IncidentType, type IncidentStatus } from "@/lib/mockData";
-import { SeverityBadge } from "@/components/SeverityBadge";
+import { statusMeta, typeMeta, type IncidentStatus, type IncidentType } from "@/lib/mockData";
 import { requireSectionAccess } from "@/lib/rbac";
-import { cn } from "@/lib/utils";
-import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
-import {
-  MapPin, Loader2, Layers, Flame, Pin, Radar, ChevronRight, Wifi, WifiOff,
-  UserPlus, ExternalLink, ChevronsUpDown, Search, LocateFixed, Maximize2, MapPinned,
-  Diamond, Users, Route as RouteIcon, Gauge, Shield, Radio,
-} from "lucide-react";
+import { useRealtimeInvalidate } from "@/lib/useRealtime";
+import { Avatar, Lifecycle, Sev, elapsed, initialsOf, timeAgo, toSev, useNow } from "@/components/nw";
+import { IncidentProposals } from "@/components/AiProposals";
 
 export const Route = createFileRoute("/app/map")({
   head: () => ({ meta: [{ title: "Live Map · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
-    requireSectionAccess(appAccess, [
-      "security_manager",
-      "operator",
-      "client_admin",
-    ]);
+    requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },
   component: LiveMap,
 });
 
 const LAGOS: [number, number] = [3.4219, 6.4281];
+const OFFICER_FRESH_MS = 15 * 60_000;
 
 type Mode = "pins" | "heatmap";
 type Window = "24h" | "7d" | "30d" | "90d";
 const WINDOWS: { value: Window; label: string; ms: number }[] = [
-  { value: "24h", label: "24h", ms: 86_400_000 },
-  { value: "7d", label: "7d", ms: 7 * 86_400_000 },
-  { value: "30d", label: "30d", ms: 30 * 86_400_000 },
-  { value: "90d", label: "90d", ms: 90 * 86_400_000 },
+  { value: "24h", label: "24 h", ms: 86_400_000 },
+  { value: "7d", label: "7 d", ms: 7 * 86_400_000 },
+  { value: "30d", label: "30 d", ms: 30 * 86_400_000 },
+  { value: "90d", label: "90 d", ms: 90 * 86_400_000 },
 ];
-const TYPE_OPTS: (IncidentType | "all")[] = ["all", "intrusion", "theft", "medical", "fire", "suspicious", "civil_unrest", "other"];
-const SMART_DEVICE_TYPES = ["Camera", "Door Sensor", "Barrier", "Radar"] as const;
-const MAP_COLORS = {
-  red: "#f43f5e",
-  orange: "#fb923c",
-  amber: "#fbbf24",
-  yellow: "#fde047",
-  slate: "#64748b",
-  blue: "#3b82f6",
-  green: "#22c55e",
-  ink: "#111827",
-  white: "#ffffff",
-};
+const TYPE_OPTS: (IncidentType | "all")[] = ["all", "intrusion", "theft", "robbery", "armed_attack", "medical", "fire", "suspicious", "civil_unrest", "vandalism", "other"];
 
-type MapMenuState = {
-  x: number;
-  y: number;
-  lng: number;
-  lat: number;
-};
-
-type IncidentDraft = {
+type IncidentRow = {
+  id: string;
+  code: string;
+  type: string;
+  title: string | null;
+  severity: number;
+  status: string;
   location: string;
   zone: string;
-  coord_x: number;
-  coord_y: number;
-  title?: string;
-  description?: string;
-  type?: IncidentType;
-  severity?: number;
+  officer: string | null;
+  description: string | null;
+  reported_at: string;
+  quick_report?: boolean | null;
+  coord_x: number | null;
+  coord_y: number | null;
+  dispatch_plan?: { recommended_actions?: unknown } | null;
+  agent_output?: { recommended_actions?: unknown } | null;
 };
+type PatrolRow = { id: string; code: string; name: string; officer: string; status: string; checked_in: number; waypoints: number };
+type WaypointRow = { patrol_id: string; ord: number; name: string | null; coord_x: number | null; coord_y: number | null };
+type LocationRow = { id: string; name: string; address?: string | null; coord_x?: number | null; coord_y?: number | null; geofence?: unknown };
+type OfficerRow = { id: string; name: string; status: string | null; current_lat?: number | null; current_lng?: number | null; location_updated_at?: string | null };
+type TelemetryRow = { id: string; target_id: string; camera_name?: string | null; coord_x?: number | null; coord_y?: number | null; confidence?: number | null; captured_at?: string | null };
+type MenuState = { x: number; y: number; lng: number; lat: number };
+type InfoCard = { title: string; lines: string[]; lng: number; lat: number };
 
-type TelemetryRow = {
-  id: string;
-  target_id: string;
-  camera_name?: string | null;
-  coord_x?: number | null;
-  coord_y?: number | null;
-  blind_spot?: boolean | null;
-  confidence?: number | null;
-  captured_at?: string | null;
-  zone?: string | null;
-};
+const coordOf = (x: unknown, y: unknown): [number, number] | null =>
+  x != null && y != null && Number.isFinite(Number(x)) && Number.isFinite(Number(y)) ? [Number(x), Number(y)] : null;
+const incidentTitle = (i: IncidentRow) => i.title || typeMeta[i.type as IncidentType] || "Incident";
+const isOpen = (i: IncidentRow) => i.status !== "resolved" && i.status !== "closed";
+const fc = (features: any[]) => ({ type: "FeatureCollection" as const, features });
 
-function normaliseLngLat(lng: number, lat: number): [number, number] {
-  return [Number(lng.toFixed(6)), Number(lat.toFixed(6))];
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
-
-function deriveRisk(zoneName: string, incidents: any[], patrols: any[]) {
-  const zoneIncidents = incidents.filter((incident) => incident.zone === zoneName);
-  const zonePatrols = patrols.filter((patrol) => String(patrol.name ?? "").toLowerCase().includes(zoneName.toLowerCase()) || String(patrol.code ?? "").toLowerCase().includes(zoneName.toLowerCase()));
-  const totalSeverity = zoneIncidents.reduce((acc, incident) => acc + Number(incident.severity ?? 0), 0);
-  const risk = 38
-    + zoneIncidents.filter((incident) => Number(incident.severity) >= 4).length * 8
-    + zoneIncidents.filter((incident) => Number(incident.severity) >= 3).length * 4
-    + zonePatrols.filter((patrol) => patrol.status === "delayed" || patrol.status === "missed").length * 6
-    + Math.min(10, totalSeverity);
-  return Math.max(0, Math.min(100, Math.round(risk)));
-}
-
-function riskColor(risk: number) {
-  if (risk >= 80) return MAP_COLORS.red;
-  if (risk >= 65) return MAP_COLORS.orange;
-  if (risk >= 45) return MAP_COLORS.amber;
-  return MAP_COLORS.green;
-}
-
-function telemetryCoord(row: TelemetryRow): [number, number] | null {
-  if (row.coord_x == null || row.coord_y == null) return null;
-  return normaliseLngLat(Number(row.coord_x), Number(row.coord_y));
-}
-
-function buildTelemetryPath(rows: TelemetryRow[], locations: { coord_x?: number | null; coord_y?: number | null }[]) {
-  const points = rows
-    .map((row, index) => {
-      const coord = telemetryCoord(row);
-      if (!coord) return null;
-      return {
-        coord,
-        row,
-        index,
-        camera: row.camera_name ?? `Camera ${index + 1}`,
-      };
-    })
-    .filter(Boolean) as Array<{ coord: [number, number]; row: TelemetryRow; index: number; camera: string }>;
-
-  if (points.length >= 1) return points;
-
-  const fallback = locations
-    .filter((location) => location.coord_x != null && location.coord_y != null)
-    .slice(0, 4)
-    .map((location, index) => ({
-      coord: normaliseLngLat(Number(location.coord_x), Number(location.coord_y)),
-      row: {
-        id: `seed-${index}`,
-        target_id: `telemetry-seed-${index + 1}`,
-        camera_name: (location as any).name ?? `Camera ${index + 1}`,
-        coord_x: Number(location.coord_x),
-        coord_y: Number(location.coord_y),
-        blind_spot: index % 3 === 1,
-        confidence: 72 + index * 4,
-        captured_at: new Date(Date.now() - index * 90_000).toISOString(),
-      } satisfies TelemetryRow,
-      index,
-      camera: (location as any).name ?? `Camera ${index + 1}`,
-    }));
-
-  return fallback;
-}
-
-// Severity → CSS color (resolves design tokens to literal colors for mapbox paint)
-function severityColor(s: number): string {
-  const map: Record<number, string> = {
-    5: MAP_COLORS.red,      // critical / red
-    4: MAP_COLORS.orange,   // high / orange
-    3: MAP_COLORS.amber,    // medium / amber
-    2: MAP_COLORS.yellow,   // low / yellow
-    1: MAP_COLORS.slate,    // info / grey
-  };
-  return map[s] ?? map[3];
-}
-
-type TargetTrack = {
-  id: string;
-  label: string;
-  path: [number, number][];
-  position: [number, number];
-  blindSpot: boolean;
-  handoff: boolean;
-  confidence: number;
-  lastSeen: string;
-  routeNote: string;
-};
-
-function lerp(start: number, end: number, ratio: number) {
-  return start + (end - start) * ratio;
-}
-
-function buildTargetPath(seed: number, base: [number, number], locations: { coord_x?: number | null; coord_y?: number | null; name?: string }[]) {
-  const anchors = locations
-    .filter((location) => location.coord_x != null && location.coord_y != null)
-    .slice(0, 4)
-    .map((location) => [Number(location.coord_x), Number(location.coord_y)] as [number, number]);
-  const fallback = [
-    [base[0] + 0.006 * (seed % 3 === 0 ? 1 : -1), base[1] + 0.004 * (seed % 2 === 0 ? 1 : -1)],
-    [base[0] + 0.012 * (seed % 2 === 0 ? 1 : -1), base[1] - 0.008],
-    [base[0] - 0.01, base[1] + 0.01 * (seed % 3 === 0 ? 1 : -1)],
-    [base[0] + 0.015, base[1] + 0.006],
-  ] as [number, number][];
-  const points = [...anchors, ...fallback].slice(0, 5);
-  return points.length >= 2 ? points : [base, [base[0] + 0.01, base[1] + 0.01]];
-}
-
-function toGeoJsonFeature(value: unknown) {
+function toFeature(value: unknown) {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, any>;
-  if (item.type === "Feature" && item.geometry && typeof item.geometry === "object") return item;
-  if ((item.type === "Polygon" || item.type === "MultiPolygon" || item.type === "LineString" || item.type === "Point") && item.coordinates) {
-    return { type: "Feature" as const, geometry: { type: item.type, coordinates: item.coordinates }, properties: {} };
-  }
-  if (item.geometry && typeof item.geometry === "object" && item.geometry.type && item.geometry.coordinates) {
-    return { type: "Feature" as const, geometry: { type: item.geometry.type, coordinates: item.geometry.coordinates }, properties: {} };
-  }
+  if (item.type === "Feature" && item.geometry) return item;
+  if (["Polygon", "MultiPolygon", "LineString", "Point"].includes(item.type) && item.coordinates) return { type: "Feature", geometry: { type: item.type, coordinates: item.coordinates }, properties: {} };
+  if (item.geometry?.type && item.geometry?.coordinates) return { type: "Feature", geometry: { type: item.geometry.type, coordinates: item.geometry.coordinates }, properties: {} };
   return null;
+}
+
+function distanceKm(a: [number, number], b: [number, number]) {
+  const rad = Math.PI / 180;
+  const dLat = (b[1] - a[1]) * rad;
+  const dLng = (b[0] - a[0]) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * rad) * Math.cos(b[1] * rad) * Math.sin(dLng / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+
+/** Severity squares drawn once as map images, so pins scale to hundreds of incidents. */
+function addSeverityIcons(map: mapboxgl.Map) {
+  const fill: Record<number, string> = { 5: "#F2384B", 4: "#FF8F2E", 3: "#F7D046", 2: "#0C0F14", 1: "#0C0F14" };
+  const edge: Record<number, string> = { 5: "#0A0C10", 4: "#0A0C10", 3: "#0A0C10", 2: "#5E708A", 1: "#3F4759" };
+  for (const s of [1, 2, 3, 4, 5]) {
+    if (map.hasImage(`sev-${s}`)) continue;
+    const size = 44;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d")!;
+    ctx.beginPath();
+    ctx.roundRect(3, 3, size - 6, size - 6, 8);
+    ctx.fillStyle = fill[s];
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = edge[s];
+    ctx.stroke();
+    map.addImage(`sev-${s}`, ctx.getImageData(0, 0, size, size), { pixelRatio: 2 });
+  }
 }
 
 function LiveMap() {
   const navigate = useNavigate();
-  const { appAccess } = Route.useRouteContext();
   const qc = useQueryClient();
+  const { appAccess } = Route.useRouteContext();
+  const readOnly = appAccess.specRole === "client_admin";
+  const canSeeDevices = appAccess.specRole === "security_manager";
+
   const listInc = useServerFn(listIncidents);
   const listPat = useServerFn(listPatrols);
+  const listWp = useServerFn(listPatrolWaypoints);
   const listLoc = useServerFn(listLocations);
-  const listMem = useServerFn(listMembers);
+  const listOff = useServerFn(listOfficers);
+  const listDev = useServerFn(listDevices);
   const listCam = useServerFn(listCameras);
   const getToken = useServerFn(getMapboxToken);
   const assignFn = useServerFn(assignIncidentToMe);
   const statusFn = useServerFn(updateIncidentStatus);
 
-  const { data: incidents = [], isLoading } = useQuery({ queryKey: ["incidents"], queryFn: () => listInc() });
-  const { data: patrols = [] } = useQuery({ queryKey: ["patrols"], queryFn: () => listPat() });
-  const { data: locations = [] } = useQuery({ queryKey: ["locations"], queryFn: () => listLoc() });
-  const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: () => listMem() });
+  useRealtimeInvalidate("incidents", [["incidents"]]);
+  useRealtimeInvalidate("patrols", [["patrols"]]);
+
+  const { data: incidents = [], isLoading } = useQuery({ queryKey: ["incidents"], queryFn: () => listInc() as Promise<IncidentRow[]> });
+  const { data: patrols = [] } = useQuery({ queryKey: ["patrols"], queryFn: () => listPat() as Promise<PatrolRow[]> });
+  const { data: waypoints = [] } = useQuery({ queryKey: ["patrol-waypoints"], queryFn: () => listWp() as Promise<WaypointRow[]> });
+  const { data: locations = [] } = useQuery({ queryKey: ["locations"], queryFn: () => listLoc() as Promise<LocationRow[]> });
+  const { data: officers = [] } = useQuery({ queryKey: ["map-officers"], queryFn: () => listOff() as Promise<OfficerRow[]>, refetchInterval: 30_000 });
+  const { data: devices = [] } = useQuery({ queryKey: ["devices"], queryFn: () => listDev() as Promise<DeviceRecord[]>, enabled: canSeeDevices });
   const { data: cameras = [] } = useQuery({ queryKey: ["cameras"], queryFn: () => listCam() as Promise<CameraRecord[]>, refetchInterval: 60_000 });
   const { data: tokenData } = useQuery({ queryKey: ["mapbox_token"], queryFn: () => getToken(), staleTime: Infinity });
 
-  // ---- UI state ----
   const [mode, setMode] = useState<Mode>("pins");
   const [win, setWin] = useState<Window>("7d");
   const [typeFilter, setTypeFilter] = useState<IncidentType | "all">("all");
-  const [showOsint, setShowOsint] = useState(true);
-  const [showOfficers, setShowOfficers] = useState(true);
-  const [showPatrols, setShowPatrols] = useState(true);
-  const [showZones, setShowZones] = useState(true);
-  const [showSmartInfra, setShowSmartInfra] = useState(true);
+  const [layers, setLayers] = useState({ incidents: true, officers: true, patrols: true, zones: true, devices: true, tracks: true });
   const [heatOpacity, setHeatOpacity] = useState(72);
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [conn, setConn] = useState<"live" | "reconnecting">("live");
-  const [contextMenu, setContextMenu] = useState<MapMenuState | null>(null);
-  const [areaIntel, setAreaIntel] = useState<{ lng: number; lat: number; label: string } | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [telemetryRows, setTelemetryRows] = useState<TelemetryRow[]>([]);
-
-  // ---- Realtime + connection banner ----
-  useEffect(() => {
-    const channel = supabase
-      .channel("incidents-map")
-      .on("postgres_changes", { event: "*", schema: "public", table: "incidents" }, () => {
-        qc.invalidateQueries({ queryKey: ["incidents"] });
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setConn("live");
-        }
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          setConn("reconnecting");
-        }
-      });
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [qc]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [info, setInfo] = useState<InfoCard | null>(null);
+  const [myPos, setMyPos] = useState<[number, number] | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [telemetry, setTelemetry] = useState<TelemetryRow[]>([]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
-    const loadTelemetry = async () => {
-      const { data, error } = await supabase
-        .from("cctv_ai_telemetry" as any)
-        .select("*")
-        .order("captured_at", { ascending: true })
-        .limit(200);
-      if (!active) return;
-      if (error) {
-        console.warn("[map] cctv_ai_telemetry initial load failed", error);
-        return;
-      }
-      setTelemetryRows((data ?? []) as TelemetryRow[]);
-    };
-    void loadTelemetry();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
+    supabase
+      .from("cctv_ai_telemetry" as any)
+      .select("*")
+      .order("captured_at", { ascending: true })
+      .limit(200)
+      .then(({ data, error }) => {
+        if (active && !error) setTelemetry((data ?? []) as unknown as TelemetryRow[]);
+      });
     const channel = supabase
-      .channel("cctv-ai-telemetry")
+      .channel("map-cctv-ai-telemetry")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "cctv_ai_telemetry" }, (payload) => {
         const next = payload.new as TelemetryRow;
-        setTelemetryRows((current) => {
-          const merged = [...current.filter((row) => row.id !== next.id), next];
-          merged.sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime());
-          return merged.slice(-200);
-        });
+        setTelemetry((current) => [...current.filter((r) => r.id !== next.id), next].slice(-200));
       })
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn("[map] cctv-ai-telemetry channel", status);
-        }
-      });
+      .subscribe();
     return () => {
+      active = false;
       supabase.removeChannel(channel);
     };
   }, []);
 
   useEffect(() => {
-    const onFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
-  // ---- Filtered incidents ----
-  const now = Date.now();
+  // ---- data shaped for the map (real coordinates only) ----
   const winMs = WINDOWS.find((w) => w.value === win)!.ms;
-  const filtered = useMemo(() => {
-    return incidents.filter((i) => {
-      const age = now - new Date(i.reported_at).getTime();
-      if (age > winMs) return false;
-      if (typeFilter !== "all" && i.type !== typeFilter) return false;
-      return true;
-    });
-  }, [incidents, now, winMs, typeFilter]);
-
-  // ---- Build GeoJSON ----
-  const geojson = useMemo(() => ({
-    type: "FeatureCollection" as const,
-    features: filtered.map((i, idx) => {
-      const lng = i.coord_x != null ? Number(i.coord_x) : LAGOS[0] + ((idx * 37) % 100 - 50) / 800;
-      const lat = i.coord_y != null ? Number(i.coord_y) : LAGOS[1] + ((idx * 53) % 100 - 50) / 800;
-      const sev = i.status === "resolved" ? 1 : i.severity;
-      return {
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [lng, lat] },
-        properties: {
-          id: i.id, sev, severity: i.severity, status: i.status,
-          critical: i.severity >= 4 && i.status !== "resolved" ? 1 : 0,
-        },
-      };
-    }),
-  }), [filtered]);
-
-  const sel = useMemo(
-    () => filtered.find((i) => i.id === selected) ?? filtered[0] ?? null,
-    [filtered, selected],
-  );
-  const searchResults = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    if (!q) return [] as Array<{ label: string; lng: number; lat: number; kind: string; id?: string }>;
-    const results: Array<{ label: string; lng: number; lat: number; kind: string; id?: string }> = [];
-    incidents.forEach((incident) => {
-      const haystack = [incident.code, incident.location, incident.zone, incident.officer, incident.title, incident.description].filter(Boolean).join(" ").toLowerCase();
-      if (haystack.includes(q) && incident.coord_x != null && incident.coord_y != null) {
-        results.push({ label: `${incident.code} · ${incident.location}`, lng: Number(incident.coord_x), lat: Number(incident.coord_y), kind: "incident", id: incident.id });
-      }
-    });
-    locations.forEach((location) => {
-      const haystack = [location.name, (location as any).address].filter(Boolean).join(" ").toLowerCase();
-      if (haystack.includes(q) && location.coord_x != null && location.coord_y != null) {
-        results.push({ label: location.name, lng: Number(location.coord_x), lat: Number(location.coord_y), kind: "location", id: location.id });
-      }
-    });
-    patrols.forEach((patrol, idx) => {
-      const haystack = [patrol.code, patrol.name, patrol.officer, patrol.shift].join(" ").toLowerCase();
-      if (haystack.includes(q)) {
-        const location = locations.find((item) => item.id === patrol.location_id);
-        const lng = location?.coord_x != null ? Number(location.coord_x) : LAGOS[0] + ((idx * 41) % 100 - 50) / 600;
-        const lat = location?.coord_y != null ? Number(location.coord_y) : LAGOS[1] + ((idx * 67) % 100 - 50) / 600;
-        results.push({ label: `${patrol.code} · ${patrol.name}`, lng, lat, kind: "patrol", id: patrol.id });
-      }
-    });
-    return results.slice(0, 6);
-  }, [incidents, locations, patrols, searchTerm]);
-  const tacticalResponse = useMemo(() => {
-    const target = sel ? `${sel.location}, ${sel.zone}` : "No active target";
-    const priority = sel ? `Severity ${sel.severity} · ${statusMeta[sel.status as IncidentStatus]}` : "Awaiting live incident feed";
-    const instruction = sel
-      ? `Dispatch nearest patrol to ${target}. Lock perimeter, confirm camera sweep, and move the incident to responding within 90 seconds.`
-      : "Watch the live feed and approve the next override when a critical signal is selected.";
-    return { target, priority, instruction };
-  }, [sel]);
-  const incidentGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: filtered.map((incident, idx) => {
-        const lng = incident.coord_x != null ? Number(incident.coord_x) : LAGOS[0] + ((idx * 37) % 100 - 50) / 800;
-        const lat = incident.coord_y != null ? Number(incident.coord_y) : LAGOS[1] + ((idx * 53) % 100 - 50) / 800;
-        const sev = incident.status === "resolved" ? 1 : Number(incident.severity);
-        return {
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [lng, lat] },
-          properties: {
-            id: incident.id,
-            sev,
-            status: incident.status,
-            title: incident.title ?? incident.code,
-          },
-        };
-      }),
-    }),
-    [filtered],
-  );
-  const osintAlerts = useMemo(() => {
-    const derived = incidents
-      .filter((incident) => Number(incident.severity) >= 3 || incident.status === "escalated")
-      .map((incident) => ({
-        id: `osint-${incident.id}`,
-        title: incident.title ?? incident.code,
-        severity: Math.max(3, Number(incident.severity)),
-        body: incident.description ?? `Intelligence signal from ${incident.location}`,
-        lng: incident.coord_x != null ? Number(incident.coord_x) : null,
-        lat: incident.coord_y != null ? Number(incident.coord_y) : null,
-        source: "incident-linked",
-      }));
-    const fallback = derived.length ? derived : [
-      { id: "osint-fallback-1", title: "Armed robbery reported nearby", severity: 4, body: "Unconfirmed intelligence signal in the Lagos metro zone.", lng: LAGOS[0] + 0.014, lat: LAGOS[1] + 0.008, source: "feed" },
-      { id: "osint-fallback-2", title: "Suspicious movement pattern", severity: 3, body: "Pattern flagged by open-source intelligence scan.", lng: LAGOS[0] - 0.012, lat: LAGOS[1] + 0.011, source: "feed" },
-    ];
-    return fallback;
-  }, [incidents]);
-  const osintGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: osintAlerts.map((alert, idx) => {
-        const lng = alert.lng ?? LAGOS[0] + ((idx * 29) % 100 - 50) / 900;
-        const lat = alert.lat ?? LAGOS[1] + ((idx * 47) % 100 - 50) / 900;
-        return {
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [lng, lat] },
-          properties: {
-            id: alert.id,
-            title: alert.title,
-            severity: alert.severity,
-            source: alert.source,
-            body: alert.body,
-          },
-        };
-      }),
-    }),
-    [osintAlerts],
-  );
-  const officerRows = useMemo(() => {
-    return members
-      .filter((member: any) => ["officer", "supervisor", "manager"].includes(member.role))
-      .map((member: any, idx) => {
-        const label = member.profile?.display_name ?? `Officer ${idx + 1}`;
-        const assignedLocationIds = member.profile?.assigned_location_ids ?? [];
-        const assignedLocation = locations.find((location) => assignedLocationIds.includes(location.id));
-        const fallbackCoord = [LAGOS[0] + ((idx * 19) % 100 - 50) / 700, LAGOS[1] + ((idx * 31) % 100 - 50) / 700] as [number, number];
-        const lngLat = assignedLocation?.coord_x != null && assignedLocation?.coord_y != null
-          ? normaliseLngLat(Number(assignedLocation.coord_x), Number(assignedLocation.coord_y))
-          : fallbackCoord;
-        return {
-          id: member.user_id,
-          name: label,
-          initials: initials(label),
-          status: member.profile?.status ?? "off-duty",
-          lng: lngLat[0],
-          lat: lngLat[1],
-          lastSeen: member.profile?.updated_at ?? member.created_at,
-          zone: member.profile?.zone ?? assignedLocation?.name ?? "All zones",
-        };
-      });
-  }, [locations, members]);
-  const officerGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: officerRows.map((officer) => ({
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [officer.lng, officer.lat] },
-        properties: {
-          id: officer.id,
-          initials: officer.initials,
-          name: officer.name,
-          status: officer.status,
-          zone: officer.zone,
-          lastSeen: officer.lastSeen,
-        },
-      })),
-    }),
-    [officerRows],
-  );
-  const patrolRouteRows = useMemo(() => {
-    return patrols.map((patrol, idx) => {
-      const baseLocation = locations.find((location) => location.id === patrol.location_id);
-      const base = baseLocation?.coord_x != null && baseLocation?.coord_y != null
-        ? [Number(baseLocation.coord_x), Number(baseLocation.coord_y)] as [number, number]
-        : [LAGOS[0] + ((idx * 41) % 100 - 50) / 600, LAGOS[1] + ((idx * 67) % 100 - 50) / 600] as [number, number];
-      const next = [base[0] + 0.012 * ((idx % 2 === 0) ? 1 : -1), base[1] + 0.006 * ((idx % 3 === 0) ? 1 : -1)] as [number, number];
-      const steps = Math.max(3, Number(patrol.waypoints) || 3);
-      const points = Array.from({ length: steps }).map((_, stepIdx) => {
-        const ratio = stepIdx / Math.max(steps - 1, 1);
-        const lng = base[0] + (next[0] - base[0]) * ratio;
-        const lat = base[1] + (next[1] - base[1]) * ratio;
-        const state = stepIdx < Number(patrol.checked_in)
-          ? "complete"
-          : stepIdx === Number(patrol.checked_in) && (patrol.status === "delayed" || patrol.status === "missed")
-            ? "missed"
-            : "pending";
-        return { lng, lat, state };
-      });
-      return {
-        id: patrol.id,
-        name: patrol.name,
-        officer: patrol.officer,
-        status: patrol.status,
-        line: {
-          type: "Feature" as const,
-          geometry: {
-            type: "LineString" as const,
-            coordinates: points.map((point) => [point.lng, point.lat]),
-          },
-          properties: { id: patrol.id, status: patrol.status, officer: patrol.officer },
-        },
-        points,
-      };
-    });
-  }, [locations, patrols]);
-  const patrolLineGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: patrolRouteRows.map((row) => row.line),
-    }),
-    [patrolRouteRows],
-  );
-  const patrolWaypointGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: patrolRouteRows.flatMap((row) =>
-        row.points.map((point, idx) => ({
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [point.lng, point.lat] },
-          properties: {
-            id: `${row.id}-${idx}`,
-            patrol_id: row.id,
-            state: point.state,
-            status: row.status,
-            officer: row.officer,
-          },
-        })),
-      ),
-    }),
-    [patrolRouteRows],
-  );
-  const zoneGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: locations.flatMap((location) => {
-        const feature = toGeoJsonFeature(location.geofence);
-        if (!feature) return [];
-        const risk = deriveRisk(location.name, incidents, patrols);
-        return [{
-          ...feature,
-          properties: {
-            ...(feature.properties ?? {}),
-            id: location.id,
-            name: location.name,
-            risk,
-          },
-        }];
-      }),
-    }),
-    [incidents, locations, patrols],
-  );
-  const canViewSmartInfra = appAccess.specRole === "security_manager";
-  const smartGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: (canViewSmartInfra ? locations : []).flatMap((location, idx) => {
-        if (location.coord_x == null || location.coord_y == null) return [];
-        return SMART_DEVICE_TYPES.map((kind, deviceIdx) => {
-          const risk = deriveRisk(location.name, incidents, patrols);
-          const status = risk >= 80 && deviceIdx % 2 === 0 ? "offline" : risk >= 60 && deviceIdx % 3 === 0 ? "override" : "online";
-          const offsets = [
-            [0.0022, 0.0018],
-            [-0.0017, 0.0026],
-            [0.0028, -0.0015],
-            [-0.0024, -0.0021],
-          ][deviceIdx];
-          return {
-            type: "Feature" as const,
-            geometry: {
-              type: "Point" as const,
-              coordinates: [Number(location.coord_x) + offsets[0], Number(location.coord_y) + offsets[1]],
-            },
-            properties: {
-              id: `${location.id}-${kind}-${idx}`,
-              kind,
-              status,
-              name: `${kind} · ${location.name}`,
-              risk,
-            },
-          };
-        });
-      }),
-    }),
-    [canViewSmartInfra, incidents, locations, patrols],
-  );
-  const trackedTargets = useMemo<TargetTrack[]>(() => {
-    const groups = new Map<string, TelemetryRow[]>();
-    telemetryRows.forEach((row) => {
-      if (!row.target_id) return;
-      const current = groups.get(row.target_id) ?? [];
-      current.push(row);
-      groups.set(row.target_id, current);
-    });
-
-    const tracks = [...groups.entries()]
-      .map(([id, rows], index) => {
-        const ordered = [...rows]
-          .filter((row) => row.coord_x != null && row.coord_y != null)
-          .sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime());
-        if (!ordered.length) return null;
-        const path = buildTelemetryPath(ordered, locations).map((entry) => entry.coord);
-        const latest = ordered[ordered.length - 1];
-        const latestPoint = telemetryCoord(latest) ?? path[path.length - 1] ?? [LAGOS[0], LAGOS[1]];
-        const blindSpot = Boolean(latest.blind_spot);
-        const handoff = ordered.length > 1 && Boolean(ordered[ordered.length - 2]?.blind_spot) && !blindSpot;
-        return {
-          id,
-          label: id,
-          path,
-          position: latestPoint,
-          blindSpot,
-          handoff,
-          confidence: Math.max(0, Math.min(100, Number(latest.confidence ?? 74))),
-          lastSeen: latest.captured_at ?? new Date().toISOString(),
-          routeNote: blindSpot
-            ? `Blind spot at ${latest.camera_name ?? "unknown camera"}`
-            : handoff
-              ? `Reappeared after blind spot via ${latest.camera_name ?? "camera handoff"}`
-              : `Visible at ${latest.camera_name ?? "camera feed"}`,
-        } satisfies TargetTrack;
-      })
-      .filter(Boolean) as TargetTrack[];
-
-    if (tracks.length > 0) return tracks;
-
-    return [];
-  }, [locations, telemetryRows]);
-  const mcmotTransitions = useMemo(
+  const filtered = useMemo(
     () =>
-      trackedTargets.map((target, index) => {
-        const hopNames = telemetryRows
-          .filter((row) => row.target_id === target.id)
-          .sort((a, b) => new Date(a.captured_at ?? 0).getTime() - new Date(b.captured_at ?? 0).getTime())
-          .map((row, hopIndex) => row.camera_name ?? `Camera ${hopIndex + 1}`);
-        const fallbackNames = target.path.map((point, hopIndex) => {
-          const nearestLocation = locations.find((location) => {
-            if (location.coord_x == null || location.coord_y == null) return false;
-            const lngDelta = Math.abs(Number(location.coord_x) - point[0]);
-            const latDelta = Math.abs(Number(location.coord_y) - point[1]);
-            return lngDelta < 0.01 && latDelta < 0.01;
-          });
-          return nearestLocation?.name ?? `Camera ${hopIndex + 1}`;
-        });
-        const routeNames = hopNames.length ? hopNames : fallbackNames;
-        return {
-          id: target.id,
-          confidence: target.confidence,
-          current: routeNames[Math.max(0, routeNames.length - 2)] ?? routeNames[0],
-          next: routeNames[routeNames.length - 1] ?? routeNames[0],
-          blindSpot: target.blindSpot,
-          route: routeNames.join(" → "),
-          color: target.blindSpot ? MAP_COLORS.orange : index % 2 === 0 ? MAP_COLORS.red : MAP_COLORS.blue,
-        };
-      }),
-    [telemetryRows, trackedTargets],
+      (incidents as IncidentRow[])
+        .filter((i) => Date.now() - new Date(i.reported_at).getTime() <= winMs && (typeFilter === "all" || i.type === typeFilter))
+        .sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || Number(b.severity) - Number(a.severity) || b.reported_at.localeCompare(a.reported_at)),
+    [incidents, winMs, typeFilter],
   );
-  const trackedTargetLines = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: trackedTargets.flatMap((target, targetIndex) =>
-        target.path.slice(0, -1).map((point, segmentIndex) => ({
-          type: "Feature" as const,
-          geometry: {
-            type: "LineString" as const,
-            coordinates: [point, target.path[segmentIndex + 1]],
-          },
-          properties: {
-            id: target.id,
-            blindspot: (segmentIndex + targetIndex) % 2 === 1 || target.blindSpot ? 1 : 0,
-            active: target.id === trackedTargets[0]?.id ? 1 : 0,
-            confidence: target.confidence,
-          },
+  const placed = useMemo(() => filtered.filter((i) => coordOf(i.coord_x, i.coord_y)), [filtered]);
+  const selected = filtered.find((i) => i.id === selectedId) ?? null;
+
+  const incidentGeo = useMemo(
+    () =>
+      fc(
+        placed.map((i) => ({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: coordOf(i.coord_x, i.coord_y) },
+          properties: { id: i.id, sev: isOpen(i) ? toSev(i.severity) : 1, code: i.code },
         })),
       ),
-    }),
-    [trackedTargets],
-  );
-  const trackedTargetPoints = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: trackedTargets.map((target) => ({
-        type: "Feature" as const,
-        geometry: {
-          type: "Point" as const,
-          coordinates: target.position,
-        },
-          properties: {
-            id: target.id,
-            label: target.label,
-            blindspot: target.blindSpot ? 1 : 0,
-            handoff: target.handoff ? 1 : 0,
-            confidence: target.confidence,
-            routeNote: target.routeNote,
-            lastSeen: target.lastSeen,
-          },
-        })),
-    }),
-    [trackedTargets],
+    [placed],
   );
 
-  // ---- Map ----
-  const mapContainer = useRef<HTMLDivElement | null>(null);
+  const zoneGeo = useMemo(
+    () => fc(locations.flatMap((l) => {
+      const f = toFeature(l.geofence);
+      return f ? [{ ...f, properties: { name: l.name } }] : [];
+    })),
+    [locations],
+  );
+
+  const routes = useMemo(() => {
+    const byPatrol = new Map<string, WaypointRow[]>();
+    for (const w of waypoints) {
+      if (!coordOf(w.coord_x, w.coord_y)) continue;
+      byPatrol.set(w.patrol_id, [...(byPatrol.get(w.patrol_id) ?? []), w]);
+    }
+    return patrols
+      .filter((p) => p.status !== "complete" && byPatrol.has(p.id))
+      .map((p) => ({ patrol: p, points: byPatrol.get(p.id)!.sort((a, b) => a.ord - b.ord) }));
+  }, [patrols, waypoints]);
+  const routeGeo = useMemo(
+    () => fc(routes.filter((r) => r.points.length > 1).map((r) => ({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: r.points.map((w) => coordOf(w.coord_x, w.coord_y)) },
+      properties: { id: r.patrol.id, code: r.patrol.code, officer: r.patrol.officer },
+    }))),
+    [routes],
+  );
+  const waypointGeo = useMemo(
+    () => fc(routes.flatMap((r) => r.points.map((w, idx) => {
+      const done = idx < Number(r.patrol.checked_in);
+      const due = idx === Number(r.patrol.checked_in);
+      const state = done ? "done" : due && r.patrol.status === "missed" ? "missed" : due && r.patrol.status === "delayed" ? "late" : "upcoming";
+      return { type: "Feature", geometry: { type: "Point", coordinates: coordOf(w.coord_x, w.coord_y) }, properties: { state, name: w.name ?? `Waypoint ${idx + 1}`, code: r.patrol.code } };
+    }))),
+    [routes],
+  );
+
+  const placedOfficers = useMemo(
+    () => (officers as OfficerRow[]).flatMap((o) => {
+      const c = coordOf(o.current_lng, o.current_lat);
+      if (!c) return [];
+      const fresh = o.location_updated_at ? Date.now() - new Date(o.location_updated_at).getTime() < OFFICER_FRESH_MS : false;
+      return [{ officer: o, coord: c, fresh }];
+    }),
+    [officers],
+  );
+  const officerGeo = useMemo(
+    () => fc(placedOfficers.map(({ officer, coord, fresh }) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: coord },
+      properties: { id: officer.id, initials: initialsOf(officer.name), name: officer.name, fresh: fresh ? 1 : 0, updated: officer.location_updated_at ?? "" },
+    }))),
+    [placedOfficers],
+  );
+
+  const placedDevices = useMemo(() => (canSeeDevices ? devices : []).filter((d) => coordOf(d.lng, d.lat)), [devices, canSeeDevices]);
+  const deviceGeo = useMemo(
+    () => fc(placedDevices.map((d) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: coordOf(d.lng, d.lat) },
+      properties: { id: d.id, name: d.name, type: d.type, status: (d.status ?? "unknown").toLowerCase(), seen: d.last_seen ?? "" },
+    }))),
+    [placedDevices],
+  );
+
+  const tracks = useMemo(() => {
+    const byTarget = new Map<string, TelemetryRow[]>();
+    for (const row of telemetry) {
+      if (!row.target_id || !coordOf(row.coord_x, row.coord_y)) continue;
+      byTarget.set(row.target_id, [...(byTarget.get(row.target_id) ?? []), row]);
+    }
+    return [...byTarget.entries()].map(([id, rows]) => ({
+      id,
+      rows: rows.sort((a, b) => (a.captured_at ?? "").localeCompare(b.captured_at ?? "")),
+    }));
+  }, [telemetry]);
+  const trackLineGeo = useMemo(
+    () => fc(tracks.filter((t) => t.rows.length > 1).map((t) => ({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: t.rows.map((r) => coordOf(r.coord_x, r.coord_y)) },
+      properties: { id: t.id },
+    }))),
+    [tracks],
+  );
+  const trackPointGeo = useMemo(
+    () => fc(tracks.map((t) => {
+      const last = t.rows[t.rows.length - 1];
+      return {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: coordOf(last.coord_x, last.coord_y) },
+        properties: { id: t.id, camera: last.camera_name ?? "", seen: last.captured_at ?? "", confidence: last.confidence ?? "" },
+      };
+    })),
+    [tracks],
+  );
+
+  // ---- map ----
+  const container = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const loadedRef = useRef(false);
-  const routePulseRef = useRef<number | null>(null);
-  const listenersBoundRef = useRef(false);
+  const pulseMarkers = useRef<mapboxgl.Marker[]>([]);
+  const meMarker = useRef<mapboxgl.Marker | null>(null);
+  const [ready, setReady] = useState(false);
+  const selectRef = useRef(setSelectedId);
+  selectRef.current = setSelectedId;
 
   useEffect(() => {
-    if (!tokenData?.token || !mapContainer.current || mapRef.current) return;
-    mapboxgl.accessToken = tokenData.token;
-    const map = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: "mapbox://styles/mapbox/dark-v11",
-      center: LAGOS,
-      zoom: 11,
-      attributionControl: false,
-    });
-    map.on("error", (e) => {
-      // Surface tile/style failures rather than silently showing a grey canvas
-      // eslint-disable-next-line no-console
-      console.error("[mapbox]", e?.error?.message ?? e);
-    });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    const token = tokenData?.token;
+    if (!token || !container.current || mapRef.current) return;
+    mapboxgl.accessToken = token;
+    const map = new mapboxgl.Map({ container: container.current, style: "mapbox://styles/mapbox/dark-v11", center: LAGOS, zoom: 11, attributionControl: false });
     mapRef.current = map;
-
-
+    map.on("error", (e) => console.error("[mapbox]", e?.error?.message ?? e));
     map.on("load", () => {
-      loadedRef.current = true;
-      // Fix container sizing race in flex/grid layouts
-      requestAnimationFrame(() => map.resize());
-      // Incidents source (clustered)
-      map.addSource("incidents", {
-        type: "geojson", data: geojson, cluster: true,
-        clusterMaxZoom: 14, clusterRadius: 50,
-        clusterProperties: { maxSev: ["max", ["get", "sev"]] },
-      });
-      // Cluster bubbles
+      addSeverityIcons(map);
+      map.addSource("zones", { type: "geojson", data: fc([]) });
+      map.addLayer({ id: "zones-fill", type: "fill", source: "zones", paint: { "fill-color": "#7A9BFF", "fill-opacity": 0.06 } });
+      map.addLayer({ id: "zones-line", type: "line", source: "zones", paint: { "line-color": "#7A9BFF", "line-width": 1.2, "line-opacity": 0.6, "line-dasharray": [2, 2] } });
+      map.addLayer({ id: "zones-label", type: "symbol", source: "zones", layout: { "text-field": ["get", "name"], "text-size": 11, "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] }, paint: { "text-color": "#8790A5", "text-halo-color": "#0A0C10", "text-halo-width": 1.2 } });
+
+      map.addSource("routes", { type: "geojson", data: fc([]) });
+      map.addLayer({ id: "routes-line", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#7A9BFF", "line-width": 2.5, "line-opacity": 0.9 } });
+      map.addSource("waypoints", { type: "geojson", data: fc([]) });
       map.addLayer({
-        id: "clusters", type: "circle", source: "incidents", filter: ["has", "point_count"],
+        id: "waypoints-dot",
+        type: "circle",
+        source: "waypoints",
         paint: {
-          "circle-color": [
-            "step", ["get", "maxSev"],
-            MAP_COLORS.slate, 2,
-            MAP_COLORS.yellow, 3,
-            MAP_COLORS.amber, 4,
-            MAP_COLORS.orange, 5,
-            MAP_COLORS.red,
-          ],
-          "circle-radius": ["step", ["get", "point_count"], 16, 5, 22, 20, 30],
-          "circle-stroke-width": 2, "circle-stroke-color": MAP_COLORS.ink,
-          "circle-opacity": 0.9,
+          "circle-radius": 4.5,
+          "circle-color": ["match", ["get", "state"], "done", "#35C77B", "missed", "#F2384B", "late", "#F7D046", "#0C0F14"],
+          "circle-stroke-color": ["match", ["get", "state"], "upcoming", "#8790A5", "#0A0C10"],
+          "circle-stroke-width": 1.5,
+        },
+      });
+
+      map.addSource("tracks", { type: "geojson", data: fc([]) });
+      map.addLayer({ id: "tracks-line", type: "line", source: "tracks", paint: { "line-color": "#A88BFF", "line-width": 2, "line-opacity": 0.85 } });
+      map.addSource("track-points", { type: "geojson", data: fc([]) });
+      map.addLayer({ id: "tracks-dot", type: "circle", source: "track-points", paint: { "circle-radius": 5, "circle-color": "#A88BFF", "circle-stroke-color": "#0A0C10", "circle-stroke-width": 2 } });
+
+      map.addSource("devices", { type: "geojson", data: fc([]) });
+      map.addLayer({
+        id: "devices-dot",
+        type: "circle",
+        source: "devices",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": ["match", ["get", "status"], "online", "#35C77B", "active", "#35C77B", "offline", "#FF6B7A", "error", "#FF6B7A", "unknown", "#4A5163", "#F7D046"],
+          "circle-stroke-color": "#0A0C10",
+          "circle-stroke-width": 2,
+        },
+      });
+
+      map.addSource("officers", { type: "geojson", data: fc([]) });
+      map.addLayer({
+        id: "officers-dot",
+        type: "circle",
+        source: "officers",
+        paint: {
+          "circle-radius": 11,
+          "circle-color": ["case", ["==", ["get", "fresh"], 1], "#3462F0", "#0C0F14"],
+          "circle-stroke-color": ["case", ["==", ["get", "fresh"], 1], "#0A0C10", "#3462F0"],
+          "circle-stroke-width": 2,
         },
       });
       map.addLayer({
-        id: "cluster-count", type: "symbol", source: "incidents", filter: ["has", "point_count"],
-        layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 12, "text-font": ["DIN Pro Medium", "Arial Unicode MS Bold"] },
-        paint: { "text-color": "#fff" },
+        id: "officers-initials",
+        type: "symbol",
+        source: "officers",
+        layout: { "text-field": ["get", "initials"], "text-size": 9, "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"], "text-allow-overlap": true },
+        paint: { "text-color": ["case", ["==", ["get", "fresh"], 1], "#FFFFFF", "#7A9BFF"] },
       });
-      // Single points
+
+      map.addSource("incidents", { type: "geojson", data: fc([]), cluster: true, clusterRadius: 38, clusterMaxZoom: 14 });
       map.addLayer({
-        id: "unclustered", type: "circle", source: "incidents", filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-color": [
-            "match", ["get", "sev"],
-            5, MAP_COLORS.red, 4, MAP_COLORS.orange, 3, MAP_COLORS.amber,
-            2, MAP_COLORS.yellow, MAP_COLORS.slate,
-          ],
-          "circle-radius": ["case", ["==", ["get", "critical"], 1], 9, 7],
-          "circle-stroke-width": 2, "circle-stroke-color": MAP_COLORS.ink,
-        },
-      });
-      // Heatmap layer (toggled)
-      map.addLayer({
-        id: "incidents-heat", type: "heatmap", source: "incidents",
+        id: "incidents-heat",
+        type: "heatmap",
+        source: "incidents",
         layout: { visibility: "none" },
         paint: {
           "heatmap-weight": ["interpolate", ["linear"], ["get", "sev"], 1, 0.2, 5, 1],
           "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 9, 1, 15, 3],
           "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 18, 15, 40],
-          "heatmap-opacity": 0.75,
-          "heatmap-color": [
-            "interpolate", ["linear"], ["heatmap-density"],
-            0, "rgba(0,0,0,0)",
-            0.2, "rgba(59,130,246,0.4)",
-            0.4, "rgba(253,224,71,0.6)",
-            0.7, "rgba(251,146,60,0.8)",
-            1, "rgba(244,63,94,0.95)",
-          ],
+          "heatmap-opacity": 0.72,
+          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.25, "rgba(247,208,70,0.4)", 0.6, "rgba(255,143,46,0.6)", 1, "rgba(242,56,75,0.85)"],
         },
       });
-
-      // Zones (geofences) source
-      map.addSource("zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({
-        id: "zones-fill", type: "fill", source: "zones",
-        paint: { "fill-color": MAP_COLORS.blue, "fill-opacity": 0.12 },
+        id: "incidents-cluster",
+        type: "circle",
+        source: "incidents",
+        filter: ["has", "point_count"],
+        paint: { "circle-color": "#1C212C", "circle-stroke-color": "#3A4256", "circle-stroke-width": 1.5, "circle-radius": ["step", ["get", "point_count"], 15, 10, 19, 30, 24] },
       });
       map.addLayer({
-        id: "zones-line", type: "line", source: "zones",
-        paint: { "line-color": MAP_COLORS.blue, "line-width": 1.5, "line-dasharray": [2, 2] },
+        id: "incidents-cluster-count",
+        type: "symbol",
+        source: "incidents",
+        filter: ["has", "point_count"],
+        layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11, "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"] },
+        paint: { "text-color": "#E9EDF5" },
       });
-
-      // Patrol source
-      map.addSource("patrols", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({
-        id: "patrols-pts", type: "circle", source: "patrols",
-        paint: {
-          "circle-color": [
-            "match", ["get", "status"],
-            "complete", MAP_COLORS.green,
-            "missed", MAP_COLORS.red,
-            "delayed", MAP_COLORS.orange,
-            MAP_COLORS.blue,
-          ],
-          "circle-radius": 6, "circle-stroke-width": 2, "circle-stroke-color": MAP_COLORS.ink,
+        id: "incidents-selected",
+        type: "circle",
+        source: "incidents",
+        filter: ["==", ["get", "id"], ""],
+        paint: { "circle-radius": 15, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#FFFFFF", "circle-stroke-width": 2 },
+      });
+      map.addLayer({
+        id: "incidents-pin",
+        type: "symbol",
+        source: "incidents",
+        filter: ["!", ["has", "point_count"]],
+        layout: {
+          "icon-image": ["concat", "sev-", ["to-string", ["get", "sev"]]],
+          "icon-allow-overlap": true,
+          "text-field": ["to-string", ["get", "sev"]],
+          "text-size": 11,
+          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
         },
+        paint: { "text-color": ["match", ["get", "sev"], 2, "#B9C6D8", 1, "#9AA3B5", "#0A0C10"] },
       });
 
-      // Click handlers
-      map.on("click", "unclustered", (e) => {
-        const f = e.features?.[0]; if (!f) return;
-        const id = (f.properties as any).id as string;
-        const [lng, lat] = (f.geometry as any).coordinates as [number, number];
-        setSelected(id);
-        map.flyTo({ center: [lng, lat], zoom: 14, duration: 700 });
+      map.on("click", "incidents-pin", (e) => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        if (id) selectRef.current(id);
       });
-      map.on("click", "clusters", (e) => {
-        const features = map.queryRenderedFeatures(e.point, { layers: ["clusters"] });
-        const clusterId = features[0]?.properties?.cluster_id;
+      map.on("click", "incidents-cluster", (e) => {
+        const feature = e.features?.[0];
+        const clusterId = feature?.properties?.cluster_id;
         const src = map.getSource("incidents") as mapboxgl.GeoJSONSource;
-          src.getClusterExpansionZoom(clusterId, (err, zoom) => {
-            if (err || zoom == null) return;
-            const coords = (features[0].geometry as any).coordinates as [number, number];
-            map.easeTo({ center: coords, zoom });
-          });
+        if (clusterId == null) return;
+        src.getClusterExpansionZoom(clusterId, (err, zoom) => {
+          if (err || zoom == null) return;
+          map.easeTo({ center: (feature!.geometry as any).coordinates, zoom });
+        });
       });
-      map.on("mouseenter", "unclustered", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "unclustered", () => { map.getCanvas().style.cursor = ""; });
-      map.on("mouseenter", "clusters", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "clusters", () => { map.getCanvas().style.cursor = ""; });
+      const bindInfo = (layer: string, build: (p: any) => { title: string; lines: string[] }) =>
+        map.on("click", layer, (e) => {
+          const f = e.features?.[0];
+          if (!f) return;
+          const [lng, lat] = (f.geometry as any).coordinates as [number, number];
+          setInfo({ ...build(f.properties ?? {}), lng, lat });
+        });
+      bindInfo("officers-dot", (p) => ({ title: p.name, lines: [p.fresh ? "Position reported recently" : "Position not updated in 15 min", p.updated ? `Updated ${timeAgo(p.updated)}` : "No update time"] }));
+      bindInfo("devices-dot", (p) => ({ title: p.name, lines: [`${p.type} · ${p.status}`, p.seen ? `Last seen ${timeAgo(p.seen)}` : "Never seen"] }));
+      bindInfo("tracks-dot", (p) => ({ title: `Re-ID ${p.id}`, lines: [p.camera ? `Last at ${p.camera}` : "Camera unknown", p.seen ? timeAgo(p.seen) : "", p.confidence !== "" ? `Model confidence ${Math.round(Number(p.confidence) <= 1 ? Number(p.confidence) * 100 : Number(p.confidence))}%` : ""].filter(Boolean) }));
+      bindInfo("waypoints-dot", (p) => ({ title: `${p.code} · ${p.name}`, lines: [p.state === "done" ? "Checked in" : p.state === "missed" ? "Missed" : p.state === "late" ? "Late" : "Upcoming"] }));
+      for (const layer of ["incidents-pin", "incidents-cluster", "officers-dot", "devices-dot", "tracks-dot", "waypoints-dot"]) {
+        map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
+        map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
+      }
+      setReady(true);
+      requestAnimationFrame(() => map.resize());
     });
-
-    // Resize when container changes size (sidebar collapse, viewport change)
-    const ro = new ResizeObserver(() => { try { map.resize(); } catch {} });
-    if (mapContainer.current) ro.observe(mapContainer.current);
-
+    const ro = new ResizeObserver(() => {
+      try {
+        map.resize();
+      } catch {
+        // map may be mid-teardown
+      }
+    });
+    ro.observe(container.current);
     return () => {
       ro.disconnect();
-      loadedRef.current = false;
+      pulseMarkers.current.forEach((m) => m.remove());
+      meMarker.current?.remove();
       map.remove();
       mapRef.current = null;
+      setReady(false);
     };
   }, [tokenData?.token]);
 
-  // Update incidents data
   useEffect(() => {
-    const map = mapRef.current; if (!map || !loadedRef.current) return;
-    const src = map.getSource("incidents") as mapboxgl.GeoJSONSource | undefined;
-    src?.setData(geojson);
-  }, [geojson]);
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const set = (id: string, data: any) => (map.getSource(id) as mapboxgl.GeoJSONSource | undefined)?.setData(data);
+    set("incidents", incidentGeo);
+    set("zones", zoneGeo);
+    set("routes", routeGeo);
+    set("waypoints", waypointGeo);
+    set("officers", officerGeo);
+    set("devices", deviceGeo);
+    set("tracks", trackLineGeo);
+    set("track-points", trackPointGeo);
+  }, [ready, incidentGeo, zoneGeo, routeGeo, waypointGeo, officerGeo, deviceGeo, trackLineGeo, trackPointGeo]);
 
-  // Toggle pins vs heatmap
   useEffect(() => {
-    const map = mapRef.current; if (!map || !loadedRef.current) return;
-    const pinVis = mode === "pins" ? "visible" : "none";
-    const heatVis = mode === "heatmap" ? "visible" : "none";
-    ["clusters", "cluster-count", "unclustered"].forEach((id) => map.setLayoutProperty(id, "visibility", pinVis));
-    map.setLayoutProperty("incidents-heat", "visibility", heatVis);
-  }, [mode]);
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    const pins = layers.incidents && mode === "pins";
+    ["incidents-pin", "incidents-cluster", "incidents-cluster-count", "incidents-selected"].forEach((id) => vis(id, pins));
+    vis("incidents-heat", layers.incidents && mode === "heatmap");
+    ["zones-fill", "zones-line", "zones-label"].forEach((id) => vis(id, layers.zones));
+    ["routes-line", "waypoints-dot"].forEach((id) => vis(id, layers.patrols));
+    ["officers-dot", "officers-initials"].forEach((id) => vis(id, layers.officers));
+    vis("devices-dot", layers.devices);
+    ["tracks-line", "tracks-dot"].forEach((id) => vis(id, layers.tracks));
+    map.setPaintProperty("incidents-heat", "heatmap-opacity", heatOpacity / 100);
+    map.setFilter("incidents-selected", ["==", ["get", "id"], selectedId ?? ""]);
+  }, [ready, layers, mode, heatOpacity, selectedId]);
 
-  // Zones overlay
+  // One pulse for live S5 items.
   useEffect(() => {
-    const map = mapRef.current; if (!map || !loadedRef.current) return;
-    const features = (showZones ? locations : [])
-      .flatMap((l) => {
-        const feature = toGeoJsonFeature(l.geofence);
-        return feature ? [{ ...feature, properties: { name: l.name } }] : [];
-      });
-    const src = map.getSource("zones") as mapboxgl.GeoJSONSource | undefined;
-    src?.setData({ type: "FeatureCollection", features });
-  }, [locations, showZones]);
+    const map = mapRef.current;
+    pulseMarkers.current.forEach((m) => m.remove());
+    pulseMarkers.current = [];
+    if (!map || !ready || !layers.incidents || mode !== "pins") return;
+    for (const i of placed) {
+      if (!isOpen(i) || toSev(i.severity) < 5) continue;
+      const el = document.createElement("span");
+      el.className = "pulse-dot";
+      el.style.cssText = "width:22px;height:22px;border-radius:5px;pointer-events:none";
+      pulseMarkers.current.push(new mapboxgl.Marker({ element: el }).setLngLat(coordOf(i.coord_x, i.coord_y)!).addTo(map));
+    }
+  }, [placed, ready, layers.incidents, mode]);
 
-  // Patrol overlay
   useEffect(() => {
-    const map = mapRef.current; if (!map || !loadedRef.current) return;
-    const features = (showPatrols ? patrols : []).map((p, idx) => {
-      // Place at associated location coord if any, else around lagos
-      const loc = locations.find((l) => l.id === p.location_id);
-      const lng = loc?.coord_x != null ? Number(loc.coord_x) : LAGOS[0] + ((idx * 41) % 100 - 50) / 600;
-      const lat = loc?.coord_y != null ? Number(loc.coord_y) : LAGOS[1] + ((idx * 67) % 100 - 50) / 600;
-      return {
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [lng, lat] },
-        properties: { code: p.code, status: p.status, officer: p.officer },
-      };
-    });
-    const src = map.getSource("patrols") as mapboxgl.GeoJSONSource | undefined;
-    src?.setData({ type: "FeatureCollection", features });
-  }, [patrols, locations, showPatrols]);
+    const map = mapRef.current;
+    const c = selected ? coordOf(selected.coord_x, selected.coord_y) : null;
+    if (map && ready && c) map.easeTo({ center: c, zoom: Math.max(map.getZoom(), 14), duration: 500 });
+  }, [selected?.id, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const flyToResult = (lng: number, lat: number, id?: string, kind?: string) => {
+  const fitAll = () => {
     const map = mapRef.current;
     if (!map) return;
-    map.easeTo({ center: [lng, lat], zoom: kind === "patrol" ? 13 : 14, duration: 600 });
-    if (id) {
-      const match = incidents.find((incident) => incident.id === id) ?? null;
-      if (match) setSelected(match.id);
-    }
-    setContextMenu(null);
-    setAreaIntel({ lng, lat, label: kind ? `${kind} match` : "Area match" });
+    const points = [...placed.map((i) => coordOf(i.coord_x, i.coord_y)!), ...placedOfficers.map((o) => o.coord)];
+    if (!points.length) return map.easeTo({ center: LAGOS, zoom: 11 });
+    const bounds = new mapboxgl.LngLatBounds(points[0], points[0]);
+    points.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds, { padding: { top: 120, bottom: 80, left: 60, right: panelOpen ? 420 : 60 }, maxZoom: 16, duration: 500 });
   };
-
-  const logIncidentHere = (lng: number, lat: number) => {
-    const nearestLocation = locations.find((location) => location.coord_x != null && location.coord_y != null);
-    const draft: IncidentDraft = {
-      location: nearestLocation?.name ?? "Mapped area",
-      zone: nearestLocation?.name ?? "Mapped area",
-      coord_x: lng,
-      coord_y: lat,
-      title: "Map-originated incident",
-      description: `Logged from live map at ${lng.toFixed(5)}, ${lat.toFixed(5)}.`,
-      type: "suspicious",
-      severity: 3,
-    };
-    sessionStorage.setItem("lemtik_incident_draft", JSON.stringify(draft));
-    setContextMenu(null);
-    navigate({ to: "/app/incidents" });
-  };
-
-  const drawZoneHere = (lng: number, lat: number) => {
-    const payload = {
-      name: "New live zone",
-      coord_x: lng,
-      coord_y: lat,
-      source: "map-context",
-    };
-    sessionStorage.setItem("lemtik_zone_draft", JSON.stringify(payload));
-    setContextMenu(null);
-    navigate({ to: "/app/locations" });
-  };
-
-  const toggleFullscreen = async () => {
-    const wrapper = mapContainer.current?.parentElement?.parentElement;
-    if (!wrapper) return;
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-      setIsFullscreen(false);
-    } else if (wrapper.requestFullscreen) {
-      await wrapper.requestFullscreen();
-      setIsFullscreen(true);
-    }
-  };
-
-  const focusCurrentLocation = () => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition((position) => {
-      const coords: [number, number] = [position.coords.longitude, position.coords.latitude];
-      setCurrentLocation(coords);
-      const map = mapRef.current;
-      map?.flyTo({ center: coords, zoom: 14, duration: 700 });
-    });
-  };
-
-  const runSearch = () => {
-    const result = searchResults[0];
-    if (!result) return;
-    flyToResult(result.lng, result.lat, result.id, result.kind);
-  };
-
+  const fittedRef = useRef(false);
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-
-    const ensureSource = (id: string, data: any) => {
-      const existing = map.getSource(id) as mapboxgl.GeoJSONSource | undefined;
-      if (!existing) {
-        map.addSource(id, { type: "geojson", data });
-      } else {
-        existing.setData(data);
-      }
-    };
-
-    ensureSource("command-osint", osintGeo);
-    ensureSource("command-officers", officerGeo);
-    ensureSource("command-patrol-lines", patrolLineGeo);
-    ensureSource("command-patrol-waypoints", patrolWaypointGeo);
-    ensureSource("command-smart", smartGeo);
-    ensureSource("command-target-lines", trackedTargetLines);
-    ensureSource("command-target-points", trackedTargetPoints);
-
-    if (!map.getLayer("command-osint-diamond")) {
-      map.addLayer({
-        id: "command-osint-diamond",
-        type: "symbol",
-        source: "command-osint",
-        layout: {
-          "text-field": "◆",
-          "text-size": 16,
-          "text-allow-overlap": true,
-        },
-        paint: {
-          "text-color": [
-            "match",
-            ["get", "severity"],
-            5, MAP_COLORS.red,
-            4, MAP_COLORS.orange,
-            3, MAP_COLORS.amber,
-            MAP_COLORS.yellow,
-          ],
-        },
-      });
+    if (ready && !fittedRef.current && (placed.length || placedOfficers.length)) {
+      fittedRef.current = true;
+      fitAll();
     }
-    if (!map.getLayer("command-target-lines")) {
-      map.addLayer({
-        id: "command-target-lines",
-        type: "line",
-        source: "command-target-lines",
-        paint: {
-          "line-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "confidence"],
-            68, MAP_COLORS.slate,
-            76, MAP_COLORS.blue,
-            84, MAP_COLORS.orange,
-            92, MAP_COLORS.red,
-          ],
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["get", "confidence"],
-            68, 1.8,
-            80, 2.8,
-            92, 4.2,
-          ],
-          "line-opacity": 0.7,
-          "line-dasharray": [2, 1.6],
-        },
-      });
-    }
-    if (!map.getLayer("command-target-points")) {
-      map.addLayer({
-        id: "command-target-points",
-        type: "circle",
-        source: "command-target-points",
-        paint: {
-          "circle-color": [
-            "case",
-            ["==", ["get", "blindspot"], 1], MAP_COLORS.orange,
-            ["==", ["get", "handoff"], 1], MAP_COLORS.red,
-            MAP_COLORS.green,
-          ],
-          "circle-radius": [
-            "case",
-            ["==", ["get", "handoff"], 1], 8,
-            ["==", ["get", "blindspot"], 1], 7,
-            6,
-          ],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": MAP_COLORS.ink,
-        },
-      });
-      map.addLayer({
-        id: "command-target-labels",
-        type: "symbol",
-        source: "command-target-points",
-        layout: {
-          "text-field": ["get", "label"],
-          "text-size": 10,
-          "text-offset": [0, 1.2],
-          "text-allow-overlap": true,
-        },
-        paint: {
-          "text-color": "#fff",
-          "text-halo-color": MAP_COLORS.ink,
-          "text-halo-width": 1.2,
-        },
-      });
-    }
-    if (!map.getLayer("command-officers-dot")) {
-      map.addLayer({
-        id: "command-officers-dot",
-        type: "circle",
-        source: "command-officers",
-        paint: {
-          "circle-color": MAP_COLORS.blue,
-          "circle-radius": 7,
-          "circle-stroke-width": 2,
-          "circle-stroke-color": MAP_COLORS.ink,
-        },
-      });
-      map.addLayer({
-        id: "command-officers-initials",
-        type: "symbol",
-        source: "command-officers",
-        layout: {
-          "text-field": ["get", "initials"],
-          "text-size": 10,
-          "text-font": ["DIN Pro Medium", "Arial Unicode MS Bold"],
-          "text-allow-overlap": true,
-        },
-        paint: { "text-color": "#fff" },
-      });
-    }
-    if (!map.getLayer("command-patrol-line")) {
-      map.addLayer({
-        id: "command-patrol-line",
-        type: "line",
-        source: "command-patrol-lines",
-        paint: {
-          "line-color": [
-            "match",
-            ["get", "status"],
-            "complete", MAP_COLORS.green,
-            "missed", MAP_COLORS.red,
-            "delayed", MAP_COLORS.orange,
-            MAP_COLORS.blue,
-          ],
-          "line-width": 3,
-          "line-opacity": 0.82,
-          "line-dasharray": [2, 1.2],
-        },
-      });
-    }
-    if (!map.getLayer("command-patrol-waypoints")) {
-      map.addLayer({
-        id: "command-patrol-waypoints",
-        type: "circle",
-        source: "command-patrol-waypoints",
-        paint: {
-          "circle-color": [
-            "match",
-            ["get", "state"],
-            "complete", MAP_COLORS.green,
-            "missed", MAP_COLORS.red,
-            "pending", MAP_COLORS.slate,
-            MAP_COLORS.blue,
-          ],
-          "circle-radius": 4,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": MAP_COLORS.ink,
-        },
-      });
-    }
-    if (!map.getLayer("command-smart-symbol")) {
-      map.addLayer({
-        id: "command-smart-symbol",
-        type: "symbol",
-        source: "command-smart",
-        layout: {
-          "text-field": ["get", "kind"],
-          "text-size": 11,
-          "text-allow-overlap": true,
-        },
-        paint: {
-          "text-color": [
-            "match",
-            ["get", "status"],
-            "offline", MAP_COLORS.red,
-            "override", MAP_COLORS.orange,
-            MAP_COLORS.green,
-          ],
-        },
-      });
-    }
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const heatOpacityValue = Math.max(0.05, Math.min(1, heatOpacity / 100));
-    map.setLayoutProperty("incidents-heat", "visibility", mode === "heatmap" ? "visible" : "none");
-    map.setLayoutProperty("clusters", "visibility", mode === "pins" ? "visible" : "none");
-    map.setLayoutProperty("cluster-count", "visibility", mode === "pins" ? "visible" : "none");
-    map.setLayoutProperty("unclustered", "visibility", mode === "pins" ? "visible" : "none");
-    map.setPaintProperty("incidents-heat", "heatmap-opacity", heatOpacityValue);
-    map.setLayoutProperty("command-osint-diamond", "visibility", showOsint ? "visible" : "none");
-    map.setLayoutProperty("command-officers-dot", "visibility", showOfficers ? "visible" : "none");
-    map.setLayoutProperty("command-officers-initials", "visibility", showOfficers ? "visible" : "none");
-    map.setLayoutProperty("patrols-pts", "visibility", showPatrols ? "visible" : "none");
-    map.setLayoutProperty("command-patrol-line", "visibility", showPatrols ? "visible" : "none");
-    map.setLayoutProperty("command-patrol-waypoints", "visibility", showPatrols ? "visible" : "none");
-    map.setLayoutProperty("zones-fill", "visibility", showZones ? "visible" : "none");
-    map.setLayoutProperty("zones-line", "visibility", showZones ? "visible" : "none");
-    map.setLayoutProperty("command-smart-symbol", "visibility", canViewSmartInfra && showSmartInfra ? "visible" : "none");
-    map.setPaintProperty("zones-fill", "fill-color", [
-      "step",
-      ["get", "risk"],
-      MAP_COLORS.green,
-      45, MAP_COLORS.amber,
-      65, MAP_COLORS.orange,
-      80, MAP_COLORS.red,
-    ]);
-    map.setPaintProperty("zones-fill", "fill-opacity", 0.12);
-    map.setPaintProperty("zones-line", "line-color", [
-      "step",
-      ["get", "risk"],
-      MAP_COLORS.green,
-      45, MAP_COLORS.amber,
-      65, MAP_COLORS.orange,
-      80, MAP_COLORS.red,
-    ]);
-    map.setPaintProperty("command-patrol-line", "line-dasharray", [2, 1.2]);
-
-    if (routePulseRef.current) window.clearInterval(routePulseRef.current);
-    routePulseRef.current = window.setInterval(() => {
-      const phase = (Date.now() / 360) % 6;
-      if (!mapRef.current || !loadedRef.current || !mapRef.current.getLayer("command-patrol-line")) return;
-      mapRef.current.setPaintProperty("command-patrol-line", "line-dasharray", [2 + phase * 0.2, 1.2 + phase * 0.08]);
-    }, 300);
-
-    if (!listenersBoundRef.current) {
-      const setHover = (label: string) => {
-        map.getCanvas().style.cursor = label;
-      };
-      map.on("mouseenter", "command-osint-diamond", () => setHover("pointer"));
-      map.on("mouseleave", "command-osint-diamond", () => setHover(""));
-      map.on("mouseenter", "command-officers-dot", () => setHover("pointer"));
-      map.on("mouseleave", "command-officers-dot", () => setHover(""));
-      map.on("mouseenter", "command-patrol-line", () => setHover("pointer"));
-      map.on("mouseleave", "command-patrol-line", () => setHover(""));
-      map.on("mouseenter", "command-smart-symbol", () => setHover("pointer"));
-      map.on("mouseleave", "command-smart-symbol", () => setHover(""));
-      map.on("mouseenter", "command-target-points", () => setHover("pointer"));
-      map.on("mouseleave", "command-target-points", () => setHover(""));
-
-      map.on("click", "command-osint-diamond", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const [lng, lat] = (feature.geometry as any).coordinates as [number, number];
-        const label = String(feature.properties?.title ?? "OSINT signal");
-        setAreaIntel({ lng, lat, label });
-        map.easeTo({ center: [lng, lat], zoom: 13, duration: 500 });
-      });
-      map.on("click", "command-officers-dot", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const [lng, lat] = (feature.geometry as any).coordinates as [number, number];
-        map.easeTo({ center: [lng, lat], zoom: 13, duration: 500 });
-      });
-      map.on("click", "command-smart-symbol", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const [lng, lat] = (feature.geometry as any).coordinates as [number, number];
-        setAreaIntel({ lng, lat, label: String(feature.properties?.name ?? "Smart device") });
-        map.easeTo({ center: [lng, lat], zoom: 14, duration: 500 });
-      });
-      map.on("click", "command-target-points", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const [lng, lat] = (feature.geometry as any).coordinates as [number, number];
-        setAreaIntel({
-          lng,
-          lat,
-          label: `${String(feature.properties?.label ?? "REID target")} · ${String(feature.properties?.routeNote ?? "Tracked movement")}`,
-        });
-        map.easeTo({ center: [lng, lat], zoom: 15, duration: 600 });
-      });
-      listenersBoundRef.current = true;
-    }
-
-    return () => {
-      if (routePulseRef.current) {
-        window.clearInterval(routePulseRef.current);
-        routePulseRef.current = null;
-      }
-    };
-  }, [
-    canViewSmartInfra,
-    heatOpacity,
-    incidentGeo,
-    mode,
-    officerGeo,
-    osintGeo,
-    patrolLineGeo,
-    patrolWaypointGeo,
-    showOfficers,
-    showOsint,
-    showPatrols,
-    showSmartInfra,
-    showZones,
-    smartGeo,
-    trackedTargetLines,
-    trackedTargetPoints,
-    zoneGeo,
-  ]);
-
-  // Mutations
-  const assignMut = useMutation({
-    mutationFn: (id: string) => assignFn({ data: { id } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["incidents"] }),
-  });
+  // ---- actions ----
+  const assignMut = useMutation({ mutationFn: (id: string) => assignFn({ data: { id } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["incidents"] }) });
   const statusMut = useMutation({
     mutationFn: (v: { id: string; status: IncidentStatus }) => statusFn({ data: v }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["incidents"] }),
   });
 
+  const searchResults = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return [];
+    const out: { label: string; kind: string; coord: [number, number]; id?: string }[] = [];
+    for (const i of incidents as IncidentRow[]) {
+      const c = coordOf(i.coord_x, i.coord_y);
+      if (c && [i.code, i.location, i.zone, i.officer, i.title].filter(Boolean).join(" ").toLowerCase().includes(q)) out.push({ label: `${i.code} · ${i.location}`, kind: "Incident", coord: c, id: i.id });
+    }
+    for (const l of locations) {
+      const c = coordOf(l.coord_x, l.coord_y);
+      if (c && [l.name, l.address].filter(Boolean).join(" ").toLowerCase().includes(q)) out.push({ label: l.name, kind: "Location", coord: c });
+    }
+    for (const o of placedOfficers) if (o.officer.name.toLowerCase().includes(q)) out.push({ label: o.officer.name, kind: "Officer", coord: o.coord });
+    return out.slice(0, 6);
+  }, [searchTerm, incidents, locations, placedOfficers]);
+
+  const goTo = (r: { coord: [number, number]; id?: string }) => {
+    mapRef.current?.easeTo({ center: r.coord, zoom: 15, duration: 600 });
+    if (r.id) {
+      setSelectedId(r.id);
+      setPanelOpen(true);
+    }
+    setSearchTerm("");
+  };
+
+  const logIncidentHere = (lng: number, lat: number) => {
+    const withCoords = locations.flatMap((l) => {
+      const c = coordOf(l.coord_x, l.coord_y);
+      return c ? [{ l, d: distanceKm([lng, lat], c) }] : [];
+    });
+    const nearest = withCoords.sort((a, b) => a.d - b.d)[0]?.l;
+    sessionStorage.setItem(
+      "lemtik_incident_draft",
+      JSON.stringify({
+        location: nearest?.name ?? "Mapped area",
+        zone: nearest?.name ?? "Mapped area",
+        coord_x: lng,
+        coord_y: lat,
+        title: "Map-originated incident",
+        description: `Logged from the live map at ${lat.toFixed(5)}, ${lng.toFixed(5)}.`,
+        type: "suspicious",
+        severity: 3,
+      }),
+    );
+    setMenu(null);
+    navigate({ to: "/app/incidents" });
+  };
+
+  const drawZoneHere = (lng: number, lat: number) => {
+    sessionStorage.setItem("lemtik_zone_draft", JSON.stringify({ name: "New zone", coord_x: lng, coord_y: lat, source: "map-context" }));
+    setMenu(null);
+    navigate({ to: "/app/locations" });
+  };
+
+  const locateMe = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const c: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+      setMyPos(c);
+      const map = mapRef.current;
+      if (!map) return;
+      meMarker.current?.remove();
+      const el = document.createElement("span");
+      el.style.cssText = "width:14px;height:14px;border-radius:50%;background:#7A9BFF;box-shadow:0 0 0 4px rgba(122,155,255,.3),0 0 0 2px #0A0C10";
+      meMarker.current = new mapboxgl.Marker({ element: el }).setLngLat(c).addTo(map);
+      map.flyTo({ center: c, zoom: 15, duration: 700 });
+    });
+  };
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await rootRef.current?.requestFullscreen?.();
+  };
+
+  const counts = {
+    incidents: filtered.length,
+    officers: placedOfficers.length,
+    patrols: routes.length,
+    zones: zoneGeo.features.length,
+    devices: placedDevices.length,
+    tracks: tracks.length,
+  };
+  const unplaced = filtered.length - placed.length;
   const tokenMissing = tokenData && !tokenData.token;
+  const asideWidth = 372;
+
+  const chip = (key: keyof typeof layers, label: string, Icon: typeof Siren) => (
+    <button key={key} type="button" className={`chip${layers[key] ? " on" : ""}`} aria-pressed={layers[key]} onClick={() => setLayers((l) => ({ ...l, [key]: !l[key] }))}>
+      <Icon size={13} strokeWidth={1.75} className="ic" />
+      {label}
+      <span className="mono" style={{ fontSize: 11, opacity: 0.75 }}>{counts[key]}</span>
+    </button>
+  );
 
   return (
-    <div className="space-y-3">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Live Incident Map</div>
-          <h1 className="mt-1 text-2xl font-semibold">Lagos operations</h1>
-          <p className="text-sm text-muted-foreground">
-            {filtered.length} of {incidents.length} incident{incidents.length === 1 ? "" : "s"} · last {WINDOWS.find((w) => w.value === win)?.label}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 text-[11px]">
-          {conn === "live" ? (
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-low/30 bg-low/10 px-2 py-1 text-low">
-              <Wifi className="h-3 w-3" /> Live
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-high/40 bg-high/10 px-2 py-1 text-high">
-              <WifiOff className="h-3 w-3" /> Live updates paused — reconnecting…
-            </span>
-          )}
-        </div>
+    <div
+      ref={rootRef}
+      className="relative -m-4 overflow-hidden"
+      style={{ height: fullscreen ? "100vh" : "calc(100dvh - var(--shell-top, 52px))", minHeight: 620, background: "#0C0F14" }}
+      onContextMenu={(e) => {
+        const map = mapRef.current;
+        if (!map || !container.current?.contains(e.target as Node)) return;
+        e.preventDefault();
+        const rect = container.current.getBoundingClientRect();
+        const ll = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+        setMenu({ x: e.clientX, y: e.clientY, lng: ll.lng, lat: ll.lat });
+      }}
+      onClick={() => setMenu(null)}
+    >
+      <div className="map" style={{ position: "absolute", inset: 0, borderRadius: 0, border: 0 }}>
+        <div ref={container} className="absolute inset-0" />
+        {(tokenMissing || !tokenData) && (
+          <div className="absolute inset-0 grid place-items-center p-6 text-center">
+            {tokenMissing ? (
+              <div className="col g6" style={{ maxWidth: 340 }}>
+                <b>Map unavailable</b>
+                <span className="t3" style={{ fontSize: 12.5 }}>No Mapbox token is configured for this deployment (MAPBOX_PUBLIC_TOKEN), so the map can’t be drawn. Incidents are still listed in the panel.</span>
+              </div>
+            ) : (
+              <Loader2 className="h-5 w-5 animate-spin t3" />
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
-        <div className="relative min-w-[240px] flex-1">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                runSearch();
-              }
-            }}
-            placeholder="Search address or area"
-            className="w-full rounded border border-border bg-surface py-1.5 pl-7 pr-3 text-[11px] text-foreground"
-          />
-        </div>
-        <button onClick={runSearch} className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground">
-          <MapPinned className="h-3.5 w-3.5" /> Go
-        </button>
-        <div className="h-5 w-px bg-border mx-1" />
-        <SegBtn active={mode === "pins"} onClick={() => setMode("pins")} icon={Pin}>Pins</SegBtn>
-        <SegBtn active={mode === "heatmap"} onClick={() => setMode("heatmap")} icon={Flame}>Heatmap</SegBtn>
-        <div className="h-5 w-px bg-border mx-1" />
-        <div className="flex items-center gap-1">
-          {WINDOWS.map((w) => (
-            <button
-              key={w.value}
-              onClick={() => setWin(w.value)}
-              className={`rounded px-2 py-1 text-[11px] font-medium uppercase tracking-wider ${win === w.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {w.label}
+      <div className="col g8" style={{ position: "absolute", left: 12, right: panelOpen ? asideWidth + 24 : 12, top: 12 }}>
+        <div className="row g8 wrap">
+          <div className="relative" style={{ flex: "1 1 220px", maxWidth: 360 }}>
+            <label className="glass row g8" style={{ height: 38, padding: "0 12px", color: "var(--tx-3)" }}>
+              <Search size={15} strokeWidth={1.75} className="ic" />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && searchResults[0]) goTo(searchResults[0]);
+                  if (e.key === "Escape") setSearchTerm("");
+                }}
+                placeholder="Search incident, location or officer"
+                aria-label="Search the map"
+                className="f1 bg-transparent outline-none t1"
+                style={{ fontSize: 13 }}
+              />
+            </label>
+            {searchTerm.trim() && (
+              <div className="glass absolute left-0 right-0 z-20 mt-1 overflow-hidden" role="listbox">
+                {searchResults.length === 0 ? (
+                  <div className="empty" style={{ padding: "8px 12px" }}>Nothing with a map position matches.</div>
+                ) : (
+                  searchResults.map((r, i) => (
+                    <button key={`${r.kind}-${i}`} type="button" role="option" aria-selected={false} onClick={() => goTo(r)} className="row g8 w-full text-left hover:bg-ink-3" style={{ padding: "8px 12px" }}>
+                      <span className="tg">{r.kind}</span>
+                      <span className="trunc">{r.label}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          <div className="glass seg" style={{ height: 38, alignItems: "center" }} role="group" aria-label="Incident display">
+            <button type="button" className={mode === "pins" ? "on" : undefined} aria-pressed={mode === "pins"} onClick={() => setMode("pins")}>
+              <Pin size={13} strokeWidth={1.75} /> Pins
             </button>
-          ))}
+            <button type="button" className={mode === "heatmap" ? "on" : undefined} aria-pressed={mode === "heatmap"} onClick={() => setMode("heatmap")}>
+              <Flame size={13} strokeWidth={1.75} /> Heatmap
+            </button>
+          </div>
+          <div className="glass row g8" style={{ height: 38, padding: "0 6px 0 12px" }}>
+            <span style={{ fontSize: 12.5, fontWeight: 550 }}>Window</span>
+            <div className="seg" style={{ border: 0, background: "transparent" }} role="group" aria-label="Time window">
+              {WINDOWS.map((w) => (
+                <button key={w.value} type="button" className={win === w.value ? "on" : undefined} aria-pressed={win === w.value} onClick={() => setWin(w.value)}>
+                  {w.label}
+                </button>
+              ))}
+            </div>
+            {mode === "heatmap" && (
+              <label className="t3 row g6" style={{ fontSize: 11.5, paddingRight: 6 }}>
+                Opacity
+                <input type="range" min={10} max={100} value={heatOpacity} onChange={(e) => setHeatOpacity(Number(e.target.value))} style={{ width: 64 }} aria-label="Heatmap opacity" />
+              </label>
+            )}
+          </div>
         </div>
-        <div className="h-5 w-px bg-border mx-1" />
-        <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span>Type</span>
-          <div className="relative">
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as IncidentType | "all")}
-              className="appearance-none rounded border border-border bg-surface pr-6 pl-2 py-1 text-[11px] text-foreground"
-            >
+        <div className="row g8 wrap">
+          <div className="glass row g4 wrap" style={{ padding: 4 }} role="group" aria-label="Map layers">
+            {chip("incidents", "Incidents", Siren)}
+            {chip("officers", "Officers", Users)}
+            {chip("patrols", "Patrol routes", RouteIcon)}
+            {chip("zones", "Zones", Hexagon)}
+            {canSeeDevices && chip("devices", "Devices", Cpu)}
+            {counts.tracks > 0 && chip("tracks", "Re-ID tracks", ScanEye)}
+          </div>
+          <label className="glass row g6" style={{ height: 36, padding: "0 4px 0 10px" }}>
+            <ListFilter size={13} strokeWidth={1.75} className="ic t3" />
+            <span className="sr-only">Incident type</span>
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as IncidentType | "all")} className="in" style={{ height: 28, border: 0, background: "transparent", width: "auto", paddingLeft: 4 }}>
               {TYPE_OPTS.map((t) => (
                 <option key={t} value={t}>{t === "all" ? "All types" : typeMeta[t as IncidentType]}</option>
               ))}
             </select>
-            <ChevronsUpDown className="pointer-events-none absolute right-1 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-          </div>
-        </label>
-        <div className="h-5 w-px bg-border mx-1" />
-        <ToggleBtn active={showOsint} onClick={() => setShowOsint((v) => !v)} icon={Diamond}>OSINT</ToggleBtn>
-        <ToggleBtn active={showOfficers} onClick={() => setShowOfficers((v) => !v)} icon={Users}>Officers</ToggleBtn>
-        <ToggleBtn active={showPatrols} onClick={() => setShowPatrols((v) => !v)} icon={Radar}>Patrols</ToggleBtn>
-        <ToggleBtn active={showZones} onClick={() => setShowZones((v) => !v)} icon={Layers}>Zones</ToggleBtn>
-        {canViewSmartInfra && (
-          <ToggleBtn active={showSmartInfra} onClick={() => setShowSmartInfra((v) => !v)} icon={Radio}>Smart infra</ToggleBtn>
-        )}
-        <button onClick={focusCurrentLocation} className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground">
-          <LocateFixed className="h-3.5 w-3.5" /> My location
-        </button>
-        <button onClick={toggleFullscreen} className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground">
-          <Maximize2 className="h-3.5 w-3.5" /> {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-        </button>
-        <label className="ml-auto inline-flex items-center gap-2 text-[11px] text-muted-foreground">
-          Heat opacity
-          <input
-            type="range"
-            min={5}
-            max={100}
-            value={heatOpacity}
-            onChange={(e) => setHeatOpacity(Number(e.target.value))}
-            className="w-28"
-          />
-        </label>
+          </label>
+        </div>
       </div>
 
-      {/* Map + Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3">
-        <div
-          className="relative overflow-hidden rounded-lg border border-border bg-surface h-[calc(100vh-260px)] min-h-[480px]"
-          onContextMenu={(e) => {
-            e.preventDefault();
-            const map = mapRef.current;
-            if (!map) return;
-            const rect = e.currentTarget.getBoundingClientRect();
-            const point = [e.clientX - rect.left, e.clientY - rect.top] as [number, number];
-            const lngLat = map.unproject(point);
-            setContextMenu({ x: e.clientX, y: e.clientY, lng: lngLat.lng, lat: lngLat.lat });
-          }}
-          onClick={() => setContextMenu(null)}
-        >
-          {/* Always mount the container so the ref is present before the map init effect runs */}
-          <div ref={mapContainer} className="absolute inset-0" style={{ width: "100%", height: "100%" }} />
-          {tokenMissing && (
-            <div className="absolute inset-0 grid place-items-center p-6 text-center bg-surface z-10">
-              <div>
-                <div className="text-sm font-medium text-critical">Mapbox token missing</div>
-                <p className="mt-2 text-xs text-muted-foreground">Add MAPBOX_PUBLIC_TOKEN in project secrets.</p>
-              </div>
-            </div>
-          )}
-          {!tokenData && (
-            <div className="absolute inset-0 grid place-items-center bg-surface z-10">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-
-          {!tokenMissing && (
-            <div className="absolute bottom-4 left-4 z-10 flex items-center gap-3 rounded-md border border-border bg-background/90 backdrop-blur px-3 py-2 text-[11px]">
-              {([5, 4, 3, 2, 1] as const).map((s) => (
-                <span key={s} className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: severityColor(s) }} />
-                  S{s}
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="absolute top-4 left-4 z-10 space-y-2">
-            <div className="rounded-md border border-critical/30 bg-background/90 backdrop-blur px-3 py-2 text-[11px] shadow-lg">
-              <div className="flex items-center gap-2 font-medium text-foreground">
-                <span className="h-2 w-2 rounded-full bg-critical animate-pulse" />
-                Target lock
-              </div>
-              <div className="mt-1 font-mono text-muted-foreground">{tacticalResponse.target}</div>
-            </div>
-            {currentLocation && (
-              <div className="rounded-md border border-border bg-background/90 backdrop-blur px-3 py-2 text-[11px] shadow-lg">
-                <div className="flex items-center gap-2 font-medium text-foreground">
-                  <LocateFixed className="h-3.5 w-3.5 text-high" />
-                  Current position
-                </div>
-                <div className="mt-1 font-mono text-muted-foreground">{currentLocation[1].toFixed(5)}, {currentLocation[0].toFixed(5)}</div>
-              </div>
-            )}
+      {info && (
+        <div className="glass col g4" style={{ position: "absolute", left: 12, bottom: 64, padding: "10px 12px", maxWidth: 300 }}>
+          <div className="row g8">
+            <b className="f1 trunc">{info.title}</b>
+            <button type="button" className="t3 hover:text-tx-1" aria-label="Close" onClick={() => setInfo(null)}>
+              <X size={14} strokeWidth={1.75} />
+            </button>
           </div>
-          {areaIntel && (
-            <div className="absolute right-4 top-4 z-10 max-w-sm rounded-lg border border-border bg-background/92 px-3 py-2 text-[11px] shadow-xl backdrop-blur">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-medium text-foreground">Area intelligence</div>
-                <button onClick={(e) => { e.stopPropagation(); setAreaIntel(null); }} className="text-muted-foreground hover:text-foreground">×</button>
-              </div>
-              <div className="mt-1 font-semibold text-foreground">{areaIntel.label}</div>
-              <div className="mt-1 text-muted-foreground">
-                Coordinates {areaIntel.lat.toFixed(5)}, {areaIntel.lng.toFixed(5)}
-              </div>
-              <div className="mt-2 text-muted-foreground">
-                Nearby incidents and OSINT signals can be reviewed from the incident panel after you pin or search the area.
-              </div>
-            </div>
+          {info.lines.map((l) => (
+            <span key={l} className="t2" style={{ fontSize: 12 }}>{l}</span>
+          ))}
+          <span className="mono t3" style={{ fontSize: 11 }}>{info.lat.toFixed(5)}, {info.lng.toFixed(5)}</span>
+        </div>
+      )}
+
+      <div className="glass row g12 wrap" style={{ position: "absolute", left: 12, bottom: 12, padding: "8px 12px", fontSize: 11.5, color: "var(--tx-2)", maxWidth: `calc(100% - ${panelOpen ? asideWidth + 90 : 90}px)` }}>
+        {mode === "heatmap" ? (
+          <span className="row g6">
+            <span style={{ width: 28, height: 8, borderRadius: 4, background: "linear-gradient(90deg,rgba(247,208,70,.4),rgba(255,143,46,.6),rgba(242,56,75,.8))", display: "block" }} />
+            Incident density · {WINDOWS.find((w) => w.value === win)?.label}
+          </span>
+        ) : (
+          <span className="row g6">
+            <span className="sv sv5 svq" style={{ height: 14, width: 14, minWidth: 14, fontSize: 9 }}>5</span>
+            Incident by severity
+          </span>
+        )}
+        <span className="row g6">
+          <span style={{ width: 12, height: 12, borderRadius: "50%", background: "#3462F0", display: "block" }} />
+          Officer
+        </span>
+        <span className="row g6">
+          <span style={{ width: 16, height: 0, borderTop: "2.5px solid #7A9BFF", display: "block" }} />
+          Patrol route
+        </span>
+        {counts.tracks > 0 && (
+          <span className="row g6">
+            <span style={{ width: 16, height: 0, borderTop: "2px solid #A88BFF", display: "block" }} />
+            Re-ID track
+          </span>
+        )}
+        {unplaced > 0 && <span className="t3">{unplaced} without a map position</span>}
+      </div>
+
+      <div className="mapctl" style={{ right: panelOpen ? asideWidth + 24 : 12, bottom: 12 }}>
+        <button type="button" className="ibtn" aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()} disabled={!ready}>
+          <Plus size={15} strokeWidth={1.75} />
+        </button>
+        <button type="button" className="ibtn" aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()} disabled={!ready}>
+          <Minus size={15} strokeWidth={1.75} />
+        </button>
+        <button type="button" className="ibtn" aria-label={myPos ? "Back to my location" : "Show my location"} onClick={locateMe} disabled={!ready}>
+          <LocateFixed size={15} strokeWidth={1.75} />
+        </button>
+        <button type="button" className="ibtn" aria-label="Show everything" onClick={fitAll} disabled={!ready}>
+          <Hexagon size={15} strokeWidth={1.75} />
+        </button>
+        <button type="button" className="ibtn" aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={toggleFullscreen}>
+          {fullscreen ? <Minimize2 size={15} strokeWidth={1.75} /> : <Maximize2 size={15} strokeWidth={1.75} />}
+        </button>
+      </div>
+
+      {!panelOpen && (
+        <button type="button" className="glass row g8 b" style={{ position: "absolute", right: 12, top: 12, height: 38 }} onClick={() => setPanelOpen(true)}>
+          <PanelRightOpen size={15} strokeWidth={1.75} />
+          Incidents · {filtered.length}
+        </button>
+      )}
+
+      {panelOpen && (
+        <aside className="glass col" style={{ position: "absolute", right: 12, top: 12, bottom: 12, width: asideWidth, maxWidth: "calc(100% - 24px)", overflow: "hidden" }} aria-label="Incident details">
+          {selected ? (
+            <IncidentDetail
+              incident={selected}
+              cameras={cameras}
+              officers={officers as OfficerRow[]}
+              orgId={appAccess.orgId}
+              readOnly={readOnly}
+              actor={appAccess.displayName || appAccess.email || "You"}
+              onClose={() => setSelectedId(null)}
+              onAssign={() => assignMut.mutate(selected.id)}
+              assigning={assignMut.isPending}
+              onStatus={(status) => statusMut.mutate({ id: selected.id, status })}
+            />
+          ) : (
+            <IncidentList incidents={filtered} loading={isLoading} onPick={(id) => setSelectedId(id)} onHide={() => setPanelOpen(false)} windowLabel={WINDOWS.find((w) => w.value === win)!.label} />
           )}
-          {contextMenu && (
-            <div
-              className="fixed z-50 w-52 rounded-lg border border-border bg-card p-2 shadow-2xl"
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                onClick={() => logIncidentHere(contextMenu.lng, contextMenu.lat)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[11px] text-foreground hover:bg-surface"
-              >
-                <Shield className="h-3.5 w-3.5 text-critical" /> Log incident here
-              </button>
-              <button
-                type="button"
-                onClick={() => drawZoneHere(contextMenu.lng, contextMenu.lat)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[11px] text-foreground hover:bg-surface"
-              >
-                <RouteIcon className="h-3.5 w-3.5 text-high" /> Draw new zone
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAreaIntel({ lng: contextMenu.lng, lat: contextMenu.lat, label: "Area intelligence query" });
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[11px] text-foreground hover:bg-surface"
-              >
-                <Gauge className="h-3.5 w-3.5 text-resolved" /> View area intelligence
-              </button>
+        </aside>
+      )}
+
+      {menu && (
+        <div className="glass col fixed z-50" style={{ left: menu.x, top: menu.y, width: 220, padding: 4 }} onClick={(e) => e.stopPropagation()} role="menu">
+          {!readOnly && (
+            <button type="button" role="menuitem" className="row g8 w-full text-left hover:bg-ink-3" style={{ padding: "8px 10px", borderRadius: 6 }} onClick={() => logIncidentHere(menu.lng, menu.lat)}>
+              <Siren size={14} strokeWidth={1.75} className="ic" style={{ color: "var(--s5)" }} />
+              Log incident here
+            </button>
+          )}
+          <button type="button" role="menuitem" className="row g8 w-full text-left hover:bg-ink-3" style={{ padding: "8px 10px", borderRadius: 6 }} onClick={() => drawZoneHere(menu.lng, menu.lat)}>
+            <Hexagon size={14} strokeWidth={1.75} className="ic lnk" />
+            Draw a zone here
+          </button>
+          <span className="mono t3" style={{ fontSize: 11, padding: "4px 10px" }}>{menu.lat.toFixed(5)}, {menu.lng.toFixed(5)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IncidentList({ incidents, loading, onPick, onHide, windowLabel }: { incidents: IncidentRow[]; loading: boolean; onPick: (id: string) => void; onHide: () => void; windowLabel: string }) {
+  const now = useNow(1000);
+  return (
+    <>
+      <div className="row g8" style={{ padding: "12px 14px", borderBottom: "1px solid var(--line-1)" }}>
+        <b>Incidents</b>
+        <span className="t3" style={{ fontSize: 12 }}>last {windowLabel} · {incidents.length}</span>
+        <span className="flex-auto" />
+        <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Hide panel" onClick={onHide}>
+          <X size={14} strokeWidth={1.75} />
+        </button>
+      </div>
+      <div className="list scroll" style={{ flex: "1 1 auto" }}>
+        {loading ? (
+          <div className="empty row g8" style={{ padding: 14 }}><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading incidents…</div>
+        ) : incidents.length === 0 ? (
+          <div className="empty" style={{ padding: 14 }}>No incidents in this window. Widen the window or change the type filter.</div>
+        ) : (
+          incidents.map((i) => (
+            <button key={i.id} type="button" onClick={() => onPick(i.id)} className="row g10 w-full text-left hover:bg-ink-3" style={{ padding: "9px 14px", alignItems: "flex-start" }}>
+              <Sev level={isOpen(i) ? i.severity : 1} />
+              <span className="f1 col g4 min-w-0">
+                <span className="row g8">
+                  <span className="mono t3" style={{ fontSize: 11.5 }}>{i.code}</span>
+                  <span className="trunc f1" style={{ fontWeight: 600 }}>{incidentTitle(i)}</span>
+                  <span className="mono t2" style={{ fontSize: 12 }}>{isOpen(i) ? elapsed(i.reported_at, now) : timeAgo(i.reported_at)}</span>
+                </span>
+                <span className="row g8">
+                  <span className="trunc f1 t3" style={{ fontSize: 12 }}>{[i.zone, i.location].filter(Boolean).join(" · ")}</span>
+                  <Lifecycle status={i.status} label={false} />
+                  {!coordOf(i.coord_x, i.coord_y) && <span className="tg">No position</span>}
+                </span>
+              </span>
+            </button>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+function IncidentDetail({
+  incident,
+  cameras,
+  officers,
+  orgId,
+  readOnly,
+  actor,
+  onClose,
+  onAssign,
+  assigning,
+  onStatus,
+}: {
+  incident: IncidentRow;
+  cameras: CameraRecord[];
+  officers: OfficerRow[];
+  orgId: string;
+  readOnly: boolean;
+  actor: string;
+  onClose: () => void;
+  onAssign: () => void;
+  assigning: boolean;
+  onStatus: (status: IncidentStatus) => void;
+}) {
+  const now = useNow(1000);
+  const open = isOpen(incident);
+  const assignee = incident.officer ? officers.find((o) => o.name.toLowerCase() === incident.officer!.toLowerCase()) : null;
+  const camera = cameras.find((c) => {
+    const where = c.location?.toLowerCase() ?? "";
+    return where && ((incident.zone && where.includes(incident.zone.toLowerCase())) || (incident.location && where.includes(incident.location.toLowerCase())));
+  });
+
+  return (
+    <>
+      <div className="row g8" style={{ padding: "12px 14px", borderBottom: "1px solid var(--line-1)" }}>
+        <Sev level={incident.severity} label />
+        <span className="mono t3" style={{ fontSize: 12 }}>{incident.code}</span>
+        <span className="flex-auto" />
+        <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Back to the incident list" onClick={onClose}>
+          <X size={14} strokeWidth={1.75} />
+        </button>
+      </div>
+      <div className="col g12 scroll" style={{ padding: 14, flex: "1 1 auto" }}>
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 650 }}>{incidentTitle(incident)}</h2>
+          <div className="t2" style={{ fontSize: 12.5, marginTop: 2 }}>{[incident.location, incident.zone].filter(Boolean).join(" · ")}</div>
+        </div>
+        <div className="row g8">
+          <Lifecycle status={incident.status} />
+          <span className="flex-auto" />
+          <span className="mono" style={{ fontSize: 13 }}>{open ? elapsed(incident.reported_at, now) : timeAgo(incident.reported_at)}</span>
+        </div>
+        {incident.description && <p className="t2" style={{ fontSize: 13, lineHeight: 1.5 }}>{incident.description}</p>}
+        <div className="card" style={{ padding: "10px 12px" }}>
+          {incident.officer ? (
+            <div className="row g10">
+              <Avatar name={incident.officer} size="lg" own />
+              <div className="f1 min-w-0">
+                <b className="trunc block" style={{ fontSize: 13 }}>{incident.officer}</b>
+                <div className="t3" style={{ fontSize: 12 }}>
+                  {assignee?.location_updated_at ? `Position updated ${timeAgo(assignee.location_updated_at)}` : "Assigned"}
+                </div>
+              </div>
+              <span className="tg tg-blue">Assigned</span>
+            </div>
+          ) : (
+            <div className="row g10">
+              <span className="av av-lg" aria-hidden="true">
+                <UserCheck size={15} strokeWidth={1.75} />
+              </span>
+              <div className="f1">
+                <b style={{ fontSize: 13 }}>Nobody assigned</b>
+                <div className="t3" style={{ fontSize: 12 }}>Take it or dispatch from the incident page</div>
+              </div>
+              <span className="tg tg-warn">Unassigned</span>
             </div>
           )}
         </div>
-
-        {/* Slide-in panel (always rendered on lg, slides in on mobile via translate) */}
-        <aside
-          className={`rounded-lg border border-border bg-card p-5 transition-all ${sel ? "" : "opacity-70"}`}
-        >
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading incidents…
-            </div>
-          ) : sel ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-critical/30 bg-critical/10 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">AI Dynamic Tactical Response</div>
-                    <div className="text-sm font-semibold text-foreground">{tacticalResponse.priority}</div>
-                  </div>
-                  <span className="rounded-md border border-critical/30 bg-background/80 px-2 py-1 text-[10px] uppercase tracking-wider text-critical">
-                    Live
-                  </span>
-                </div>
-                <div className="mt-3 rounded-md border border-border bg-card px-3 py-2 text-xs leading-relaxed text-foreground">
-                  {tacticalResponse.instruction}
-                </div>
-                <button
-                  onClick={() => {
-                    assignMut.mutate(sel.id);
-                    statusMut.mutate({ id: sel.id, status: "responding" });
-                  }}
-                  className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-critical px-3 py-2 text-xs font-medium text-white hover:opacity-90"
-                >
-                  Approve & Execute Overrides
-                </button>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">MCMOT Transition Map</div>
-                    <div className="text-sm font-semibold">REID movement across camera hops</div>
-                  </div>
-                  <Radar className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div className="mt-3 space-y-2">
-                  {mcmotTransitions.map((target) => (
-                    <div key={target.id} className={cn("rounded-xl border p-3 transition", target.blindSpot ? "border-high/30 bg-high/10" : "border-border bg-surface")}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium text-foreground">{target.id}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{target.route}</div>
-                        </div>
-                        <span className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                          {target.confidence}%
-                        </span>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        <span className="rounded-full border border-border px-2 py-1">{target.current}</span>
-                        <span className="rounded-full border border-border px-2 py-1">{target.next}</span>
-                        <span className="rounded-full border border-border px-2 py-1">{target.blindSpot ? "Blind spot" : "Visible"}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-lg border border-border bg-card p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Camera Registry</div>
-                    <div className="text-sm font-semibold">Live feeds and stream start control</div>
-                  </div>
-                  <Radio className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div className="mt-3 space-y-3">
-                  {cameras.length ? (
-                    cameras.slice(0, 1).map((camera) => (
-                      <CameraStreamPlayer key={camera.id} camera={camera} />
-                    ))
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-border bg-surface px-4 py-5 text-xs text-muted-foreground">
-                      No camera list returned by the Relationship API yet.
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <SeverityBadge severity={sel.severity as Severity} />
-                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-                  {statusMeta[sel.status as IncidentStatus]}
-                </span>
-              </div>
-              <div>
-                <div className="text-xs font-mono text-muted-foreground">{sel.code}</div>
-                <div className="mt-1 text-base font-semibold">{typeMeta[sel.type as IncidentType]}</div>
-                <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <MapPin className="h-3 w-3" /> {sel.location} · {sel.zone}
-                </div>
-              </div>
-              <p className="text-sm text-foreground/90 leading-relaxed line-clamp-4">
-                {sel.description ?? "No description on file."}
-              </p>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <Field label="Reported" value={new Date(sel.reported_at).toLocaleString("en-GB")} />
-                <Field label="Since" value={timeAgo(sel.reported_at)} />
-                <Field label="Assigned" value={sel.officer ?? "Unassigned"} />
-                <Field label="Status" value={statusMeta[sel.status as IncidentStatus]} />
-              </div>
-
-              <div className="space-y-1.5 pt-1">
-                <Link
-                  to="/app/incidents"
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium hover:bg-surface-2"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" /> View full incident
-                </Link>
-                <button
-                  onClick={() => assignMut.mutate(sel.id)}
-                  disabled={assignMut.isPending}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-                >
-                  {assignMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                  Assign to me
-                </button>
-                <div className="relative">
-                  <select
-                    value={sel.status}
-                    onChange={(e) => statusMut.mutate({ id: sel.id, status: e.target.value as IncidentStatus })}
-                    className="w-full appearance-none rounded-md border border-border bg-surface px-3 py-2 pr-8 text-xs font-medium hover:bg-surface-2"
-                  >
-                    {(Object.keys(statusMeta) as IncidentStatus[]).map((s) => (
-                      <option key={s} value={s}>Change status: {statusMeta[s]}</option>
-                    ))}
-                  </select>
-                  <ChevronRight className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-90 text-muted-foreground" />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              No incidents in this window. Adjust the time range or filters, or log a new incident.
-            </div>
-          )}
-        </aside>
+        {open && (
+          <div className="col g8">
+            <span className="ai-h">AI proposals</span>
+            <IncidentProposals incident={incident} orgId={orgId} readOnly={readOnly} actor={actor} limit={2} />
+          </div>
+        )}
+        <dl className="kv" style={{ margin: 0 }}>
+          <dt>Reported</dt>
+          <dd className="mono">{new Date(incident.reported_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "medium" })}</dd>
+          <dt>Source</dt>
+          <dd>{incident.quick_report ? "Quick report" : "Logged incident"}</dd>
+          <dt>Nearest camera</dt>
+          <dd>{camera ? `${camera.name} · ${camera.status}` : "None registered for this area"}</dd>
+          <dt>Position</dt>
+          <dd className="mono">{coordOf(incident.coord_x, incident.coord_y) ? `${Number(incident.coord_y).toFixed(5)}, ${Number(incident.coord_x).toFixed(5)}` : "Not recorded"}</dd>
+        </dl>
+        {!readOnly && (
+          <label className="fl">
+            <span className="lbl">Status</span>
+            <select className="in" value={incident.status} onChange={(e) => onStatus(e.target.value as IncidentStatus)}>
+              {(Object.keys(statusMeta) as IncidentStatus[]).map((s) => (
+                <option key={s} value={s}>{statusMeta[s]}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
-    </div>
+      <div className="row g8" style={{ padding: "12px 14px", borderTop: "1px solid var(--line-1)" }}>
+        <Link to="/app/incidents/$id" params={{ id: incident.id }} className="b b-sec f1">
+          Open incident
+        </Link>
+        {!readOnly && (
+          <button type="button" className="b b-pri f1" onClick={onAssign} disabled={assigning}>
+            {assigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserCheck size={14} strokeWidth={1.75} />}
+            Assign to me
+          </button>
+        )}
+      </div>
+    </>
   );
-}
-
-function SegBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: any; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium ${active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-      <Icon className="h-3.5 w-3.5" /> {children}
-    </button>
-  );
-}
-function ToggleBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: any; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] font-medium ${active ? "border-primary/40 bg-primary/10 text-foreground" : "border-border bg-surface text-muted-foreground hover:text-foreground"}`}>
-      <Icon className="h-3.5 w-3.5" /> {children}
-    </button>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-surface p-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-foreground truncate">{value}</div>
-    </div>
-  );
-}
-
-function timeAgo(iso: string): string {
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return `${Math.floor(s)}s ago`;
-  const m = s / 60; if (m < 60) return `${Math.floor(m)}m ago`;
-  const h = m / 60; if (h < 24) return `${Math.floor(h)}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
 }

@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   Car,
-  Check,
   FileText,
   Fuel,
   Layers,
@@ -30,12 +29,12 @@ import { listPatrols, listCheckIns } from "@/lib/patrols.functions";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
 import { listVehicles } from "@/lib/inventory.functions";
 import { getMapboxToken } from "@/lib/config.functions";
-import { submitAiQuery, submitAiRecommendation, submitApprovalDecision, type AiQueryResult, type AiRecommendation } from "@/lib/ai-commands.functions";
+import { submitAiQuery, type AiQueryResult } from "@/lib/ai-commands.functions";
+import { ProposalCard, useIncidentProposals, useProposalDecisions } from "@/components/AiProposals";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { appendStoredCommandHistory, loadStoredCommandHistory, type CommandHistoryEntry } from "@/lib/command-memory";
 import { typeMeta, type IncidentType } from "@/lib/mockData";
 import type { AppAccess } from "@/lib/rbac";
-import { Avatar, Confidence, Kpi, Lifecycle, PageHeader, Seg, Sev, Tabs, elapsed, timeAgo, toSev, useNow } from "@/components/nw";
+import { Avatar, Kpi, Lifecycle, PageHeader, Seg, Sev, Tabs, elapsed, timeAgo, toSev, useNow } from "@/components/nw";
 
 type MapboxModule = typeof import("mapbox-gl");
 type MapboxMap = import("mapbox-gl").Map;
@@ -692,76 +691,10 @@ function WaypointDots({ total, done, status }: { total: number; done: number; st
 
 /* ---------------- decision panel ---------------- */
 
-type Proposal = { id: string; title: string; detail: string | null; confidence: number | null };
-
-function persistedProposals(incident: IncidentRow | null): Proposal[] {
-  const raw = incident?.dispatch_plan?.recommended_actions ?? incident?.agent_output?.recommended_actions;
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((a: any, idx: number) => {
-    const title = typeof a === "string" ? a : a?.title || a?.label || a?.name;
-    if (!title) return [];
-    const conf = typeof a === "object" && a && Number.isFinite(Number(a.confidence)) ? Number(a.confidence) : null;
-    const detail = typeof a === "object" && a ? (Array.isArray(a.reasoning) ? a.reasoning[0] : a.detail || a.description) ?? null : null;
-    return [{ id: String((typeof a === "object" && a?.id) || `${incident!.id}-plan-${idx}`), title: String(title), detail, confidence: conf }];
-  });
-}
-
 function DecisionPanel({ incident, orgId, readOnly, actor }: { incident: IncidentRow | null; orgId: string; readOnly: boolean; actor: string }) {
-  const recommend = useServerFn(submitAiRecommendation);
-  const decide = useServerFn(submitApprovalDecision);
-  const [history, setHistory] = useState<CommandHistoryEntry[]>(() => loadStoredCommandHistory());
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const { data: rec, isLoading, isError } = useQuery({
-    queryKey: ["ai-recommendation", incident?.id],
-    queryFn: () => recommend({ data: { incident_id: incident!.id, org_id: orgId, scope: "incidents" } }) as Promise<AiRecommendation & { meta?: { operation_id?: string; request_id?: string } }>,
-    enabled: !!incident,
-    staleTime: 5 * 60_000,
-    retry: 0,
-  });
-
-  const fromModel = !!rec && !String(rec.request_id ?? "").startsWith("local-");
-  const proposals: Proposal[] = [
-    ...persistedProposals(incident),
-    ...(fromModel ? rec!.actions.map((a) => ({ id: a.id, title: a.label, detail: rec!.reasoning?.[0] ?? null, confidence: null })) : []),
-  ];
-  const decided = (id: string) => history.find((h) => h.proposalIds.includes(id) && h.commandText === incident?.code);
+  const { proposals, loading, emptyReason, rec, fromModel } = useIncidentProposals(incident, orgId);
+  const { decided, run, busy } = useProposalDecisions(incident, orgId, actor, rec, fromModel);
   const pending = proposals.filter((p) => !decided(p.id)).length;
-
-  const run = async (proposal: Proposal, decision: "approve_selected" | "reject") => {
-    if (!incident) return;
-    setBusy(`${proposal.id}:${decision}`);
-    try {
-      const result = (await decide({
-        data: {
-          decision,
-          proposal_ids: [proposal.id],
-          command_text: incident.code,
-          operation_id: rec?.meta?.operation_id,
-          request_id: rec?.meta?.request_id ?? (fromModel ? rec?.request_id : undefined),
-          org_id: orgId,
-        },
-      })) as { request_id?: string; controller_warning?: string | null } | null;
-      const entry: CommandHistoryEntry = {
-        id: `${Date.now()}-${proposal.id}`,
-        at: new Date().toISOString(),
-        decision,
-        proposalIds: [proposal.id],
-        commandText: incident.code,
-        summary: `${decision === "reject" ? "Denied" : "Approved"} · ${proposal.title}`,
-        scope: "incidents",
-        note: `${actor}${result?.request_id?.startsWith("local-") ? " · recorded on this device only" : ""}`,
-      };
-      appendStoredCommandHistory(entry);
-      setHistory((h) => [entry, ...h]);
-      if (result?.controller_warning) toast.warning(decision === "reject" ? "Denied" : "Approved", { description: result.controller_warning });
-      else toast.success(decision === "reject" ? "Denied" : "Approved");
-    } catch (err) {
-      toast.error("Couldn’t record that decision", { description: err instanceof Error ? err.message : undefined });
-    } finally {
-      setBusy(null);
-    }
-  };
 
   return (
     <section className="pn" style={{ flex: "none" }}>
@@ -775,62 +708,16 @@ function DecisionPanel({ incident, orgId, readOnly, actor }: { incident: Inciden
       <div className="col g8" style={{ padding: 10 }}>
         {!incident ? (
           <div className="empty">No open incident selected. AI proposals for an incident appear here for a person to approve.</div>
-        ) : isLoading ? (
+        ) : loading ? (
           <div className="row g8 t2" style={{ fontSize: 12.5 }}>
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Asking for recommendations on {incident.code}…
           </div>
         ) : proposals.length === 0 ? (
-          <div className="empty">
-            {isError
-              ? "Couldn’t reach the recommendation service."
-              : rec && !fromModel
-                ? `No AI recommendations for ${incident.code} — the recommendation service didn’t return a model result.`
-                : `No AI proposals for ${incident.code}.`}
-          </div>
+          <div className="empty">{emptyReason}</div>
         ) : (
-          proposals.slice(0, 3).map((p) => {
-            const done = decided(p.id);
-            if (done) {
-              const approved = done.decision !== "reject";
-              return (
-                <div key={p.id} className="ai done col g6" style={{ padding: "9px 11px" }}>
-                  <div className="row g8">
-                    <span className="f1 trunc" style={{ fontWeight: 600 }}>{p.title}</span>
-                    <span className={`tg ${approved ? "tg-ok" : "tg-fail"}`}>
-                      {approved ? <Check size={12} strokeWidth={2.4} /> : <X size={12} strokeWidth={2.4} />}
-                      {approved ? "Approved" : "Denied"}
-                    </span>
-                  </div>
-                  <span className="t2 trunc" style={{ fontSize: 12 }}>
-                    {done.note} · {new Date(done.at).toLocaleTimeString("en-GB")}
-                  </span>
-                </div>
-              );
-            }
-            return (
-              <div key={p.id} className="ai col g6" style={{ padding: "9px 11px" }}>
-                <div className="row g8">
-                  <span className="f1 trunc" style={{ fontWeight: 600 }}>{p.title}</span>
-                  <Confidence value={p.confidence} size={11.5} />
-                </div>
-                {p.detail && <div className="t2 trunc" style={{ fontSize: 12 }}>{p.detail}</div>}
-                <div className="row g8">
-                  <span className="t3 f1 trunc" style={{ fontSize: 11.5 }}>{readOnly ? "View only for client admins" : "Proposed · awaiting a decision"}</span>
-                  {!readOnly && (
-                    <>
-                      <button type="button" className="b b-sm b-gh" disabled={busy !== null} onClick={() => run(p, "reject")}>
-                        Deny
-                      </button>
-                      <button type="button" className="b b-sm b-pri" disabled={busy !== null} onClick={() => run(p, "approve_selected")}>
-                        {busy === `${p.id}:approve_selected` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check size={14} strokeWidth={1.75} />}
-                        Approve
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          proposals.slice(0, 3).map((p) => (
+            <ProposalCard key={p.id} proposal={p} decision={decided(p.id)} readOnly={readOnly} busy={busy} onDecide={(d) => run(p, d)} />
+          ))
         )}
       </div>
     </section>
