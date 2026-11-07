@@ -1,66 +1,53 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import "mapbox-gl/dist/mapbox-gl.css";
+import { toast } from "sonner";
+import {
+  ArrowRight,
+  Car,
+  Check,
+  FileText,
+  Fuel,
+  Layers,
+  Loader2,
+  LocateFixed,
+  Maximize2,
+  Minus,
+  OctagonAlert,
+  Plus,
+  Radar,
+  Route as RouteIcon,
+  Siren,
+  Sparkles,
+  Timer,
+  UserCheck,
+  X,
+} from "lucide-react";
 import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols, listCheckIns } from "@/lib/patrols.functions";
-import { listAlerts } from "@/lib/alerts.functions";
 import { listMembers, listLocations } from "@/lib/orgs.functions";
 import { listVehicles } from "@/lib/inventory.functions";
 import { getMapboxToken } from "@/lib/config.functions";
-import { AiChatWidget, ApprovalHistoryPanel, HumanApprovalLayer } from "@/components/dashboard/AICommandStudio";
+import { submitAiQuery, submitAiRecommendation, submitApprovalDecision, type AiQueryResult, type AiRecommendation } from "@/lib/ai-commands.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
+import { appendStoredCommandHistory, loadStoredCommandHistory, type CommandHistoryEntry } from "@/lib/command-memory";
+import { typeMeta, type IncidentType } from "@/lib/mockData";
 import type { AppAccess } from "@/lib/rbac";
-import type { AiQueryResult, ApprovalProposal } from "@/lib/ai-commands.functions";
-import { listCameras, type CameraRecord } from "@/lib/cameras.functions";
-import {
-  appendStoredCommandHistory,
-  loadStoredCommandHistory,
-  saveStoredCommandHistory,
-  saveStoredCommandIntent,
-  type CommandHistoryEntry,
-} from "@/lib/command-memory";
-import { SeverityBadge } from "@/components/SeverityBadge";
-import { typeMeta, statusMeta } from "@/lib/mockData";
-import { orgRoom, useRealtimeEventFeed } from "@/lib/realtime.events";
-import {
-  AlertTriangle,
-  ArrowUpRight,
-  BadgeAlert,
-  Clock3,
-  Layers3,
-  Loader2,
-  MessageSquareMore,
-  ShieldAlert,
-  Signal,
-  Smartphone,
-  UserRoundCheck,
-} from "lucide-react";
-import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
+import { Avatar, Confidence, Kpi, Lifecycle, PageHeader, Seg, Sev, Tabs, elapsed, timeAgo, toSev, useNow } from "@/components/nw";
 
 type MapboxModule = typeof import("mapbox-gl");
 type MapboxMap = import("mapbox-gl").Map;
+type MapboxMarker = import("mapbox-gl").Marker;
 type MapboxGeoJSONSource = import("mapbox-gl").GeoJSONSource;
-
-const MAP_COLORS = {
-  red: "#f43f5e",
-  orange: "#fb923c",
-  amber: "#fbbf24",
-  yellow: "#fde047",
-  slate: "#64748b",
-  blue: "#3b82f6",
-  green: "#22c55e",
-  ink: "#111827",
-  white: "#ffffff",
-};
 
 type IncidentRow = {
   id: string;
   code: string;
-  type: keyof typeof typeMeta;
-  severity: 1 | 2 | 3 | 4 | 5 | number;
-  status: keyof typeof statusMeta | string;
+  type: string;
+  severity: number;
+  status: string;
   location: string;
   zone: string;
   officer: string | null;
@@ -69,6 +56,8 @@ type IncidentRow = {
   coord_y?: number | null;
   description?: string | null;
   title?: string | null;
+  dispatch_plan?: { recommended_actions?: unknown } | null;
+  agent_output?: { recommended_actions?: unknown } | null;
 };
 
 type PatrolRow = {
@@ -79,779 +68,353 @@ type PatrolRow = {
   shift: string;
   waypoints: number;
   checked_in: number;
-  status: "on_route" | "delayed" | "complete" | "missed";
+  status: string;
   location_id?: string | null;
   next_check_in?: string | null;
 };
 
-type AlertRow = {
-  id: string;
-  title: string;
-  body?: string | null;
-  severity: number;
-  alert_type?: string | null;
-  sent_at: string;
-  channel?: string | null;
-  status?: string | null;
-};
+type MemberRow = { id: string; user_id: string; role: string; profile?: { display_name?: string | null; status?: string | null } | null };
+type LocationRow = { id: string; name: string; coord_x?: number | null; coord_y?: number | null; geofence?: unknown };
+type CheckInRow = { id: string; patrol_id?: string | null; created_at: string };
+type VehicleRow = { id: string; vehicle_id: string; status: string; fuel_percentage: number | null };
 
-type MemberRow = {
-  id: string;
-  user_id: string;
-  role: string;
-  profile?: {
-    display_name?: string | null;
-    status?: string | null;
-    zone?: string | null;
-    assigned_location_ids?: string[] | null;
-  } | null;
-};
+type Window = "live" | "24h" | "7d";
+const WINDOW_MS: Record<Exclude<Window, "live">, number> = { "24h": 86_400_000, "7d": 7 * 86_400_000 };
+const LAGOS: [number, number] = [3.4219, 6.4281];
+const isOpen = (i: IncidentRow) => i.status !== "resolved" && i.status !== "closed";
+const incidentTitle = (i: IncidentRow) => i.title || typeMeta[i.type as IncidentType] || "Incident";
 
-type LocationRow = {
-  id: string;
-  name: string;
-  coord_x?: number | null;
-  coord_y?: number | null;
-  geofence?: unknown;
-};
-
-type CheckInRow = {
-  id: string;
-  patrol_id?: string | null;
-  created_at: string;
-  status?: string | null;
-};
-
-export function CommanderDashboard({ access }: { access: AppAccess }) {
+export function CommanderDashboard({ access, ask }: { access: AppAccess; ask?: string }) {
   const readOnly = access.specRole === "client_admin";
+  const navigate = useNavigate();
   const loadIncidents = useServerFn(listIncidents);
   const loadPatrols = useServerFn(listPatrols);
-  const loadAlerts = useServerFn(listAlerts);
   const loadMembers = useServerFn(listMembers);
   const loadLocations = useServerFn(listLocations);
   const loadCheckIns = useServerFn(listCheckIns);
-  const loadCameras = useServerFn(listCameras);
   const loadToken = useServerFn(getMapboxToken);
-  const loadVehiclesFn = useServerFn(listVehicles);
+  const loadVehicles = useServerFn(listVehicles);
+  const runQuery = useServerFn(submitAiQuery);
 
   useRealtimeInvalidate("incidents", [["command-incidents"]]);
   useRealtimeInvalidate("patrols", [["command-patrols"]]);
-  useRealtimeInvalidate("alerts", [["command-alerts"]]);
   useRealtimeInvalidate("patrol_check_ins", [["command-checkins"]]);
 
   const { data: incidents = [], isLoading: incidentsLoading } = useQuery({ queryKey: ["command-incidents"], queryFn: () => loadIncidents() as Promise<IncidentRow[]> });
-  const { data: patrols = [], isLoading: patrolsLoading } = useQuery({ queryKey: ["command-patrols"], queryFn: () => loadPatrols() as Promise<PatrolRow[]> });
-  const { data: alerts = [], isLoading: alertsLoading } = useQuery({ queryKey: ["command-alerts"], queryFn: () => loadAlerts() as Promise<AlertRow[]> });
-  const { data: members = [], isLoading: membersLoading } = useQuery({ queryKey: ["command-members"], queryFn: () => loadMembers() as Promise<MemberRow[]> });
-  const { data: locations = [], isLoading: locationsLoading } = useQuery({ queryKey: ["command-locations"], queryFn: () => loadLocations() as Promise<LocationRow[]> });
-  const { data: checkIns = [], isLoading: checkInsLoading } = useQuery({ queryKey: ["command-checkins"], queryFn: () => loadCheckIns() as Promise<CheckInRow[]> });
-  const { data: vehicles = [], isLoading: vehiclesLoading } = useQuery({ queryKey: ["command-vehicles"], queryFn: () => loadVehiclesFn() });
-  const { data: cameras = [], isLoading: camerasLoading } = useQuery({
-    queryKey: ["command-cameras"],
-    queryFn: () => loadCameras() as Promise<CameraRecord[]>,
-    refetchInterval: 60_000,
-  });
+  const { data: patrols = [] } = useQuery({ queryKey: ["command-patrols"], queryFn: () => loadPatrols() as Promise<PatrolRow[]> });
+  const { data: members = [] } = useQuery({ queryKey: ["command-members"], queryFn: () => loadMembers() as Promise<MemberRow[]> });
+  const { data: locations = [] } = useQuery({ queryKey: ["command-locations"], queryFn: () => loadLocations() as Promise<LocationRow[]> });
+  const { data: checkIns = [] } = useQuery({ queryKey: ["command-checkins"], queryFn: () => loadCheckIns() as Promise<CheckInRow[]> });
+  const { data: vehicles = [] } = useQuery({ queryKey: ["command-vehicles"], queryFn: () => loadVehicles() as Promise<VehicleRow[]> });
   const { data: tokenData } = useQuery({ queryKey: ["command-mapbox-token"], queryFn: () => loadToken(), staleTime: Infinity });
-  const liveEvents = useRealtimeEventFeed(access.orgId ? orgRoom(access.orgId) : null, 5);
 
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
-  const [activeIntent, setActiveIntent] = useState<AiQueryResult | null>(null);
-  const [approvalHistory, setApprovalHistory] = useState<CommandHistoryEntry[]>(() => loadStoredCommandHistory());
-  const [clock, setClock] = useState("");
-
-  useEffect(() => {
-    const tick = () =>
-      setClock(
-        new Intl.DateTimeFormat("en-NG", {
-          timeZone: "Africa/Lagos",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: undefined,
-        }).format(new Date()),
-      );
-    tick();
-    const id = setInterval(tick, 30_000);
-    return () => clearInterval(id);
-  }, []);
+  const [win, setWin] = useState<Window>("live");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [intent, setIntent] = useState<AiQueryResult | null>(null);
+  const [asking, setAsking] = useState(false);
 
   useEffect(() => {
-    saveStoredCommandIntent(activeIntent);
-  }, [activeIntent]);
-
-  useEffect(() => {
-    saveStoredCommandHistory(approvalHistory);
-  }, [approvalHistory]);
-
-  const safeIncidents = useMemo(() => (Array.isArray(incidents) ? incidents : []), [incidents]);
-  const safePatrols = useMemo(() => (Array.isArray(patrols) ? patrols : []), [patrols]);
-  const safeAlerts = useMemo(() => (Array.isArray(alerts) ? alerts : []), [alerts]);
-  const safeMembers = useMemo(() => (Array.isArray(members) ? members : []), [members]);
-  const safeVehicles = useMemo(() => (Array.isArray(vehicles) ? vehicles : []), [vehicles]);
-
-  const openIncidents = useMemo(
-    () => safeIncidents.filter((incident) => incident.status !== "resolved" && incident.status !== "closed"),
-    [safeIncidents],
-  );
-  const criticalIncidents = useMemo(
-    () => openIncidents.filter((incident) => Number(incident.severity) >= 4),
-    [openIncidents],
-  );
-  const delayedPatrols = useMemo(
-    () => safePatrols.filter((patrol) => patrol.status === "delayed" || patrol.status === "missed"),
-    [safePatrols],
-  );
-  const activePatrols = useMemo(
-    () => safePatrols.filter((patrol) => patrol.status !== "complete"),
-    [safePatrols],
-  );
-  const onDutyMembers = useMemo(
-    () => safeMembers.filter((member: any) => (member.profile?.status ?? member.status) === "on-duty"),
-    [safeMembers],
-  );
-  const patrolCompliance = useMemo(() => {
-    if (!safePatrols.length) return 0;
-    const sum = safePatrols.reduce((acc, patrol) => acc + patrol.checked_in / Math.max(patrol.waypoints || 1, 1), 0);
-    return Math.round((sum / safePatrols.length) * 100);
-  }, [safePatrols]);
-  const avgResponseAgeMinutes = useMemo(() => {
-    if (!openIncidents.length) return 0;
-    const sum = openIncidents.reduce((acc, incident) => acc + (Date.now() - new Date(incident.reported_at).getTime()) / 60000, 0);
-    return Math.round(sum / openIncidents.length);
-  }, [openIncidents]);
-  const areaRiskScore = useMemo(() => {
-    if (!openIncidents.length && !criticalIncidents.length) return 0;
-    const score = criticalIncidents.length * 25
-      + openIncidents.length * 10
-      + delayedPatrols.length * 15;
-    return Math.max(0, Math.min(100, Math.round(score)));
-  }, [criticalIncidents.length, delayedPatrols.length, openIncidents.length]);
-
-  const fleetProxy = useMemo(() => {
-    const totalFleet = safeVehicles.length;
-    const deployed = safeVehicles.filter((v: any) => v.status === "deployed" || v.status === "responding").length;
-    const available = safeVehicles.filter((v: any) => v.status === "available").length;
-    return { totalFleet, deployed, available };
-  }, [safeVehicles]);
-  const fuelLowUnits = safeVehicles.filter((v: any) => v.status === "low_fuel" || (v.fuel_percentage != null && v.fuel_percentage < 25)).length;
-
-  const osintAlerts = useMemo(
-    () =>
-      safeAlerts
-        .filter((alert) => Number(alert.severity) >= 3 || alert.alert_type === "osint_threat")
-        .slice(0, 4),
-    [safeAlerts],
-  );
-  const inventoryAlerts = useMemo(() => {
-    const derived: Array<{ id: string; title: string; detail: string; severity: "critical" | "warning" }> = [];
-    if (fuelLowUnits > 0) {
-      derived.push({
-        id: "fuel-low",
-        title: `Vehicle fuel low on ${fuelLowUnits} patrol unit${fuelLowUnits === 1 ? "" : "s"}`,
-        detail: `${delayedPatrols.map((p) => p.code).join(", ")} below threshold`,
-        severity: "critical",
-      });
+    if (!ask) {
+      setIntent(null);
+      return;
     }
-    const stockReserve = Math.max(12, 28 - criticalIncidents.length * 3 - delayedPatrols.length * 2);
-    if (stockReserve <= 20) {
-      derived.push({
-        id: "supply-reserve",
-        title: `Supply cache at ${stockReserve}% reserve`,
-        detail: "Operational inventory reserve is below preferred threshold",
-        severity: "warning",
-      });
-    }
-    if (!derived.length) {
-      derived.push({
-        id: "inventory-stable",
-        title: "Inventory thresholds stable",
-        detail: "No active inventory service alerts from live operational signals",
-        severity: "warning",
-      });
-    }
-    return derived;
-  }, [criticalIncidents.length, delayedPatrols, fuelLowUnits]);
-  const latestCheckIns = useMemo(() => {
-    const map = new Map<string, CheckInRow>();
-    for (const checkIn of checkIns) {
-      if (!checkIn.patrol_id) continue;
-      const existing = map.get(checkIn.patrol_id);
-      if (!existing || new Date(checkIn.created_at).getTime() > new Date(existing.created_at).getTime()) {
-        map.set(checkIn.patrol_id, checkIn);
-      }
-    }
-    return map;
-  }, [checkIns]);
-
-  useEffect(() => {
-    if (!selectedIncidentId && openIncidents[0]?.id) setSelectedIncidentId(openIncidents[0].id);
-  }, [openIncidents, selectedIncidentId]);
-
-  const sortedActiveIncidents = useMemo(
-    () =>
-      [...openIncidents].sort((a, b) => {
-        const sevDiff = Number(b.severity) - Number(a.severity);
-        if (sevDiff !== 0) return sevDiff;
-        return new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime();
-    }),
-    [openIncidents],
-  );
-  const intentFilteredIncidents = useMemo(() => {
-    if (!activeIntent) return sortedActiveIncidents;
-    const { query, severityMin, status, location, zone, target } = activeIntent.filters;
-    return sortedActiveIncidents.filter((incident) => {
-      const haystack = [
-        incident.code,
-        incident.location,
-        incident.zone,
-        incident.officer,
-        incident.title,
-        incident.description,
-        incident.type,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      if (query && !haystack.includes(query)) {
-        const queryTokens = query.split(/\s+/).filter(Boolean);
-        if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
-      }
-      if (severityMin != null && Number(incident.severity) < severityMin) return false;
-      if (status && String(incident.status).toLowerCase() !== status.toLowerCase()) return false;
-      if (location && !incident.location.toLowerCase().includes(location.toLowerCase()) && !incident.zone.toLowerCase().includes(location.toLowerCase())) return false;
-      if (zone && !incident.zone.toLowerCase().includes(zone.toLowerCase())) return false;
-      if (target && !incident.code.toLowerCase().includes(target.toLowerCase()) && !(incident.description ?? "").toLowerCase().includes(target.toLowerCase())) return false;
-      return true;
-    });
-  }, [activeIntent, sortedActiveIncidents]);
-  const selectedIncident = intentFilteredIncidents.find((incident) => incident.id === selectedIncidentId) ?? intentFilteredIncidents[0] ?? null;
-  const intentFilteredPatrols = useMemo(() => {
-    if (!activeIntent) return activePatrols;
-    const { query, severityMin, status, location, zone, target } = activeIntent.filters;
-    return activePatrols.filter((patrol) => {
-      const locationLabel = locations.find((item) => item.id === patrol.location_id)?.name ?? "";
-      const haystack = [patrol.code, patrol.name, patrol.officer, patrol.shift, locationLabel]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      if (query && !haystack.includes(query)) {
-        const queryTokens = query.split(/\s+/).filter(Boolean);
-        if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
-      }
-      if (status && patrol.status.toLowerCase() !== status.toLowerCase()) return false;
-      if (location && !haystack.includes(location.toLowerCase())) return false;
-      if (zone && !haystack.includes(zone.toLowerCase())) return false;
-      if (target && !haystack.includes(target.toLowerCase())) return false;
-      if (severityMin != null && severityMin >= 4 && patrol.status === "complete") return false;
-      return true;
-    });
-  }, [activeIntent, activePatrols, locations]);
-  const commandResultCounts = useMemo(
-    () => ({
-      incidents: intentFilteredIncidents.length,
-      patrols: intentFilteredPatrols.length,
-      critical: intentFilteredIncidents.filter((incident) => Number(incident.severity) >= 4).length,
-    }),
-    [intentFilteredIncidents, intentFilteredPatrols],
-  );
-
-  const approvalProposals = useMemo<ApprovalProposal[]>(() => {
-    if (!selectedIncident) {
-      return delayedPatrols.slice(0, 3).map((patrol, idx) => ({
-        id: `plan-${patrol.id}`,
-        title: `Review delayed patrol ${patrol.code}`,
-        confidence: Math.max(68, 84 - idx * 5),
-        reasoning: [
-          `Patrol ${patrol.officer} is delayed and should be human-reviewed before escalation.`,
-          `Latest check-in timing suggests a route drift of ${Math.max(1, idx + 2)} minutes.`,
-        ],
-        devices: [`PWA-${patrol.officer.split(/\s+/)[0].toUpperCase()}`, "RADIO-DISPATCH"],
-        risk: idx === 0 ? "high" : "medium",
-        status: "pending",
-      }));
-    }
-    const safeCameras = Array.isArray(cameras) ? cameras : [];
-    const matchingCameras = safeCameras.filter((camera) => {
-      const haystack = [camera.location, camera.name].filter(Boolean).join(" ").toLowerCase();
-      return haystack.includes(selectedIncident.zone.toLowerCase()) || haystack.includes(selectedIncident.location.toLowerCase());
-    });
-    const cameraDevices = matchingCameras.map((camera) => camera.id);
-
-    // If incident has real backend AI dispatch plan / agent output, map those:
-    const backendActions = (selectedIncident as any)?.dispatch_plan?.recommended_actions 
-      || (selectedIncident as any)?.agent_output?.recommended_actions;
-
-    if (Array.isArray(backendActions) && backendActions.length > 0) {
-      return backendActions.map((action: any, idx: number) => ({
-        id: action.id || `${selectedIncident.id}-action-${idx}`,
-        title: action.title || action.label || action.name || `Action ${idx + 1}`,
-        confidence: Number(action.confidence) || 85,
-        reasoning: Array.isArray(action.reasoning) ? action.reasoning : [action.detail || action.description || "AI recommended response action."],
-        devices: cameraDevices,
-        risk: (action.risk || "medium").toLowerCase() as "low" | "medium" | "high",
-        status: "pending" as const,
-      }));
-    }
-
-    // Only create a patrol dispatch proposal if there is an ACTUAL live officer / active patrol:
-    if (!activePatrols.length) {
-      return [];
-    }
-
-    const nearestPatrol = activePatrols[0];
-    const nearestOfficer = nearestPatrol?.officer;
-    if (!nearestOfficer) return [];
-
-    const proposals: ApprovalProposal[] = [
-      {
-        id: `${selectedIncident.id}-dispatch`,
-        title: `Dispatch ${nearestOfficer} to ${selectedIncident.code}`,
-        confidence: Math.min(97, 86 + Math.min(8, Number(selectedIncident.severity) * 2)),
-        reasoning: [
-          `The selected incident is severity ${selectedIncident.severity} in ${selectedIncident.location}.`,
-          `Live patrol ${nearestOfficer} is active; dispatching keeps response inside SLA window.`,
-        ],
-        devices: cameraDevices,
-        risk: Number(selectedIncident.severity) >= 4 ? "high" : "medium",
-        status: "pending",
-      },
-    ];
-    return proposals;
-  }, [activePatrols, cameras, selectedIncident]);
-
-  const handleApprovalDecision = (
-    decision: string,
-    proposalIds: string[],
-    details?: { note?: string; modification?: string; commandText?: string; priority?: string; scope?: string },
-  ) => {
-    const selected = approvalProposals.filter((proposal) => proposalIds.includes(proposal.id));
-    const summary =
-      decision === "reject"
-        ? `Rejected ${selected.length} approval item${selected.length === 1 ? "" : "s"}`
-        : decision === "approve_all"
-          ? `Approved all AI proposals for ${details?.commandText ?? selectedIncident?.code ?? "the active incident"}`
-          : `Approved ${selected.length} selected proposal${selected.length === 1 ? "" : "s"}`;
-
-    const entry: CommandHistoryEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      at: new Date().toISOString(),
-      decision: decision as CommandHistoryEntry["decision"],
-      proposalIds,
-      commandText: details?.commandText ?? activeIntent?.text ?? selectedIncident?.code ?? "manual review",
-      summary,
-      scope: (details?.scope ?? activeIntent?.scope ?? "incidents") as CommandHistoryEntry["scope"],
-      priority: details?.priority as CommandHistoryEntry["priority"],
-      note: details?.note,
-      modification: details?.modification,
+    let cancelled = false;
+    setAsking(true);
+    runQuery({ data: { text: ask, context: { scope: "incidents", org_id: access.orgId } } })
+      .then((result) => !cancelled && setIntent(result as AiQueryResult))
+      .catch((err) => !cancelled && toast.error("Couldn't run that question", { description: err instanceof Error ? err.message : undefined }))
+      .finally(() => !cancelled && setAsking(false));
+    return () => {
+      cancelled = true;
     };
-    setApprovalHistory((current) => [entry, ...current].slice(0, 12));
-    appendStoredCommandHistory(entry);
-  };
+  }, [ask, access.orgId, runQuery]);
 
-  const commandStats = readOnly
-    ? [
-        { label: "Open incidents", value: String(openIncidents.length), delta: "live count", icon: ShieldAlert, tone: "critical" as const },
-        { label: "Patrol compliance", value: `${patrolCompliance}%`, delta: `${activePatrols.length} active patrols`, icon: Layers3, tone: "resolved" as const },
-        { label: "Area risk", value: `${areaRiskScore}/100`, delta: areaRiskScore >= 70 ? "Elevated" : "Stable", icon: AlertTriangle, tone: areaRiskScore >= 70 ? "critical" as const : "resolved" as const },
-        { label: "Avg response age", value: formatMinutes(avgResponseAgeMinutes), delta: "live incident aging", icon: Clock3, tone: "muted" as const },
-      ]
-    : [
-        { label: "Open incidents", value: String(openIncidents.length), delta: `${criticalIncidents.length} critical`, icon: ShieldAlert, tone: "critical" as const },
-        { label: "Critical incidents", value: String(criticalIncidents.length), delta: "severity 4+", icon: BadgeAlert, tone: criticalIncidents.length > 0 ? "critical" as const : "resolved" as const },
-        { label: "Officers on shift", value: `${onDutyMembers.length} / ${members.length || "—"}`, delta: `${Math.max(0, members.length - onDutyMembers.length)} unavailable`, icon: UserRoundCheck, tone: "resolved" as const },
-        { label: "Patrol compliance", value: `${patrolCompliance}%`, delta: patrolCompliance < 90 ? "▼ from target" : "On target", icon: Layers3, tone: patrolCompliance >= 90 ? "resolved" as const : "warning" as const },
-        { label: "Vehicles available", value: `${fleetProxy.available} / ${fleetProxy.totalFleet}`, delta: `${fleetProxy.deployed} deployed`, icon: Smartphone, tone: fleetProxy.available > 0 ? "resolved" as const : "critical" as const },
-        { label: "Fuel status", value: `${fuelLowUnits} low`, delta: fuelLowUnits > 0 ? "Requires attention" : "All units stable", icon: BadgeAlert, tone: fuelLowUnits > 0 ? "critical" as const : "resolved" as const },
-        { label: "Area risk score", value: `${areaRiskScore} / 100`, delta: areaRiskScore >= 70 ? "Elevated" : "Managed", icon: Signal, tone: areaRiskScore >= 70 ? "warning" as const : "resolved" as const },
-        { label: "Avg response time", value: formatMinutes(avgResponseAgeMinutes), delta: "live incident age", icon: Clock3, tone: "muted" as const },
-      ];
+  const safeIncidents = Array.isArray(incidents) ? incidents : [];
+  const safePatrols = Array.isArray(patrols) ? patrols : [];
+  const safeVehicles = Array.isArray(vehicles) ? vehicles : [];
+  const safeMembers = Array.isArray(members) ? members : [];
 
-  const mapToken = tokenData?.token ?? "";
-  const fullMapHeight = readOnly ? "h-[560px]" : "h-[calc(100vh-285px)] min-h-[540px]";
+  const windowed = useMemo(() => {
+    const base = win === "live" ? safeIncidents.filter(isOpen) : safeIncidents.filter((i) => Date.now() - new Date(i.reported_at).getTime() <= WINDOW_MS[win]);
+    return [...base].sort((a, b) => Number(b.severity) - Number(a.severity) || new Date(a.reported_at).getTime() - new Date(b.reported_at).getTime());
+  }, [safeIncidents, win]);
 
-  const loading = incidentsLoading || patrolsLoading || alertsLoading || membersLoading || locationsLoading || checkInsLoading;
+  const queue = useMemo(() => (intent ? windowed.filter((i) => matchesIntent(i, intent)) : windowed), [intent, windowed]);
+  const selected = queue.find((i) => i.id === selectedId) ?? queue[0] ?? null;
+
+  const openNow = safeIncidents.filter(isOpen);
+  const critical = windowed.filter((i) => Number(i.severity) >= 4);
+  const s5 = critical.filter((i) => Number(i.severity) >= 5).length;
+  const lastHour = safeIncidents.filter((i) => Date.now() - new Date(i.reported_at).getTime() <= 3_600_000).length;
+
+  const officers = safeMembers.filter((m) => m.role === "officer");
+  const roster = officers.length ? officers : safeMembers;
+  const statusOf = (m: MemberRow) => (m.profile?.status ?? "").toLowerCase();
+  const onDuty = roster.filter((m) => statusOf(m) === "on-duty").length;
+  const onBreak = roster.filter((m) => statusOf(m) === "break").length;
+
+  const activePatrols = useMemo(() => safePatrols.filter((p) => p.status !== "complete"), [safePatrols]);
+  const latePatrols = safePatrols.filter((p) => p.status === "delayed");
+  const missedPatrols = safePatrols.filter((p) => p.status === "missed");
+  const compliance = safePatrols.length
+    ? Math.round((safePatrols.reduce((acc, p) => acc + p.checked_in / Math.max(p.waypoints || 1, 1), 0) / safePatrols.length) * 100)
+    : null;
+
+  const avgOpenMinutes = openNow.length
+    ? Math.round(openNow.reduce((acc, i) => acc + (Date.now() - new Date(i.reported_at).getTime()) / 60000, 0) / openNow.length)
+    : null;
+
+  const available = safeVehicles.filter((v) => v.status === "available").length;
+  const deployed = safeVehicles.filter((v) => v.status === "deployed" || v.status === "responding").length;
+  const lowFuel = safeVehicles.filter((v) => v.status === "low_fuel" || (v.fuel_percentage != null && v.fuel_percentage < 25));
+
+  const openCritical = openNow.filter((i) => Number(i.severity) >= 4).length;
+  const riskIndex = Math.min(100, openCritical * 25 + openNow.length * 10 + (latePatrols.length + missedPatrols.length) * 15);
+  const busiestZone = useMemo(() => {
+    const counts = new Map<string, number>();
+    openNow.forEach((i) => i.zone && counts.set(i.zone, (counts.get(i.zone) ?? 0) + 1));
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }, [openNow]);
+
+  const winLabel = win === "live" ? "Open incidents" : win === "24h" ? "Incidents · 24 h" : "Incidents · 7 days";
+  const clearAsk = () => navigate({ to: "/app", search: {} });
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Command Dashboard</div>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">{access.orgName}</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-300">
-              Live operational view for {access.roleLabel}. {readOnly ? "Read-only mode for client admins." : "Commander mode with live incident, patrol, and alert control."}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-slate-300">
-            <span className="h-2 w-2 rounded-full bg-resolved pulse-dot" />
-            <span>{clock || "--:--"} Lagos</span>
-          </div>
-        </div>
-      </section>
+    <div className="col g12 min-[1100px]:h-[calc(100dvh-var(--shell-top,52px)-32px)] min-[1100px]:min-h-[700px]">
+      <PageHeader
+        title="Command overview"
+        sub={`${access.orgName} · ${access.roleLabel}${readOnly ? " · view only" : ""}`}
+      >
+        <Seg
+          label="Time window"
+          value={win}
+          onChange={setWin}
+          options={[
+            { value: "live", label: "Live" },
+            { value: "24h", label: "Last 24 h" },
+            { value: "7d", label: "7 days" },
+          ]}
+        />
+        <Link to="/app/report-centre" className="b b-sec">
+          <FileText size={15} strokeWidth={1.75} className="ic" />
+          Shift report
+        </Link>
+        {!readOnly && (
+          <Link to="/app/incidents" search={{ new: true }} className="b b-pri">
+            <Plus size={15} strokeWidth={1.75} className="ic" />
+            Log incident
+          </Link>
+        )}
+      </PageHeader>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {commandStats.map((stat) => (
-          <StatCard key={stat.label} {...stat} />
-        ))}
+      {(ask || intent) && <IntentBar ask={ask} intent={intent} asking={asking} matches={queue.length} onClear={clearAsk} />}
+
+      <div className="kpis">
+        <Kpi
+          icon={<Siren size={13} strokeWidth={1.75} className="ic" />}
+          label={winLabel}
+          value={windowed.length}
+          delta={win === "live" ? `${lastHour} in the last hour` : `${windowed.filter(isOpen).length} still open`}
+        />
+        <Kpi
+          icon={<OctagonAlert size={13} strokeWidth={1.75} className="ic" />}
+          label="Critical · S4+"
+          value={critical.length}
+          delta={critical.length ? `S5 ×${s5} · S4 ×${critical.length - s5}` : "None"}
+          deltaClass={critical.length ? "up-bad" : ""}
+        />
+        <Kpi
+          icon={<UserCheck size={13} strokeWidth={1.75} className="ic" />}
+          label="Officers on duty"
+          value={roster.length ? onDuty : "—"}
+          unit={roster.length ? `/ ${roster.length}` : undefined}
+          delta={roster.length ? `${onBreak} on break · ${Math.max(0, roster.length - onDuty - onBreak)} off` : "No officers yet"}
+        />
+        <Kpi
+          icon={<RouteIcon size={13} strokeWidth={1.75} className="ic" />}
+          label="Patrol compliance"
+          value={compliance == null ? "—" : `${compliance}%`}
+          delta={safePatrols.length ? `${activePatrols.length} active · ${latePatrols.length + missedPatrols.length} late or missed` : "No patrols set up"}
+          deltaClass={latePatrols.length + missedPatrols.length ? "dn-bad" : ""}
+        />
+        <Kpi
+          icon={<Timer size={13} strokeWidth={1.75} className="ic" />}
+          label="Avg open time"
+          value={avgOpenMinutes == null ? "—" : formatMinutes(avgOpenMinutes)}
+          delta={openNow.length ? `across ${openNow.length} open` : "Nothing open"}
+        />
+        <Kpi
+          icon={<Car size={13} strokeWidth={1.75} className="ic" />}
+          label="Vehicles ready"
+          value={safeVehicles.length ? available : "—"}
+          unit={safeVehicles.length ? `/ ${safeVehicles.length}` : undefined}
+          delta={safeVehicles.length ? `${deployed} deployed` : "No vehicles registered"}
+        />
+        <Kpi
+          icon={<Fuel size={13} strokeWidth={1.75} className="ic" />}
+          label="Fuel"
+          value={safeVehicles.length ? `${lowFuel.length} low` : "—"}
+          delta={safeVehicles.length ? (lowFuel.length ? `${lowFuel.slice(0, 3).map((v) => v.vehicle_id).join(", ")} under 25%` : "All above 25%") : "—"}
+          deltaClass={lowFuel.length ? "warnc" : ""}
+        />
+        <Kpi
+          title="Index from open incidents (×10), open S4+ incidents (×25) and late or missed patrols (×15), capped at 100."
+          icon={<Radar size={13} strokeWidth={1.75} className="ic" />}
+          label="Risk index"
+          value={riskIndex}
+          unit="/ 100"
+          delta={riskIndex >= 70 ? `Elevated${busiestZone ? ` · ${busiestZone}` : ""}` : riskIndex >= 40 ? "Watch" : "Managed"}
+          deltaClass={riskIndex >= 70 ? "warnc" : ""}
+        />
       </div>
 
-      {!readOnly && (
-        <section className="rounded-3xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          <div className="flex items-start gap-2">
-            <ShieldAlert className="mt-0.5 h-4 w-4 text-high" />
-            <div>
-              <div className="font-medium text-foreground">Commander mode</div>
-              <div>Use the incident cards to open the AI panel and approve overrides. Inventory alerts are derived from live patrol and response data until a dedicated inventory service is connected.</div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      <section className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
-        <AiChatWidget
-          scope={activeIntent?.scope ?? "incidents"}
-          context={{ orgId: access.orgId, selectedIds: selectedIncident ? [selectedIncident.id] : [] }}
-          suggestions={[
-            "Show critical incidents in Zone B",
-            "Track REID targets crossing blind spots",
-            "List patrols with delayed check-ins",
-          ]}
-          onQueryResult={setActiveIntent}
-        />
-        <HumanApprovalLayer
-          incidentId={selectedIncident?.id ?? null}
-          commandText={activeIntent?.text ?? selectedIncident?.code ?? null}
-          scope={activeIntent?.scope ?? "incidents"}
-          orgId={access.orgId}
-          fallbackProposals={approvalProposals}
-          onDecision={handleApprovalDecision}
-        />
-      </section>
-
-      <section className="rounded-3xl border border-white/10 bg-primary/10 px-4 py-4 text-sm text-slate-100">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-300">Command result summary</div>
-            <div className="mt-1 text-base font-medium">
-              {activeIntent ? activeIntent.summary : "No active AI filter. Dashboard is showing the live operational feed."}
-            </div>
-            <div className="mt-1 text-xs text-slate-300">{activeIntent ? activeIntent.routingNote : "Submit a query to stage a backend filter proposal."}</div>
-          </div>
-          {activeIntent ? (
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Incidents {commandResultCounts.incidents}</span>
-              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Patrols {commandResultCounts.patrols}</span>
-              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Critical {commandResultCounts.critical}</span>
-              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.16em]">Scope {activeIntent.scope}</span>
-            </div>
-          ) : null}
+      <div className="flex min-h-0 flex-1 flex-wrap gap-3">
+        <div className="col g12 min-h-0" style={{ flex: "999 1 560px", minWidth: 0 }}>
+          <OverviewMap
+            incidents={queue}
+            patrols={activePatrols}
+            locations={locations}
+            orgName={access.orgName}
+            token={tokenData?.token ?? ""}
+            selected={selected}
+            onSelect={setSelectedId}
+          />
+          <PatrolPulse patrols={activePatrols} checkIns={checkIns} late={latePatrols.length} missed={missedPatrols.length} />
         </div>
-      </section>
-
-      <ApprovalHistoryPanel entries={approvalHistory} />
-
-      {activeIntent && (
-        <section className="rounded-3xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-slate-100">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-300">Applied command filter</div>
-              <div className="mt-1 font-medium">{activeIntent.summary}</div>
-              <div className="mt-1 text-xs text-slate-300">{activeIntent.routingNote}</div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveIntent(null)}
-              className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-200"
-            >
-              Clear filter
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section className="grid gap-4 xl:grid-cols-[1.5fr_0.95fr]">
-        <div className="space-y-4">
-          <div className={`rounded-3xl border border-border bg-card p-4 ${fullMapHeight}`}>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Live incident map</div>
-                <h2 className="text-lg font-semibold">Operational picture</h2>
-              </div>
-              <Link to="/app/map" className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2">
-                Open full map <ArrowUpRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-            <CommandMapPreview
-              incidents={intentFilteredIncidents}
-              patrols={activePatrols}
-              locations={locations}
-              token={mapToken}
-              selectedIncident={selectedIncident}
-              onSelectIncident={(id) => setSelectedIncidentId(id)}
-            />
-          </div>
+        <div className="col g12 min-h-0" style={{ flex: "1 1 380px", minWidth: 0, maxWidth: "100%" }}>
+          <DecisionPanel incident={selected} orgId={access.orgId} readOnly={readOnly} actor={access.displayName || access.email || "You"} />
+          <IncidentQueue
+            incidents={queue}
+            loading={incidentsLoading}
+            selectedId={selected?.id ?? null}
+            onSelect={setSelectedId}
+            me={access.displayName}
+            win={win}
+          />
         </div>
-
-        <div className="space-y-4">
-          <Card title="Active incidents" icon={AlertTriangle}>
-            <div className="space-y-3">
-              {intentFilteredIncidents.slice(0, 5).map((incident) => (
-                <div
-                  key={incident.id}
-                  className={`rounded-2xl border p-3 ${incident.id === selectedIncident?.id ? "border-primary/40 bg-primary/10" : "border-border bg-surface"}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold">{incident.code}</span>
-                        <span className="text-xs text-muted-foreground">{typeMeta[incident.type]}</span>
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {incident.location} · {incident.zone}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {new Intl.DateTimeFormat("en-NG", { timeStyle: "short", hour12: false }).format(new Date(incident.reported_at))} · {timeAgo(incident.reported_at)} · {incident.officer ? `${incident.officer} assigned` : "Unassigned"} · {statusMeta[incident.status as keyof typeof statusMeta] ?? incident.status}
-                      </div>
-                    </div>
-                    <SeverityBadge severity={incident.severity as 1 | 2 | 3 | 4 | 5} />
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      onClick={() => setSelectedIncidentId(incident.id)}
-                      className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-background"
-                    >
-                      View
-                    </button>
-                    {!readOnly && (
-                      <Link
-                        to="/app/incidents/$id"
-                        params={{ id: incident.id }}
-                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-background"
-                      >
-                        AI Panel
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {!intentFilteredIncidents.length && <EmptyState>No active incidents match the current command filter.</EmptyState>}
-            </div>
-          </Card>
-
-          <Card title="Realtime events" icon={Signal}>
-            <div className="space-y-3">
-              {liveEvents.length === 0 ? (
-                <EmptyState>No live events yet.</EmptyState>
-              ) : (
-                liveEvents.map((event) => (
-                  <div key={`${event.event}-${event.at}`} className="rounded-2xl border border-border bg-surface p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">{event.event}</div>
-                        <div className="mt-1 truncate text-xs text-muted-foreground">
-                          {JSON.stringify(event.payload)}
-                        </div>
-                      </div>
-                      <span className="rounded-full border border-border px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        {new Intl.DateTimeFormat("en-NG", { timeStyle: "short", hour12: false }).format(new Date(event.at))}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-
-          <Card title="OSINT alerts" icon={MessageSquareMore}>
-            <div className="space-y-3">
-              {osintAlerts.map((alert) => (
-                <div key={alert.id} className="rounded-2xl border border-border bg-surface p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">{alert.title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {alert.channel ?? "feed"} · {alert.severity >= 4 ? "92% conf" : "live feed"} · {timeAgo(alert.sent_at)}
-                      </div>
-                    </div>
-                    <StatusDot severity={alert.severity} />
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <Link to="/app/alerts" className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-background">
-                      View
-                    </Link>
-                  </div>
-                </div>
-              ))}
-              {!osintAlerts.length && <EmptyState>No OSINT alerts above severity 3.</EmptyState>}
-            </div>
-          </Card>
-
-          <Card title="Inventory alerts" icon={BadgeAlert}>
-            <div className="space-y-3">
-              {inventoryAlerts.map((alert) => (
-                <div key={alert.id} className={`rounded-2xl border p-3 ${alert.severity === "critical" ? "border-critical/30 bg-critical/10" : "border-border bg-surface"}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">{alert.title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{alert.detail}</div>
-                    </div>
-                    <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${alert.severity === "critical" ? "border-critical/30 bg-critical/10 text-critical" : "border-high/30 bg-high/10 text-high"}`}>
-                      {alert.severity}
-                    </span>
-                  </div>
-                  <div className="mt-3">
-                    <Link to="/app/patrols" className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-background">
-                      View patrol load
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card title="Live cameras" icon={Layers3}>
-            <div className="space-y-3">
-              {camerasLoading ? (
-                <EmptyState>Loading camera registry…</EmptyState>
-              ) : cameras.length ? (
-                cameras.slice(0, 2).map((camera) => <CameraStreamPlayer key={camera.id} camera={camera} />)
-              ) : (
-                <EmptyState>No registered cameras were returned by the Relationship API.</EmptyState>
-              )}
-            </div>
-          </Card>
-        </div>
-      </section>
-
-      <section className="rounded-3xl border border-border bg-card p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Active patrols</div>
-            <h2 className="text-lg font-semibold">Current shifts</h2>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {activePatrols.length} active · {delayedPatrols.length} delayed
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {(activeIntent ? intentFilteredPatrols : activePatrols).map((patrol) => {
-            const lastCheckIn = latestCheckIns.get(patrol.id);
-            return (
-              <div key={patrol.id} className="rounded-2xl border border-border bg-surface p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold">{patrol.officer}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{patrol.name} · {patrol.shift}</div>
-                  </div>
-                  <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${
-                    patrol.status === "on_route"
-                      ? "border-resolved/30 bg-resolved/10 text-resolved"
-                      : patrol.status === "delayed"
-                        ? "border-high/30 bg-high/10 text-high"
-                        : patrol.status === "missed"
-                          ? "border-critical/30 bg-critical/10 text-critical"
-                          : "border-border bg-card text-muted-foreground"
-                  }`}>
-                    {patrol.status.replace("_", " ")}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-1.5 text-xs text-muted-foreground">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Last check-in</span>
-                    <span>{lastCheckIn ? timeAgo(lastCheckIn.created_at) : patrol.next_check_in ?? "—"}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Route</span>
-                    <span>{patrol.code}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Progress</span>
-                    <span>{patrol.checked_in}/{patrol.waypoints}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {!(activeIntent ? intentFilteredPatrols : activePatrols).length && (
-            <EmptyState>{activeIntent ? "No patrols match the current AI command filter." : "No patrols are currently active."}</EmptyState>
-          )}
-        </div>
-      </section>
-
-      {loading && (
-        <div className="rounded-3xl border border-border bg-card p-5 text-sm text-muted-foreground">
-          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-          Loading live command data…
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
-function CommandMapPreview({
+function matchesIntent(incident: IncidentRow, intent: AiQueryResult) {
+  const { query, severityMin, status, location, zone, target } = intent.filters;
+  const haystack = [incident.code, incident.location, incident.zone, incident.officer, incident.title, incident.description, incident.type]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (query && !haystack.includes(query)) {
+    const tokens = query.split(/\s+/).filter(Boolean);
+    if (tokens.length && !tokens.every((t) => haystack.includes(t))) return false;
+  }
+  if (severityMin != null && Number(incident.severity) < severityMin) return false;
+  if (status && status !== "open" && status !== "active" && String(incident.status).toLowerCase() !== status.toLowerCase()) return false;
+  if (location && !`${incident.location} ${incident.zone}`.toLowerCase().includes(location.toLowerCase())) return false;
+  if (zone && !incident.zone.toLowerCase().includes(zone.toLowerCase())) return false;
+  if (target && !`${incident.code} ${incident.description ?? ""}`.toLowerCase().includes(target.toLowerCase())) return false;
+  return true;
+}
+
+function IntentBar({ ask, intent, asking, matches, onClear }: { ask?: string; intent: AiQueryResult | null; asking: boolean; matches: number; onClear: () => void }) {
+  const fromModel = intent && !String(intent.request_id ?? "").startsWith("local-");
+  return (
+    <div className={`${fromModel ? "ai" : "card"} row g10 wrap`} style={{ padding: "8px 12px" }} role="status">
+      {fromModel ? <Sparkles size={15} strokeWidth={1.75} className="ic" style={{ color: "var(--ai)" }} /> : <Layers size={15} strokeWidth={1.75} className="ic t3" />}
+      <span className="f1 trunc" style={{ fontSize: 12.5 }}>
+        {asking ? (
+          <span className="t2">Working on “{ask}”…</span>
+        ) : intent ? (
+          <>
+            <b>{fromModel ? "Lemtik filtered for" : "Keyword filter"}</b> <span className="t2">“{intent.text}”</span>
+            <span className="t3"> · {matches} matching incident{matches === 1 ? "" : "s"}</span>
+          </>
+        ) : null}
+      </span>
+      <button type="button" className="b b-sm b-gh" onClick={onClear}>
+        <X size={13} strokeWidth={1.75} />
+        Clear
+      </button>
+    </div>
+  );
+}
+
+function formatMinutes(minutes: number) {
+  if (minutes < 1) return "<1m";
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/* ---------------- map ---------------- */
+
+function toFeature(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const item = value as Record<string, any>;
+  if (item.type === "Feature" && item.geometry) return item;
+  if (["Polygon", "MultiPolygon", "LineString", "Point"].includes(item.type) && item.coordinates) {
+    return { type: "Feature" as const, geometry: { type: item.type, coordinates: item.coordinates }, properties: {} };
+  }
+  if (item.geometry?.type && item.geometry?.coordinates) {
+    return { type: "Feature" as const, geometry: { type: item.geometry.type, coordinates: item.geometry.coordinates }, properties: {} };
+  }
+  return null;
+}
+
+const coordOf = (x: unknown, y: unknown): [number, number] | null =>
+  x != null && y != null && Number.isFinite(Number(x)) && Number.isFinite(Number(y)) ? [Number(x), Number(y)] : null;
+
+function OverviewMap({
   incidents,
   patrols,
   locations,
+  orgName,
   token,
-  selectedIncident,
-  onSelectIncident,
+  selected,
+  onSelect,
 }: {
   incidents: IncidentRow[];
   patrols: PatrolRow[];
   locations: LocationRow[];
+  orgName: string;
   token: string;
-  selectedIncident: IncidentRow | null;
-  onSelectIncident: (id: string) => void;
+  selected: IncidentRow | null;
+  onSelect: (id: string) => void;
 }) {
-  const mapContainer = useRef<HTMLDivElement | null>(null);
+  const container = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapboxMap | null>(null);
-  const loadedRef = useRef(false);
   const mapboxRef = useRef<MapboxModule | null>(null);
+  const markersRef = useRef<MapboxMarker[]>([]);
+  const [ready, setReady] = useState(false);
+  const [layers, setLayers] = useState({ incidents: true, patrols: true, zones: true });
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
 
-  const lagos: [number, number] = [3.4219, 6.4281];
-  const incidentGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: incidents.map((incident, idx) => {
-        const lng = incident.coord_x != null ? Number(incident.coord_x) : lagos[0] + ((idx * 37) % 100 - 50) / 800;
-        const lat = incident.coord_y != null ? Number(incident.coord_y) : lagos[1] + ((idx * 53) % 100 - 50) / 800;
-        return {
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [lng, lat] },
-          properties: {
-            id: incident.id,
-            sev: Number(incident.severity),
-            status: incident.status,
-          },
-        };
+  const placedIncidents = useMemo(
+    () =>
+      incidents.flatMap((i) => {
+        const c = coordOf(i.coord_x, i.coord_y);
+        return c ? [{ incident: i, coord: c }] : [];
       }),
-    }),
     [incidents],
   );
-  const patrolGeo = useMemo(
-    () => ({
-      type: "FeatureCollection" as const,
-      features: patrols.map((patrol, idx) => {
-        const location = locations.find((item) => item.id === patrol.location_id);
-        const lng = location?.coord_x != null ? Number(location.coord_x) : lagos[0] + ((idx * 41) % 100 - 50) / 600;
-        const lat = location?.coord_y != null ? Number(location.coord_y) : lagos[1] + ((idx * 67) % 100 - 50) / 600;
-        return {
-          type: "Feature" as const,
-          geometry: { type: "Point" as const, coordinates: [lng, lat] },
-          properties: { id: patrol.id, status: patrol.status, officer: patrol.officer, code: patrol.code },
-        };
+  const placedPatrols = useMemo(
+    () =>
+      patrols.flatMap((p) => {
+        const loc = locations.find((l) => l.id === p.location_id);
+        const c = coordOf(loc?.coord_x, loc?.coord_y);
+        return c ? [{ patrol: p, coord: c }] : [];
       }),
-    }),
-    [lagos, locations, patrols],
+    [patrols, locations],
   );
-  const zoneGeo = useMemo(
+  const unplaced = incidents.length - placedIncidents.length;
+  const zones = useMemo(
     () => ({
       type: "FeatureCollection" as const,
-      features: locations
-        .flatMap((location) => {
-          const feature = toGeoJsonFeature(location.geofence);
-          return feature ? [{ ...feature, properties: { name: location.name } }] : [];
-        }),
+      features: locations.flatMap((l) => {
+        const f = toFeature(l.geofence);
+        return f ? [{ ...f, properties: { name: l.name } }] : [];
+      }),
     }),
     [locations],
   );
@@ -860,280 +423,504 @@ function CommandMapPreview({
     let cancelled = false;
     let map: MapboxMap | null = null;
     let ro: ResizeObserver | null = null;
-
-    const mount = async () => {
-      if (!token || !mapContainer.current || mapRef.current) return;
+    (async () => {
+      if (!token || !container.current || mapRef.current) return;
       const mapboxgl = mapboxRef.current ?? (await import("mapbox-gl"));
       mapboxRef.current = mapboxgl;
-      if (cancelled || !mapContainer.current || mapRef.current) return;
+      if (cancelled || !container.current) return;
       mapboxgl.default.accessToken = token;
-      map = new mapboxgl.default.Map({
-        container: mapContainer.current,
-        style: "mapbox://styles/mapbox/dark-v11",
-        center: lagos,
-        zoom: 10.7,
-        attributionControl: false,
-      });
-      map.addControl(new mapboxgl.default.NavigationControl({ showCompass: false }), "top-right");
+      map = new mapboxgl.default.Map({ container: container.current, style: "mapbox://styles/mapbox/dark-v11", center: LAGOS, zoom: 10.7, attributionControl: false });
       map.on("load", () => {
-        loadedRef.current = true;
-        map!.addSource("incidents", { type: "geojson", data: incidentGeo, cluster: true, clusterRadius: 42, clusterMaxZoom: 14 });
-        map!.addLayer({
-          id: "incidents-cluster",
-          type: "circle",
-          source: "incidents",
-          filter: ["has", "point_count"],
-          paint: {
-            "circle-color": MAP_COLORS.red,
-            "circle-radius": ["step", ["get", "point_count"], 16, 5, 22, 15, 30],
-            "circle-opacity": 0.78,
-          },
-        });
-        map!.addLayer({
-          id: "incidents-point",
-          type: "circle",
-          source: "incidents",
-          filter: ["!", ["has", "point_count"]],
-          paint: {
-            "circle-color": [
-              "match",
-              ["get", "sev"],
-              5, MAP_COLORS.red,
-              4, MAP_COLORS.orange,
-              3, MAP_COLORS.amber,
-              2, MAP_COLORS.yellow,
-              MAP_COLORS.slate,
-            ],
-            "circle-radius": 7,
-            "circle-stroke-width": 2,
-            "circle-stroke-color": MAP_COLORS.ink,
-          },
-        });
-        map!.addLayer({
-          id: "incidents-label",
-          type: "symbol",
-          source: "incidents",
-          filter: ["!", ["has", "point_count"]],
-          layout: {
-            "text-field": ["get", "sev"],
-            "text-size": 10,
-            "text-font": ["DIN Pro Medium", "Arial Unicode MS Bold"],
-            "text-offset": [0, 1.1],
-          },
-          paint: { "text-color": "#fff" },
-        });
-        map!.addSource("patrols", { type: "geojson", data: patrolGeo });
-        map!.addLayer({
-          id: "patrols-point",
-          type: "circle",
-          source: "patrols",
-          paint: {
-            "circle-color": [
-              "match",
-              ["get", "status"],
-              "complete", MAP_COLORS.green,
-              "missed", MAP_COLORS.red,
-              "delayed", MAP_COLORS.orange,
-              MAP_COLORS.blue,
-            ],
-            "circle-radius": 6,
-            "circle-stroke-width": 2,
-            "circle-stroke-color": MAP_COLORS.ink,
-          },
-        });
-        map!.addSource("zones", { type: "geojson", data: zoneGeo });
-        map!.addLayer({
-          id: "zones-fill",
-          type: "fill",
-          source: "zones",
-          paint: { "fill-color": MAP_COLORS.blue, "fill-opacity": 0.10 },
-        });
-        map!.addLayer({
-          id: "zones-line",
-          type: "line",
-          source: "zones",
-          paint: { "line-color": MAP_COLORS.blue, "line-width": 1.4, "line-dasharray": [2, 2] },
-        });
-
-        map!.on("click", "incidents-point", (e) => {
-          const feature = e.features?.[0];
-          const id = feature?.properties?.id as string | undefined;
-          const coords = (feature?.geometry as any)?.coordinates as [number, number] | undefined;
-          if (id) onSelectIncident(id);
-          if (coords) map!.easeTo({ center: coords, zoom: 13, duration: 600 });
-        });
-        map!.on("mouseenter", "incidents-point", () => { map!.getCanvas().style.cursor = "pointer"; });
-        map!.on("mouseleave", "incidents-point", () => { map!.getCanvas().style.cursor = ""; });
+        map!.addSource("zones", { type: "geojson", data: zones as any });
+        map!.addLayer({ id: "zones-fill", type: "fill", source: "zones", paint: { "fill-color": "#7A9BFF", "fill-opacity": 0.06 } });
+        map!.addLayer({ id: "zones-line", type: "line", source: "zones", paint: { "line-color": "#7A9BFF", "line-width": 1.2, "line-opacity": 0.6, "line-dasharray": [2, 2] } });
+        setReady(true);
         requestAnimationFrame(() => map!.resize());
       });
       mapRef.current = map;
       ro = new ResizeObserver(() => {
         try {
           map!.resize();
-        } catch {}
+        } catch {
+          // map may be mid-teardown
+        }
       });
-      if (mapContainer.current) ro.observe(mapContainer.current);
-    };
-
-    void mount();
+      ro.observe(container.current);
+    })();
     return () => {
       cancelled = true;
       ro?.disconnect();
-      loadedRef.current = false;
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
       map?.remove();
       mapRef.current = null;
+      setReady(false);
     };
-  }, [onSelectIncident, token]);
+    // zones are pushed by the effect below once the style has loaded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource("incidents") as MapboxGeoJSONSource | undefined)?.setData(incidentGeo);
-  }, [incidentGeo]);
+    if (!map || !ready) return;
+    (map.getSource("zones") as MapboxGeoJSONSource | undefined)?.setData(zones as any);
+    const vis = layers.zones ? "visible" : "none";
+    ["zones-fill", "zones-line"].forEach((id) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", vis));
+  }, [zones, layers.zones, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource("patrols") as MapboxGeoJSONSource | undefined)?.setData(patrolGeo);
-  }, [patrolGeo]);
+    const mapboxgl = mapboxRef.current;
+    if (!map || !mapboxgl || !ready) return;
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+    if (layers.patrols) {
+      for (const { patrol, coord } of placedPatrols) {
+        const el = document.createElement("span");
+        el.className = "av av-b";
+        el.textContent = patrol.officer
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((s) => s[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        const ring = patrol.status === "missed" ? "var(--s5)" : patrol.status === "delayed" ? "var(--warn)" : "#0A0C10";
+        el.style.cssText = `width:22px;height:22px;box-shadow:0 0 0 2px ${ring};cursor:default`;
+        el.title = `${patrol.officer} · ${patrol.code}`;
+        markersRef.current.push(new mapboxgl.default.Marker({ element: el }).setLngLat(coord).addTo(map));
+      }
+    }
+    if (layers.incidents) {
+      for (const { incident, coord } of placedIncidents) {
+        const sev = toSev(incident.severity);
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = `sv sv${sev} svq${sev === 5 ? " pulse-dot" : ""}`;
+        el.textContent = String(sev);
+        el.setAttribute("aria-label", `${incident.code}, severity ${sev}`);
+        el.title = `${incident.code} · ${incidentTitle(incident)}`;
+        el.style.cssText = `box-shadow:${selected?.id === incident.id ? "0 0 0 2px #fff" : "0 0 0 2px #0A0C10"}`;
+        el.addEventListener("click", () => onSelectRef.current(incident.id));
+        markersRef.current.push(new mapboxgl.default.Marker({ element: el }).setLngLat(coord).addTo(map));
+      }
+    }
+  }, [placedIncidents, placedPatrols, layers.incidents, layers.patrols, ready, selected?.id]);
+
+  const fitAll = () => {
+    const map = mapRef.current;
+    const mapboxgl = mapboxRef.current;
+    if (!map || !mapboxgl) return;
+    const points = [...placedIncidents.map((p) => p.coord), ...placedPatrols.map((p) => p.coord)];
+    if (!points.length) return map.easeTo({ center: LAGOS, zoom: 10.7 });
+    const bounds = new mapboxgl.default.LngLatBounds(points[0], points[0]);
+    points.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 500 });
+  };
+
+  useEffect(() => {
+    if (ready) fitAll();
+    // fit once when the map first becomes ready
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !loadedRef.current) return;
-    (map.getSource("zones") as MapboxGeoJSONSource | undefined)?.setData(zoneGeo);
-  }, [zoneGeo]);
+    const c = selected ? coordOf(selected.coord_x, selected.coord_y) : null;
+    if (map && ready && c) map.easeTo({ center: c, zoom: Math.max(map.getZoom(), 14), duration: 500 });
+  }, [selected?.id, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !loadedRef.current || !selectedIncident) return;
-    const lng = selectedIncident.coord_x != null ? Number(selectedIncident.coord_x) : lagos[0];
-    const lat = selectedIncident.coord_y != null ? Number(selectedIncident.coord_y) : lagos[1];
-    map.easeTo({ center: [lng, lat], zoom: 13, duration: 500 });
-  }, [lagos, selectedIncident]);
+  const chip = (key: keyof typeof layers, label: string, Icon: typeof Siren) => (
+    <button
+      type="button"
+      className={`chip${layers[key] ? " on" : ""}`}
+      aria-pressed={layers[key]}
+      onClick={() => setLayers((l) => ({ ...l, [key]: !l[key] }))}
+      style={{ height: 26, fontSize: 12, padding: "0 8px", border: 0 }}
+    >
+      <Icon size={13} strokeWidth={1.75} className="ic" />
+      {label}
+    </button>
+  );
 
   return (
-    <div className="relative h-full min-h-[420px] overflow-hidden rounded-2xl border border-border bg-surface">
-      <div ref={mapContainer} className="absolute inset-0" />
+    <div className="map flex-1" style={{ minHeight: 300 }}>
+      <div ref={container} className="absolute inset-0" />
       {!token && (
-        <div className="absolute inset-0 grid place-items-center bg-background/80 p-6 text-center">
-          <div className="max-w-sm">
-            <div className="text-sm font-medium text-foreground">Mapbox token missing</div>
-            <div className="mt-2 text-xs text-muted-foreground">The live map preview is still usable, but a publishable token enables the rendered map layer.</div>
+        <div className="absolute inset-0 grid place-items-center p-6 text-center">
+          <div className="col g6" style={{ maxWidth: 320 }}>
+            <b>Map unavailable</b>
+            <span className="t3" style={{ fontSize: 12.5 }}>No Mapbox token is configured for this deployment, so the live map can’t be drawn. Incidents and patrols are still listed alongside.</span>
           </div>
         </div>
       )}
-      {token && !mapRef.current && (
-        <div className="absolute inset-0 grid place-items-center bg-background/80">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      <div className="row g8 wrap" style={{ position: "absolute", left: 12, right: 12, top: 12 }}>
+        <div className="glass row g8" style={{ padding: "6px 10px", height: 34 }}>
+          <span className="pulse" />
+          <span style={{ fontWeight: 600, fontSize: 12.5 }}>Live map</span>
+          <span className="t3 trunc" style={{ fontSize: 12, maxWidth: 220 }}>{orgName}</span>
         </div>
-      )}
-      {selectedIncident && (
-        <div className="absolute left-4 top-4 z-10 max-w-sm rounded-2xl border border-critical/30 bg-background/90 p-4 backdrop-blur">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Target lock</div>
-              <div className="text-sm font-semibold">{selectedIncident.code}</div>
-            </div>
-            <SeverityBadge severity={selectedIncident.severity as 1 | 2 | 3 | 4 | 5} />
-          </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            {typeMeta[selectedIncident.type]} · {selectedIncident.location} · {selectedIncident.zone}
-          </div>
-          <div className="mt-2 text-xs text-foreground/90">
-            {selectedIncident.description ?? "No incident description on file."}
-          </div>
+        <span className="flex-auto" />
+        <div className="glass row g4 wrap" style={{ padding: 4 }} role="group" aria-label="Map layers">
+          {chip("incidents", "Incidents", Siren)}
+          {chip("patrols", "Patrols", RouteIcon)}
+          {chip("zones", "Zones", Layers)}
         </div>
-      )}
-      <div className="absolute bottom-4 left-4 z-10 flex flex-wrap items-center gap-3 rounded-full border border-border bg-background/90 px-3 py-2 text-[11px] backdrop-blur">
-        <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="h-2 w-2 rounded-full bg-critical" /> Critical</span>
-        <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="h-2 w-2 rounded-full bg-high" /> High</span>
-        <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="h-2 w-2 rounded-full bg-resolved" /> Stable</span>
+      </div>
+      <div className="mapctl" style={{ right: 12, bottom: 12 }}>
+        <button type="button" className="ibtn" aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()} disabled={!ready}>
+          <Plus size={15} strokeWidth={1.75} />
+        </button>
+        <button type="button" className="ibtn" aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()} disabled={!ready}>
+          <Minus size={15} strokeWidth={1.75} />
+        </button>
+        <button type="button" className="ibtn" aria-label="Show everything on the map" onClick={fitAll} disabled={!ready}>
+          <LocateFixed size={15} strokeWidth={1.75} />
+        </button>
+        <Link to="/app/map" className="ibtn" aria-label="Open full map">
+          <Maximize2 size={15} strokeWidth={1.75} />
+        </Link>
+      </div>
+      <div className="glass row g12 wrap" style={{ position: "absolute", left: 12, bottom: 12, padding: "8px 10px", fontSize: 11.5, color: "var(--tx-2)", maxWidth: "calc(100% - 80px)" }}>
+        <span className="row g6">
+          <span className="sv sv5 svq" style={{ height: 14, width: 14, minWidth: 14, fontSize: 9 }}>5</span>
+          Incident
+        </span>
+        <span className="row g6">
+          <span style={{ width: 12, height: 12, borderRadius: "50%", background: "#3462F0", display: "block" }} />
+          Patrol
+        </span>
+        <span className="row g6">
+          <span style={{ width: 16, height: 0, borderTop: "1.5px dashed #7A9BFF", display: "block" }} />
+          Zone
+        </span>
+        {unplaced > 0 && <span className="t3">{unplaced} incident{unplaced === 1 ? "" : "s"} without a map position</span>}
       </div>
     </div>
   );
 }
 
-function toGeoJsonFeature(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  const item = value as Record<string, any>;
-  if (item.type === "Feature" && item.geometry && typeof item.geometry === "object") return item;
-  if ((item.type === "Polygon" || item.type === "MultiPolygon" || item.type === "LineString" || item.type === "Point") && item.coordinates) {
-    return { type: "Feature" as const, geometry: { type: item.type, coordinates: item.coordinates }, properties: {} };
-  }
-  if (item.geometry && typeof item.geometry === "object" && item.geometry.type && item.geometry.coordinates) {
-    return { type: "Feature" as const, geometry: { type: item.geometry.type, coordinates: item.geometry.coordinates }, properties: {} };
-  }
-  return null;
-}
+/* ---------------- patrol pulse ---------------- */
 
-function Card({ title, icon: Icon, children }: { title: string; icon: any; children: ReactNode }) {
+function PatrolPulse({ patrols, checkIns, late, missed }: { patrols: PatrolRow[]; checkIns: CheckInRow[]; late: number; missed: number }) {
+  const lastCheckIn = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of checkIns) {
+      if (!c.patrol_id) continue;
+      const prev = map.get(c.patrol_id);
+      if (!prev || c.created_at > prev) map.set(c.patrol_id, c.created_at);
+    }
+    return map;
+  }, [checkIns]);
+
   return (
-    <section className="rounded-3xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
-        <Icon className="h-4 w-4 text-muted-foreground" />
+    <section className="pn" style={{ flex: "none" }}>
+      <div className="pn-h" style={{ minHeight: 38, padding: "6px 12px" }}>
+        <h3>Patrol pulse</h3>
+        <span className="meta">
+          {patrols.length} active · {late} late · {missed} missed
+        </span>
+        <span className="flex-auto" />
+        <Link to="/app/patrols" className="b b-sm b-gh">
+          All patrols
+          <ArrowRight size={13} strokeWidth={1.75} />
+        </Link>
       </div>
-      <div className="mt-4">{children}</div>
+      {patrols.length === 0 ? (
+        <div className="empty" style={{ padding: "12px" }}>No patrols are running right now.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(170px,100%),1fr))", gap: 8, padding: 8 }}>
+          {patrols.slice(0, 4).map((p) => {
+            const tag =
+              p.status === "missed" ? <span className="tg tg-fail">Missed</span>
+              : p.status === "delayed" ? <span className="tg tg-warn">Late</span>
+              : p.status === "on_route" ? <span className="tg tg-ok">On time</span>
+              : p.status === "paused" ? <span className="tg tg-blue">Paused</span>
+              : <span className="tg capitalize">{p.status.replace(/_/g, " ")}</span>;
+            const last = lastCheckIn.get(p.id);
+            return (
+              <div key={p.id} className="card col g6 min-w-0" style={{ padding: "8px 10px" }}>
+                <div className="row g8">
+                  <Avatar name={p.officer} />
+                  <span className="f1 trunc" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.officer}</span>
+                  {tag}
+                </div>
+                <div className="row g8">
+                  <span className="mono t3" style={{ fontSize: 11 }}>{p.code}</span>
+                  <WaypointDots total={p.waypoints} done={p.checked_in} status={p.status} />
+                </div>
+                <div className="t3 trunc" style={{ fontSize: 11.5 }}>
+                  {p.name} · {last ? `checked in ${timeAgo(last)}` : p.next_check_in ? `next ${formatClock(p.next_check_in)}` : `${p.checked_in}/${p.waypoints} waypoints`}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  delta,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string;
-  delta: string;
-  icon: any;
-  tone: "critical" | "warning" | "resolved" | "muted";
-}) {
-  const toneClass = {
-    critical: "text-critical bg-critical/10 border-critical/30",
-    warning: "text-high bg-high/10 border-high/30",
-    resolved: "text-resolved bg-resolved/10 border-resolved/30",
-    muted: "text-muted-foreground bg-muted border-border",
-  }[tone];
+function formatClock(value: string) {
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function WaypointDots({ total, done, status }: { total: number; done: number; status: string }) {
+  const n = Math.max(0, Math.min(total || 0, 12));
+  const dot = (bg: string, border: string, ring = false) => ({
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    background: bg,
+    border: `1.5px solid ${border}`,
+    display: "block",
+    boxShadow: ring ? "0 0 0 3px rgba(233,237,245,.18)" : undefined,
+  });
   return (
-    <div className="rounded-3xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
-        <div className={`grid h-8 w-8 place-items-center rounded-md border ${toneClass}`}>
-          <Icon className="h-4 w-4" />
-        </div>
-      </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground">{delta}</div>
-    </div>
+    <span className="row g4 ml-auto" aria-label={`${done} of ${total} waypoints checked in`} role="img">
+      {Array.from({ length: n }, (_, i) => {
+        if (i < done) return <i key={i} style={dot("#35C77B", "#35C77B")} />;
+        if (i === done && status === "missed") return <i key={i} style={dot("#F2384B", "#F2384B")} />;
+        if (i === done && status === "delayed") return <i key={i} style={dot("#F7D046", "#F7D046")} />;
+        if (i === done && status !== "complete") return <i key={i} style={dot("#E9EDF5", "#E9EDF5", true)} />;
+        return <i key={i} style={dot("transparent", "#8790A5")} />;
+      })}
+    </span>
   );
 }
 
-function StatusDot({ severity }: { severity: number }) {
-  const cls = severity >= 4 ? "bg-critical" : severity === 3 ? "bg-high" : "bg-resolved";
-  return <span className={`mt-1 h-2.5 w-2.5 rounded-full ${cls}`} />;
+/* ---------------- decision panel ---------------- */
+
+type Proposal = { id: string; title: string; detail: string | null; confidence: number | null };
+
+function persistedProposals(incident: IncidentRow | null): Proposal[] {
+  const raw = incident?.dispatch_plan?.recommended_actions ?? incident?.agent_output?.recommended_actions;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((a: any, idx: number) => {
+    const title = typeof a === "string" ? a : a?.title || a?.label || a?.name;
+    if (!title) return [];
+    const conf = typeof a === "object" && a && Number.isFinite(Number(a.confidence)) ? Number(a.confidence) : null;
+    const detail = typeof a === "object" && a ? (Array.isArray(a.reasoning) ? a.reasoning[0] : a.detail || a.description) ?? null : null;
+    return [{ id: String((typeof a === "object" && a?.id) || `${incident!.id}-plan-${idx}`), title: String(title), detail, confidence: conf }];
+  });
 }
 
-function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="rounded-2xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">{children}</div>;
+function DecisionPanel({ incident, orgId, readOnly, actor }: { incident: IncidentRow | null; orgId: string; readOnly: boolean; actor: string }) {
+  const recommend = useServerFn(submitAiRecommendation);
+  const decide = useServerFn(submitApprovalDecision);
+  const [history, setHistory] = useState<CommandHistoryEntry[]>(() => loadStoredCommandHistory());
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const { data: rec, isLoading, isError } = useQuery({
+    queryKey: ["ai-recommendation", incident?.id],
+    queryFn: () => recommend({ data: { incident_id: incident!.id, org_id: orgId, scope: "incidents" } }) as Promise<AiRecommendation & { meta?: { operation_id?: string; request_id?: string } }>,
+    enabled: !!incident,
+    staleTime: 5 * 60_000,
+    retry: 0,
+  });
+
+  const fromModel = !!rec && !String(rec.request_id ?? "").startsWith("local-");
+  const proposals: Proposal[] = [
+    ...persistedProposals(incident),
+    ...(fromModel ? rec!.actions.map((a) => ({ id: a.id, title: a.label, detail: rec!.reasoning?.[0] ?? null, confidence: null })) : []),
+  ];
+  const decided = (id: string) => history.find((h) => h.proposalIds.includes(id) && h.commandText === incident?.code);
+  const pending = proposals.filter((p) => !decided(p.id)).length;
+
+  const run = async (proposal: Proposal, decision: "approve_selected" | "reject") => {
+    if (!incident) return;
+    setBusy(`${proposal.id}:${decision}`);
+    try {
+      const result = (await decide({
+        data: {
+          decision,
+          proposal_ids: [proposal.id],
+          command_text: incident.code,
+          operation_id: rec?.meta?.operation_id,
+          request_id: rec?.meta?.request_id ?? (fromModel ? rec?.request_id : undefined),
+          org_id: orgId,
+        },
+      })) as { request_id?: string; controller_warning?: string | null } | null;
+      const entry: CommandHistoryEntry = {
+        id: `${Date.now()}-${proposal.id}`,
+        at: new Date().toISOString(),
+        decision,
+        proposalIds: [proposal.id],
+        commandText: incident.code,
+        summary: `${decision === "reject" ? "Denied" : "Approved"} · ${proposal.title}`,
+        scope: "incidents",
+        note: `${actor}${result?.request_id?.startsWith("local-") ? " · recorded on this device only" : ""}`,
+      };
+      appendStoredCommandHistory(entry);
+      setHistory((h) => [entry, ...h]);
+      if (result?.controller_warning) toast.warning(decision === "reject" ? "Denied" : "Approved", { description: result.controller_warning });
+      else toast.success(decision === "reject" ? "Denied" : "Approved");
+    } catch (err) {
+      toast.error("Couldn’t record that decision", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="pn" style={{ flex: "none" }}>
+      <div className="pn-h">
+        <Sparkles size={15} strokeWidth={1.75} className="ic" style={{ color: "var(--ai)" }} />
+        <h3>Needs your decision</h3>
+        {pending > 0 && <span className="tg tg-ai">{pending}</span>}
+        <span className="flex-auto" />
+        {incident && <span className="meta mono">{incident.code}</span>}
+      </div>
+      <div className="col g8" style={{ padding: 10 }}>
+        {!incident ? (
+          <div className="empty">No open incident selected. AI proposals for an incident appear here for a person to approve.</div>
+        ) : isLoading ? (
+          <div className="row g8 t2" style={{ fontSize: 12.5 }}>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Asking for recommendations on {incident.code}…
+          </div>
+        ) : proposals.length === 0 ? (
+          <div className="empty">
+            {isError
+              ? "Couldn’t reach the recommendation service."
+              : rec && !fromModel
+                ? `No AI recommendations for ${incident.code} — the recommendation service didn’t return a model result.`
+                : `No AI proposals for ${incident.code}.`}
+          </div>
+        ) : (
+          proposals.slice(0, 3).map((p) => {
+            const done = decided(p.id);
+            if (done) {
+              const approved = done.decision !== "reject";
+              return (
+                <div key={p.id} className="ai done col g6" style={{ padding: "9px 11px" }}>
+                  <div className="row g8">
+                    <span className="f1 trunc" style={{ fontWeight: 600 }}>{p.title}</span>
+                    <span className={`tg ${approved ? "tg-ok" : "tg-fail"}`}>
+                      {approved ? <Check size={12} strokeWidth={2.4} /> : <X size={12} strokeWidth={2.4} />}
+                      {approved ? "Approved" : "Denied"}
+                    </span>
+                  </div>
+                  <span className="t2 trunc" style={{ fontSize: 12 }}>
+                    {done.note} · {new Date(done.at).toLocaleTimeString("en-GB")}
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <div key={p.id} className="ai col g6" style={{ padding: "9px 11px" }}>
+                <div className="row g8">
+                  <span className="f1 trunc" style={{ fontWeight: 600 }}>{p.title}</span>
+                  <Confidence value={p.confidence} size={11.5} />
+                </div>
+                {p.detail && <div className="t2 trunc" style={{ fontSize: 12 }}>{p.detail}</div>}
+                <div className="row g8">
+                  <span className="t3 f1 trunc" style={{ fontSize: 11.5 }}>{readOnly ? "View only for client admins" : "Proposed · awaiting a decision"}</span>
+                  {!readOnly && (
+                    <>
+                      <button type="button" className="b b-sm b-gh" disabled={busy !== null} onClick={() => run(p, "reject")}>
+                        Deny
+                      </button>
+                      <button type="button" className="b b-sm b-pri" disabled={busy !== null} onClick={() => run(p, "approve_selected")}>
+                        {busy === `${p.id}:approve_selected` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check size={14} strokeWidth={1.75} />}
+                        Approve
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
 }
 
-function formatMinutes(minutes: number) {
-  if (!minutes || minutes <= 0) return "0m";
-  if (minutes < 60) return `${minutes}m`;
-  const hrs = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
-}
+/* ---------------- incident queue ---------------- */
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+function IncidentQueue({
+  incidents,
+  loading,
+  selectedId,
+  onSelect,
+  me,
+  win,
+}: {
+  incidents: IncidentRow[];
+  loading: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  me: string | null;
+  win: Window;
+}) {
+  const now = useNow(1000);
+  const [tab, setTab] = useState<"all" | "mine" | "unassigned">("all");
+  const mine = incidents.filter((i) => me && i.officer && i.officer.toLowerCase() === me.toLowerCase());
+  const unassigned = incidents.filter((i) => !i.officer);
+  const rows = tab === "mine" ? mine : tab === "unassigned" ? unassigned : incidents;
+
+  return (
+    <section className="pn min-h-0" style={{ flex: "1 1 auto" }}>
+      <div className="row" style={{ padding: "0 8px", borderBottom: "1px solid var(--line-1)" }}>
+        <Tabs
+          label="Incident queue"
+          value={tab}
+          onChange={setTab}
+          className="border-b-0"
+          tabs={[
+            { value: "all", label: win === "live" ? "Active" : "All", count: incidents.length },
+            { value: "mine", label: "Mine", count: mine.length },
+            { value: "unassigned", label: "Unassigned", count: unassigned.length },
+          ]}
+        />
+        <span className="flex-auto" />
+        <Link to="/app/incidents" className="b b-sm b-gh">View all</Link>
+      </div>
+      <div className="list scroll" style={{ flex: "1 1 auto" }}>
+        {loading ? (
+          <div className="empty row g8" style={{ padding: 12 }}><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading incidents…</div>
+        ) : rows.length === 0 ? (
+          <div className="empty" style={{ padding: 12 }}>
+            {tab === "mine" ? "Nothing assigned to you." : tab === "unassigned" ? "Every incident has someone on it." : win === "live" ? "No open incidents." : "No incidents in this window."}
+          </div>
+        ) : (
+          rows.map((i) => {
+            const sel = i.id === selectedId;
+            const age = now - new Date(i.reported_at).getTime();
+            const overdue = !i.officer && i.status !== "resolved" && i.status !== "closed" && age > 10 * 60_000;
+            return (
+              <div
+                key={i.id}
+                className="row g10"
+                style={{ padding: "9px 12px", alignItems: "flex-start", ...(sel ? { background: "rgba(52,98,240,.09)", boxShadow: "inset 2px 0 0 #7A9BFF" } : {}) }}
+              >
+                <Sev level={i.severity} />
+                <button type="button" className="f1 col g4 text-left min-w-0" onClick={() => onSelect(i.id)} aria-pressed={sel}>
+                  <span className="row g8">
+                    <span className="mono t3" style={{ fontSize: 11.5 }}>{i.code}</span>
+                    <span className="trunc f1" style={{ fontWeight: 600 }}>{incidentTitle(i)}</span>
+                    <span className="mono" style={{ fontSize: 12, color: overdue ? "#FF8E90" : "var(--tx-2)" }}>
+                      {i.status === "resolved" || i.status === "closed" ? timeAgo(i.reported_at) : elapsed(i.reported_at, now)}
+                    </span>
+                  </span>
+                  <span className="row g8">
+                    <span className="trunc f1 t3" style={{ fontSize: 12 }}>{[i.zone, i.location].filter(Boolean).join(" · ")}</span>
+                    <Lifecycle status={i.status} label={false} />
+                    {i.officer ? <Avatar name={i.officer} /> : <span className="tg tg-warn">Unassigned</span>}
+                  </span>
+                </button>
+                {sel && (
+                  <Link to="/app/incidents/$id" params={{ id: i.id }} className="b b-sm b-sec" aria-label={`Open ${i.code}`}>
+                    Open
+                    <ArrowRight size={13} strokeWidth={1.75} />
+                  </Link>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
 }

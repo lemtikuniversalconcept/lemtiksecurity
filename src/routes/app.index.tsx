@@ -40,10 +40,11 @@ function timeAgo(iso: string) {
 
 function Overview() {
   const { appAccess } = Route.useRouteContext();
+  const { ask } = Route.useSearch();
   if (appAccess.specRole === "lemtik_admin") {
     return <PlatformDashboard />;
   }
-  return <CommanderDashboard access={appAccess} />;
+  return <CommanderDashboard access={appAccess} ask={ask} />;
 }
 
 function PlatformDashboard() {

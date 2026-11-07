@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   Boxes,
@@ -174,6 +174,20 @@ export function AppShell({ access }: { access: AppAccess }) {
 
   useEffect(() => setNavOpen(false), [pathname]);
 
+  // One-screen pages size themselves against the sticky header, which grows when the priority bar shows.
+  const headerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const ro = new ResizeObserver(() => root.style.setProperty("--shell-top", `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      root.style.removeProperty("--shell-top");
+    };
+  }, []);
+
   const listMine = useServerFn(listMyOrgs);
   const getOrg = useServerFn(getActiveOrg);
   const switchOrg = useServerFn(switchActiveOrg);
@@ -306,7 +320,7 @@ export function AppShell({ access }: { access: AppAccess }) {
       </aside>
 
       <div className="main">
-        <div className="sticky top-0 z-20">
+        <div ref={headerRef} className="sticky top-0 z-20">
           <header className="top">
             <button type="button" className="cmdk" onClick={() => setPaletteOpen(true)} aria-label={isAdmin ? "Search platform pages" : "Search pages or ask Lemtik"}>
               {isAdmin ? <Search size={15} strokeWidth={1.75} className="ic" /> : <Sparkles size={15} strokeWidth={1.75} className="ic" />}

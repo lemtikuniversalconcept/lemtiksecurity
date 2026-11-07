@@ -35,6 +35,8 @@ type IncidentRow = {
 
 export const Route = createFileRoute("/app/incidents")({
   head: () => ({ meta: [{ title: "Incidents · Lemtik SOD" }] }),
+  validateSearch: (search: Record<string, unknown>): { new?: boolean } =>
+    search.new === true || search.new === "true" || search.new === 1 || search.new === "1" ? { new: true } : {},
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
     requireSectionAccess(appAccess, [
