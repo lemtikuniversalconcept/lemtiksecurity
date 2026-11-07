@@ -9,6 +9,8 @@ import { CommanderDashboard } from "@/components/dashboard/CommanderDashboard";
 
 export const Route = createFileRoute("/app/")({
   head: () => ({ meta: [{ title: "Overview · Lemtik SOD" }] }),
+  validateSearch: (search: Record<string, unknown>): { ask?: string } =>
+    typeof search.ask === "string" && search.ask.trim() ? { ask: search.ask.trim().slice(0, 300) } : {},
   beforeLoad: async ({ context }) => {
     const access = context.appAccess;
     if (access.specRole === "field_officer") {

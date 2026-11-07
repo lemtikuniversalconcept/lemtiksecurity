@@ -1,395 +1,359 @@
-import { Link, Outlet, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import {
-  LayoutDashboard,
-  Map,
-  AlertTriangle,
-  Radar,
   Bell,
-  BarChart3,
-  Users,
-  ShieldHalf,
-  Search,
-  Radio,
-  Video,
-  LogOut,
-  History,
+  Boxes,
   Building2,
-  ReceiptText,
-  MapPin,
+  Cctv,
+  ChartColumn,
   ChevronDown,
-  Plus,
-  ServerCrash,
-  ShieldAlert,
+  Clock4,
   Cpu,
+  FileText,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Map,
+  MapPin,
+  Menu,
+  Plus,
+  Radar,
+  ReceiptText,
+  Route,
+  Search,
+  Server,
+  Siren,
+  Sparkles,
+  Users,
+  X,
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { listMyOrgs, switchActiveOrg, getActiveOrg } from "@/lib/orgs.functions";
+import { listMyNotifications } from "@/lib/alerts.functions";
 import { NotificationBell } from "@/components/NotificationBell";
-import { ConsumerEmergencyAlert } from "@/components/ConsumerEmergencyAlert";
+import { PriorityBar, useOpenIncidentSummary } from "@/components/PriorityBar";
+import { CommandPalette, useCommandPaletteShortcut, type AppPath, type PaletteGroup } from "@/components/CommandPalette";
+import { Avatar, LemtikMark, initialsOf } from "@/components/nw";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { AppAccess, SpecRole } from "@/lib/rbac";
+import type { LucideIcon } from "lucide-react";
 
-const nav = [
-  { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/map", label: "Live Map", icon: Map, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/sensors", label: "Sensors", icon: Video, allowed: ["security_manager", "operator"] as SpecRole[] },
-  { to: "/app/devices", label: "Devices", icon: Cpu, allowed: ["security_manager"] as SpecRole[] },
-  { to: "/app/incidents", label: "Incidents", icon: AlertTriangle, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/patrols", label: "Patrols", icon: Radar, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/intelligence", label: "Intelligence", icon: ShieldAlert, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/inventory", label: "Inventory", icon: MapPin, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/alerts", label: "Alerts", icon: Bell, allowed: ["security_manager", "operator"] as SpecRole[] },
-  { to: "/app/reports", label: "Analytics", icon: BarChart3, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/report-centre", label: "Report Centre", icon: ReceiptText, allowed: ["security_manager", "operator", "client_admin"] as SpecRole[] },
-  { to: "/app/locations", label: "Locations", icon: MapPin, allowed: ["security_manager", "client_admin"] as SpecRole[] },
-  { to: "/app/users", label: "Team", icon: Users, allowed: ["security_manager", "client_admin"] as SpecRole[] },
-  { to: "/app/org", label: "Organisation", icon: Building2, allowed: ["security_manager", "client_admin"] as SpecRole[] },
-  { to: "/app/audit", label: "Audit", icon: History, allowed: ["security_manager", "client_admin"] as SpecRole[] },
+type NavItem = { to: AppPath; label: string; icon: LucideIcon; exact?: boolean; allowed: SpecRole[]; count?: "incidents" | "alerts" };
+type NavGroup = { label: string; items: NavItem[] };
+
+const ALL: SpecRole[] = ["security_manager", "operator", "client_admin"];
+const OPS: SpecRole[] = ["security_manager", "operator"];
+const ADMINS: SpecRole[] = ["security_manager", "client_admin"];
+
+const CLIENT_NAV: NavGroup[] = [
+  {
+    label: "Operate",
+    items: [
+      { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true, allowed: ALL },
+      { to: "/app/map", label: "Live map", icon: Map, allowed: ALL },
+      { to: "/app/incidents", label: "Incidents", icon: Siren, allowed: ALL, count: "incidents" },
+      { to: "/app/patrols", label: "Patrols", icon: Route, allowed: ALL },
+      { to: "/app/alerts", label: "Alerts", icon: Bell, allowed: OPS, count: "alerts" },
+    ],
+  },
+  {
+    label: "Sense",
+    items: [
+      { to: "/app/intelligence", label: "Intelligence", icon: Radar, allowed: ALL },
+      { to: "/app/sensors", label: "Cameras & sensors", icon: Cctv, allowed: OPS },
+      { to: "/app/devices", label: "Devices", icon: Cpu, allowed: ["security_manager"] },
+    ],
+  },
+  {
+    label: "Resources",
+    items: [
+      { to: "/app/inventory", label: "Inventory", icon: Boxes, allowed: ALL },
+      { to: "/app/users", label: "Team", icon: Users, allowed: ADMINS },
+    ],
+  },
+  {
+    label: "Records",
+    items: [
+      { to: "/app/reports", label: "Analytics", icon: ChartColumn, allowed: ALL },
+      { to: "/app/report-centre", label: "Report centre", icon: FileText, allowed: ALL },
+      { to: "/app/audit", label: "Audit log", icon: History, allowed: ADMINS },
+    ],
+  },
+  {
+    label: "Configure",
+    items: [
+      { to: "/app/org", label: "Organisation", icon: Building2, allowed: ADMINS },
+      { to: "/app/locations", label: "Locations", icon: MapPin, allowed: ADMINS },
+    ],
+  },
 ];
+
+const ADMIN_NAV: NavGroup[] = [
+  {
+    label: "Platform",
+    items: [
+      { to: "/app", label: "Platform overview", icon: LayoutDashboard, exact: true, allowed: ["lemtik_admin"] },
+      { to: "/app/admin/organisations", label: "Organisations", icon: Building2, allowed: ["lemtik_admin"] },
+      { to: "/app/admin/billing", label: "Billing", icon: ReceiptText, allowed: ["lemtik_admin"] },
+      { to: "/app/admin/system", label: "System health", icon: Server, allowed: ["lemtik_admin"] },
+      { to: "/app/admin/audit", label: "Platform audit", icon: History, allowed: ["lemtik_admin"] },
+    ],
+  },
+];
+
+function useLiveFeedStatus(channelKey: string) {
+  const [status, setStatus] = useState<"connecting" | "live" | "down">("connecting");
+  useEffect(() => {
+    const channel = supabase.channel(`shell-status:${channelKey}`).subscribe((s) => {
+      setStatus(s === "SUBSCRIBED" ? "live" : s === "CHANNEL_ERROR" || s === "TIMED_OUT" || s === "CLOSED" ? "down" : "connecting");
+    });
+    const onOffline = () => setStatus("down");
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      supabase.removeChannel(channel);
+    };
+  }, [channelKey]);
+  return status;
+}
+
+function LiveFeed({ channelKey }: { channelKey: string }) {
+  const status = useLiveFeedStatus(channelKey);
+  const label = status === "live" ? "Live feed connected" : status === "down" ? "Live feed offline" : "Connecting live feed…";
+  return (
+    <div className="live" role="status">
+      <span
+        className={`pulse${status === "down" ? " red" : ""}`}
+        style={status === "connecting" ? { background: "var(--warn)", boxShadow: "0 0 0 3px rgba(247,208,70,.18)" } : undefined}
+      />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function Clock() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const time = now ? now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--:--:--";
+  const zone = now ? new Intl.DateTimeFormat("en-GB", { timeZoneName: "short" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value : "";
+  const day = now ? now.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) : "";
+  return (
+    <div className="clock max-[640px]:hidden" aria-label="Local time">
+      <Clock4 size={14} strokeWidth={1.75} className="ic" />
+      <span suppressHydrationWarning>
+        {time} {zone}
+      </span>
+      <span className="t3" suppressHydrationWarning>
+        {day}
+      </span>
+    </div>
+  );
+}
 
 export function AppShell({ access }: { access: AppAccess }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [me, setMe] = useState<{ name: string; role: string }>({
-    name: access.displayName || access.email || "Operator",
-    role: access.roleLabel,
-  });
-  const [clock, setClock] = useState<string>("");
-  const [orgMenuOpen, setOrgMenuOpen] = useState(false);
-  const orgMenuRef = useRef<HTMLDivElement>(null);
+  const isAdmin = access.specRole === "lemtik_admin";
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  useCommandPaletteShortcut(setPaletteOpen);
+
+  useEffect(() => setNavOpen(false), [pathname]);
 
   const listMine = useServerFn(listMyOrgs);
   const getOrg = useServerFn(getActiveOrg);
   const switchOrg = useServerFn(switchActiveOrg);
-  const orgQueriesEnabled = access.specRole !== "lemtik_admin";
+  const loadNotifications = useServerFn(listMyNotifications);
 
-  const { data: orgs = [] } = useQuery({ queryKey: ["my-orgs"], queryFn: () => listMine(), enabled: orgQueriesEnabled });
-  const { data: activeOrg } = useQuery({ queryKey: ["active-org"], queryFn: () => getOrg(), enabled: orgQueriesEnabled });
+  const { data: orgs = [] } = useQuery({ queryKey: ["my-orgs"], queryFn: () => listMine(), enabled: !isAdmin });
+  const { data: activeOrg } = useQuery({ queryKey: ["active-org"], queryFn: () => getOrg(), enabled: !isAdmin });
+  const { data: notifications = [] } = useQuery({
+    queryKey: ["my-notifications"],
+    queryFn: () => loadNotifications(),
+    enabled: !isAdmin,
+    refetchInterval: 30_000,
+  });
+  const { data: incidentSummary } = useOpenIncidentSummary(!isAdmin);
 
   const switchMut = useMutation({
     mutationFn: (id: string) => switchOrg({ data: { organisation_id: id } }),
     onSuccess: () => {
-      setOrgMenuOpen(false);
       qc.invalidateQueries();
       navigate({ to: "/app" });
     },
   });
 
-  useEffect(() => {
-    const tick = () => setClock(new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }));
-    tick();
-    const id = setInterval(tick, 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (orgMenuRef.current && !orgMenuRef.current.contains(e.target as Node)) setOrgMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  useEffect(() => {
-    setMe((m) => ({
-      ...m,
-      name: access.displayName || access.email || "Operator",
-      role: access.roleLabel,
-    }));
-  }, [access.displayName, access.email, access.roleLabel]);
-
   const signOut = async () => {
     await supabase.auth.signOut();
-    navigate({ to: "/login", replace: true });
+    navigate({ to: "/login", search: { redirect: undefined }, replace: true });
   };
 
-  const initials = me.name.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase();
-  const visibleNav = nav.filter((item) => item.allowed.includes(access.specRole));
+  const name = access.displayName || access.email || "Signed in";
+  const orgName = activeOrg?.name ?? access.orgName ?? "No organisation";
+  const unread = notifications.filter((n) => !n.read).length;
+  const openIncidents = incidentSummary?.openCount ?? 0;
+  const hasCritical = Number(incidentSummary?.top?.severity ?? 0) >= 5;
 
-  if (access.specRole === "lemtik_admin") {
-    return (
-      <div className="flex min-h-screen bg-background text-foreground">
-        <aside className="hidden md:flex w-64 flex-col border-r border-sidebar-border bg-sidebar">
-          <div className="flex items-center gap-2 px-5 py-5 border-b border-sidebar-border">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 border border-primary/40">
-              <ShieldHalf className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold tracking-tight">LEMTIK</div>
-              <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Platform Admin</div>
-            </div>
-          </div>
+  const groups = useMemo(
+    () =>
+      (isAdmin ? ADMIN_NAV : CLIENT_NAV)
+        .map((g) => ({ ...g, items: g.items.filter((i) => i.allowed.includes(access.specRole)) }))
+        .filter((g) => g.items.length > 0),
+    [isAdmin, access.specRole],
+  );
+  const paletteGroups: PaletteGroup[] = groups.map((g) => ({ label: g.label, items: g.items.map(({ to, label, icon }) => ({ to, label, icon })) }));
 
-          <nav className="flex-1 px-2 py-3 space-y-0.5">
-            <Link
-              to="/app"
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                pathname === "/app"
-                  ? "bg-sidebar-accent text-foreground border border-sidebar-border"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-              }`}
-            >
-              <LayoutDashboard className="h-4 w-4" />
-              Platform dashboard
-              </Link>
-            <Link
-              to="/app/admin/billing"
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                pathname.startsWith("/app/admin/billing")
-                  ? "bg-sidebar-accent text-foreground border border-sidebar-border"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-              }`}
-            >
-              <ReceiptText className="h-4 w-4" />
-              Billing
-            </Link>
-            <Link
-              to="/app/admin/organisations"
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                pathname.startsWith("/app/admin/organisations")
-                  ? "bg-sidebar-accent text-foreground border border-sidebar-border"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-              }`}
-            >
-              <Building2 className="h-4 w-4" />
-              Organisations
-            </Link>
-            <Link
-              to="/app/admin/system"
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                pathname.startsWith("/app/admin/system")
-                  ? "bg-sidebar-accent text-foreground border border-sidebar-border"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-              }`}
-            >
-              <ServerCrash className="h-4 w-4" />
-              System health
-            </Link>
-            <Link
-              to="/app/admin/audit"
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                pathname.startsWith("/app/admin/audit")
-                  ? "bg-sidebar-accent text-foreground border border-sidebar-border"
-                  : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-              }`}
-            >
-              <History className="h-4 w-4" />
-              Platform audit
-            </Link>
-          </nav>
+  const countFor = (kind: NavItem["count"]) => {
+    if (kind === "incidents" && openIncidents > 0) return <span className={`cnt${hasCritical ? " hot" : ""}`}>{openIncidents}</span>;
+    if (kind === "alerts" && unread > 0) return <span className="cnt">{unread > 99 ? "99+" : unread}</span>;
+    return null;
+  };
 
-          <div className="px-3 py-3 border-t border-sidebar-border space-y-2">
-            <div className="rounded-md bg-surface-2 border border-border p-3">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="h-2 w-2 rounded-full bg-resolved pulse-dot" />
-                <span className="font-medium">Platform console</span>
-              </div>
-              <div className="mt-1 text-[10px] text-muted-foreground font-mono">
-                Global admin · <span suppressHydrationWarning>{clock || "--:--"}</span>
-              </div>
-            </div>
-            <button
-              onClick={signOut}
-              className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-surface-2"
-            >
-              <LogOut className="h-3.5 w-3.5" /> Sign out
-            </button>
-          </div>
-        </aside>
-
-        <main className="flex-1 min-w-0 flex flex-col">
-          <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-border bg-background/80 backdrop-blur px-6 py-3">
-            <div className="flex items-center gap-3">
-              <div className="md:hidden">
-                <ShieldHalf className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Platform dashboard</div>
-                <div className="text-sm font-medium">{access.orgName}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 rounded-md border border-resolved/40 bg-resolved/10 px-2.5 py-1 text-[11px] text-resolved">
-                <Radio className="h-3 w-3 pulse-dot" />
-                <span className="font-mono uppercase tracking-wider">Platform health</span>
-              </div>
-              <div className="relative group">
-                <button className="flex items-center gap-2 rounded-md px-1 py-1 text-left">
-                  <div className="grid h-7 w-7 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
-                    {me.name.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase() || "AD"}
-                  </div>
-                  <div className="hidden sm:block leading-tight">
-                    <div className="text-xs font-medium">{me.name}</div>
-                    <div className="text-[10px] text-muted-foreground">{me.role}</div>
-                  </div>
-                </button>
-                <div className="absolute right-0 top-full z-30 hidden pt-2 group-hover:block">
-                  <div className="w-44 rounded-md border border-border bg-card p-1 shadow-lg">
-                    <button
-                      onClick={signOut}
-                      className="flex w-full items-center gap-2 rounded px-2 py-2 text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground"
-                    >
-                      <LogOut className="h-3.5 w-3.5" />
-                      Logout
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </header>
-
-          <div className="flex-1 p-6">
-            <Outlet />
-          </div>
-        </main>
-      </div>
-    );
-  }
+  const hideOnSmall = navOpen ? "" : " max-[784px]:hidden";
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      <aside className="hidden md:flex w-64 flex-col border-r border-sidebar-border bg-sidebar">
-        <div className="flex items-center gap-2 px-5 py-5 border-b border-sidebar-border">
-          <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 border border-primary/40">
-            <ShieldHalf className="h-5 w-5 text-primary" />
-          </div>
+    <div className="app">
+      <aside className="side" aria-label="Main navigation">
+        <div className="brand">
+          <LemtikMark />
           <div>
-            <div className="text-sm font-semibold tracking-tight">LEMTIK</div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">SOD v1.0</div>
+            <b>LEMTIK</b>
+            <small>{isAdmin ? "Platform admin" : "Command centre"}</small>
           </div>
-        </div>
-
-        {/* Org switcher */}
-        <div ref={orgMenuRef} className="relative px-3 pt-3">
           <button
-            onClick={() => setOrgMenuOpen((o) => !o)}
-            className="w-full flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-left text-xs hover:bg-surface-2"
+            type="button"
+            className="ibtn ml-auto min-[785px]:hidden"
+            aria-label={navOpen ? "Close navigation" : "Open navigation"}
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen((o) => !o)}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <Building2 className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span className="truncate font-medium">{activeOrg?.name ?? access.orgName ?? "No organisation"}</span>
-            </div>
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            {navOpen ? <X size={16} strokeWidth={1.75} /> : <Menu size={16} strokeWidth={1.75} />}
           </button>
-          {orgMenuOpen && (
-            <div className="absolute left-3 right-3 mt-1 z-30 rounded-md border border-border bg-card shadow-lg p-1 space-y-0.5">
-              {orgs.map((o) => (
-                <button
-                  key={o.id}
-                  onClick={() => switchMut.mutate(o.id)}
-                  className={`w-full flex items-center justify-between gap-2 rounded px-2 py-1.5 text-xs text-left hover:bg-surface-2 ${
-                    o.id === activeOrg?.id ? "bg-primary/10 text-foreground" : "text-muted-foreground"
-                  }`}
-                >
-                  <span className="truncate">{o.name}</span>
-                  <span className="text-[9px] uppercase tracking-wider">{o.role.replace("_", " ")}</span>
-                </button>
-              ))}
-              <Link
-                to="/onboarding"
-                onClick={() => setOrgMenuOpen(false)}
-                className="w-full flex items-center gap-2 rounded px-2 py-1.5 text-xs text-primary hover:bg-surface-2 border-t border-border mt-1 pt-2"
-              >
-                <Plus className="h-3 w-3" /> Create / join another
-              </Link>
-            </div>
-          )}
         </div>
 
-        <ConsumerEmergencyAlert orgId={access.orgId} />
+        {!isAdmin && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className={`orgsw${hideOnSmall}`} aria-label="Switch organisation">
+                <span className="lg">{initialsOf(orgName)}</span>
+                <span className="f1">
+                  <span className="trunc" style={{ display: "block", fontSize: 13, fontWeight: 600 }}>
+                    {orgName}
+                  </span>
+                  <span style={{ display: "block", fontSize: 11, color: "var(--tx-3)" }}>{access.roleLabel}</span>
+                </span>
+                <ChevronDown size={14} strokeWidth={1.75} className="ic t3" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+              <DropdownMenuLabel className="eyebrow">Your organisations</DropdownMenuLabel>
+              {orgs.map((o) => (
+                <DropdownMenuItem key={o.id} onSelect={() => o.id !== activeOrg?.id && switchMut.mutate(o.id)} className="justify-between gap-3">
+                  <span className="trunc">{o.name}</span>
+                  {o.id === activeOrg?.id ? <span className="tg tg-blue">Current</span> : <span className="t3 text-[11px]">{o.role.replace("_", " ")}</span>}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to="/onboarding" className="lnk">
+                  <Plus size={14} strokeWidth={1.75} />
+                  Create or join another
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
-        <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {visibleNav.map((item) => {
-            const active = item.exact ? pathname === item.to : pathname === item.to || pathname.startsWith(item.to + "/");
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                  active
-                    ? "bg-sidebar-accent text-foreground border border-sidebar-border"
-                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
+        <nav className={`nav${hideOnSmall}`}>
+          {groups.map((group) => (
+            <div key={group.label} className="contents">
+              <div className="grp">{group.label}</div>
+              {group.items.map((item) => {
+                const active = item.exact ? pathname === item.to || pathname === `${item.to}/` : pathname === item.to || pathname.startsWith(`${item.to}/`);
+                const Icon = item.icon;
+                return (
+                  <Link key={item.to} to={item.to} className={active ? "on" : undefined} aria-current={active ? "page" : undefined}>
+                    <Icon size={16} strokeWidth={1.75} className="ic" />
+                    <span>{item.label}</span>
+                    {countFor(item.count)}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
-        <div className="px-3 py-3 border-t border-sidebar-border space-y-2">
-          <div className="rounded-md bg-surface-2 border border-border p-3">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="h-2 w-2 rounded-full bg-resolved pulse-dot" />
-              <span className="font-medium">Live feed connected</span>
-            </div>
-            <div className="mt-1 text-[10px] text-muted-foreground font-mono">
-              Lagos Ops · <span suppressHydrationWarning>{clock || "--:--"}</span>
-            </div>
+        <div className={`sidefoot${hideOnSmall}`}>
+          <LiveFeed channelKey={isAdmin ? "platform" : access.orgId} />
+          <div className="t3 trunc" style={{ fontSize: 11.5 }}>
+            {isAdmin ? "No access to client incident data" : orgName}
           </div>
-          <button
-            onClick={signOut}
-            className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-surface-2"
-          >
-            <LogOut className="h-3.5 w-3.5" /> Sign out
-          </button>
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0 flex flex-col">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-border bg-background/80 backdrop-blur px-6 py-3">
-          <div className="flex items-center gap-3">
-            <div className="md:hidden">
-              <ShieldHalf className="h-5 w-5 text-primary" />
-            </div>
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                placeholder="Search incidents, officers, zones…"
-                className="w-72 max-w-[50vw] rounded-md border border-border bg-surface pl-7 pr-3 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 rounded-md border border-critical/40 bg-critical/10 px-2.5 py-1 text-[11px] text-critical">
-              <Radio className="h-3 w-3 pulse-dot" />
-              <span className="font-mono uppercase tracking-wider">Live ops</span>
-            </div>
-            <NotificationBell />
-            <div className="relative group">
-              <button className="flex items-center gap-2 rounded-md px-1 py-1 text-left">
-                <div className="grid h-7 w-7 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
-                  {initials || "OP"}
-                </div>
-                <div className="hidden sm:block leading-tight">
-                  <div className="text-xs font-medium">{me.name}</div>
-                  <div className="text-[10px] text-muted-foreground">{me.role}</div>
-                </div>
-              </button>
-              <div className="absolute right-0 top-full z-30 hidden pt-2 group-hover:block">
-                <div className="w-44 rounded-md border border-border bg-card p-1 shadow-lg">
-                  <button
-                    onClick={signOut}
-                    className="flex w-full items-center gap-2 rounded px-2 py-2 text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Logout
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <div className="flex-1 p-6">
-          <Outlet />
+      <div className="main">
+        <div className="sticky top-0 z-20">
+          <header className="top">
+            <button type="button" className="cmdk" onClick={() => setPaletteOpen(true)} aria-label={isAdmin ? "Search platform pages" : "Search pages or ask Lemtik"}>
+              {isAdmin ? <Search size={15} strokeWidth={1.75} className="ic" /> : <Sparkles size={15} strokeWidth={1.75} className="ic" />}
+              <span className="trunc">{isAdmin ? "Search platform pages" : "Search, or ask Lemtik — “patrols with late check-ins”"}</span>
+              <span className="kbd">⌘K</span>
+            </button>
+            <div className="flex-auto" />
+            <Clock />
+            {!isAdmin && <NotificationBell />}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="me" aria-label="Account menu">
+                  <Avatar name={name} size="lg" own />
+                  <span className="max-[640px]:hidden">
+                    <b>{name}</b>
+                    <small>{access.roleLabel}</small>
+                  </span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <span className="block trunc">{name}</span>
+                  {access.email && access.email !== name ? <span className="block t3 text-[11px] font-normal trunc">{access.email}</span> : null}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={signOut}>
+                  <LogOut size={14} strokeWidth={1.75} />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </header>
+          {!isAdmin && <PriorityBar orgId={access.orgId} />}
         </div>
-      </main>
+
+        <main className="page">
+          <Outlet />
+        </main>
+      </div>
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        groups={paletteGroups}
+        canAsk={!isAdmin && groups.some((g) => g.items.some((i) => i.to === "/app"))}
+        placeholder={isAdmin ? "Search platform pages…" : "Search pages, or ask Lemtik…"}
+      />
     </div>
   );
 }

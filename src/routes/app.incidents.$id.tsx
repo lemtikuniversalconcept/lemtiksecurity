@@ -1872,7 +1872,7 @@ function NotesPanel({
         {notes.map((n) => (
           <div
             key={n.id}
-            className={`rounded-md border px-3 py-2 ${n.client_visible ? "border-accent/40 bg-accent/5" : "border-border bg-surface"}`}
+            className={`rounded-md border px-3 py-2 ${n.client_visible ? "border-primary/40 bg-primary/5" : "border-border bg-surface"}`}
           >
             <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
               <span>

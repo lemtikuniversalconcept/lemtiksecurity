@@ -101,7 +101,7 @@ function MemberPage() {
                 { label: "Inc", value: profileStats.incidents.length, tone: "bg-primary/80" },
                 { label: "Chk", value: profileStats.checkins.length, tone: "bg-resolved/80" },
                 { label: "Aud", value: profileStats.audit.length, tone: "bg-muted-foreground/70" },
-                { label: "Not", value: profileStats.notes.length, tone: "bg-accent/80" },
+                { label: "Not", value: profileStats.notes.length, tone: "bg-primary/80" },
               ].map((item) => (
                 <div key={item.label} className="flex-1 flex flex-col items-center justify-end gap-1">
                   <div
@@ -133,7 +133,7 @@ function MemberPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card p-5 flex items-start gap-4">
-        <div className="grid h-14 w-14 place-items-center rounded-full bg-accent/20 border border-accent/40 text-sm font-bold text-accent overflow-hidden">
+        <div className="grid h-14 w-14 place-items-center rounded-full bg-primary/15 border border-primary/40 text-sm font-bold text-primary overflow-hidden">
           {p?.photo_url ? <img src={p.photo_url} alt={name} className="h-full w-full object-cover" /> : initials}
         </div>
         <div className="flex-1">

@@ -317,7 +317,7 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
                     <tr key={m.id} className={`hover:bg-surface/60 ${isActive ? "" : "opacity-60"}`}>
                       <td className="px-4 py-3">
                         <Link to="/app/users/$id" params={{ id: m.user_id }} className="flex items-center gap-3 group">
-                          <div className="grid h-8 w-8 place-items-center rounded-full bg-accent/20 border border-accent/40 text-[10px] font-bold text-accent">
+                          <div className="grid h-8 w-8 place-items-center rounded-full bg-primary/15 border border-primary/40 text-[10px] font-bold text-primary">
                             {name.split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase()}
                           </div>
                           <div>

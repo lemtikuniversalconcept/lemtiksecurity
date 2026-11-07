@@ -105,6 +105,24 @@ export const listIncidents = createServerFn({ method: "GET" })
     return data;
   });
 
+// Cheap enough to run in the app shell on every page: an open-incident count plus the single
+// most severe, longest-open incident for the priority bar.
+export const getOpenIncidentSummary = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    const { data, error, count } = await context.supabase
+      .from("incidents")
+      .select("id, code, title, type, severity, status, zone, location, reported_at", { count: "exact" })
+      .eq("organisation_id", orgId)
+      .not("status", "in", "(resolved,closed)")
+      .order("severity", { ascending: false })
+      .order("reported_at", { ascending: true })
+      .limit(1);
+    if (error) throwSafeError("incidents.openSummary", error, "Unable to load open incidents.");
+    return { openCount: count ?? 0, top: data?.[0] ?? null };
+  });
+
 export const createIncident = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => incidentInput.parse(d))
