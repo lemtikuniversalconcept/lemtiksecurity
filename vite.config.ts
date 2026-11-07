@@ -4,12 +4,10 @@ import { nitro } from "nitro/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { TanStackRouterVite } from "@tanstack/router-plugin/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
-    TanStackRouterVite(),
     tanstackStart(),
     nitro(),
     tailwindcss(),
@@ -49,6 +47,8 @@ export default defineConfig({
     }),
   ],
   ssr: {
-    noExternal: true,
+    // Inlining every dependency is only wanted for the production server bundle; in dev it
+    // pushes CJS-only packages through Vite's ESM module runner and every request 500s.
+    noExternal: command === "build" ? true : undefined,
   },
-});
+}));
