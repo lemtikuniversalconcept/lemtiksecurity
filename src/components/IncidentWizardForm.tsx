@@ -1,26 +1,39 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { severityMeta, typeMeta, type IncidentType, type Severity } from "@/lib/mockData";
 import {
+  ArrowLeft,
+  ArrowRight,
   Camera,
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle2,
-  CloudUpload,
+  CreditCard,
+  Ellipsis,
+  Eye,
   FileText,
-  Grip,
+  Flame,
+  Footprints,
+  Hand,
+  HeartPulse,
+  ListChecks,
   Loader2,
-  MapPin,
+  LocateFixed,
   Mic,
-  Move,
-  Sparkles,
+  OctagonAlert,
+  ShieldAlert,
   Square,
   Trash2,
+  TriangleAlert,
+  Upload,
+  UserX,
+  Users,
   Video,
+  WifiOff,
   X,
-  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import type { IncidentSubmitPayload } from "@/components/IncidentReportForm";
+import { LocationPicker, useMapboxToken } from "@/components/LocationPicker";
+import { Sev } from "@/components/nw";
 
 type SavedLocation = { id: string; name: string; coord_x: number | null; coord_y: number | null };
 type EvidenceKind = "image" | "video" | "audio" | "document";
@@ -34,7 +47,29 @@ const MAX: Record<EvidenceKind, number> = {
 };
 const LIMITS: Record<EvidenceKind, number> = { image: 5, video: 2, audio: 1, document: 3 };
 
-const STEP_TITLES = ["Basic Info", "Location", "People", "Evidence", "Review"] as const;
+const STEPS = [
+  { title: "Basics", hint: "Type, severity, what happened" },
+  { title: "Location", hint: "Map pin, block, floor" },
+  { title: "People", hint: "Suspects, victims, witnesses" },
+  { title: "Evidence", hint: "Photos, video, voice notes" },
+  { title: "Review", hint: "Confirm and submit" },
+] as const;
+
+const TYPE_ICON: Record<IncidentType, LucideIcon> = {
+  intrusion: Footprints,
+  theft: Hand,
+  robbery: OctagonAlert,
+  armed_attack: ShieldAlert,
+  kidnapping: UserX,
+  medical: HeartPulse,
+  fire: Flame,
+  suspicious: Eye,
+  civil_unrest: Users,
+  vandalism: TriangleAlert,
+  fraud_scam: CreditCard,
+  cyber_incident: WifiOff,
+  other: Ellipsis,
+};
 
 export function IncidentWizardForm({
   organisationId,
@@ -87,8 +122,7 @@ export function IncidentWizardForm({
   const photoIn = useRef<HTMLInputElement>(null);
   const videoIn = useRef<HTMLInputElement>(null);
   const docIn = useRef<HTMLInputElement>(null);
-  const descRef = useRef<HTMLTextAreaElement>(null);
-  const dropRef = useRef<HTMLDivElement>(null);
+  const { data: tokenData } = useMapboxToken();
 
   const counts: Record<EvidenceKind, number> = {
     image: evidence.filter((e) => e.kind === "image").length,
@@ -104,49 +138,61 @@ export function IncidentWizardForm({
     [],
   );
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const captureGps = () => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      toast.error("This browser can’t share its location.");
+      return;
+    }
     setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setForm((f) => ({
-          ...f,
-          coord_x: pos.coords.longitude,
-          coord_y: pos.coords.latitude,
-        }));
+        setForm((f) => ({ ...f, coord_x: Number(pos.coords.longitude.toFixed(6)), coord_y: Number(pos.coords.latitude.toFixed(6)) }));
         setGpsLoading(false);
       },
-      () => setGpsLoading(false),
+      () => {
+        setGpsLoading(false);
+        toast.error("Couldn’t get your location. Check the browser’s location permission.");
+      },
       { enableHighAccuracy: true, timeout: 10_000 },
     );
   };
 
   const uploadFile = async (file: File, kind: EvidenceKind) => {
     if (file.size > MAX[kind]) {
-      alert(`${file.name} exceeds ${Math.round(MAX[kind] / 1024 / 1024)}MB limit.`);
+      toast.error(`${file.name} is over the ${Math.round(MAX[kind] / 1024 / 1024)} MB limit.`);
       return;
     }
     if (counts[kind] >= LIMITS[kind]) {
-      alert(`Maximum ${LIMITS[kind]} ${kind} file(s).`);
+      toast.error(`You can add up to ${LIMITS[kind]} ${kind === "image" ? "photos" : kind === "audio" ? "voice note" : `${kind}s`}.`);
       return;
     }
     setUploadingKind(kind);
     const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
     const path = `${organisationId}/draft/${crypto.randomUUID()}.${ext}`;
-    const { error: upErr } = await supabase.storage.from("incident-evidence").upload(path, file, {
-      upsert: false,
-      contentType: file.type,
-    });
+    const { error: upErr } = await supabase.storage.from("incident-evidence").upload(path, file, { upsert: false, contentType: file.type });
     setUploadingKind(null);
     if (upErr) {
-      alert(`Upload failed: ${upErr.message}`);
+      toast.error("Upload failed", { description: upErr.message });
       return;
     }
     const previewUrl = kind === "image" ? URL.createObjectURL(file) : undefined;
     setEvidence((prev) => [...prev, { path, kind, size: file.size, name: file.name, previewUrl }]);
   };
 
-  const addDroppedFiles = async (files: FileList | File[]) => {
+  const removeEvidence = async (item: EvidenceItem) => {
+    setEvidence((prev) => prev.filter((e) => e.path !== item.path));
+    if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    const { error: rmErr } = await supabase.storage.from("incident-evidence").remove([item.path]);
+    if (rmErr) console.warn("[incident-wizard] draft evidence not removed from storage", rmErr);
+  };
+
+  const addFiles = async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
       if (file.type.startsWith("image/")) await uploadFile(file, "image");
       else if (file.type.startsWith("video/")) await uploadFile(file, "video");
@@ -155,9 +201,18 @@ export function IncidentWizardForm({
     }
   };
 
+  const stopRecording = () => {
+    mediaRef.current?.stop();
+    setRecording(false);
+    if (recTimer.current) {
+      window.clearInterval(recTimer.current);
+      recTimer.current = null;
+    }
+  };
+
   const startRecording = async () => {
     if (counts.audio >= LIMITS.audio) {
-      alert("Maximum 1 voice note.");
+      toast.error("You can add one voice note.");
       return;
     }
     try {
@@ -169,8 +224,7 @@ export function IncidentWizardForm({
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: "audio/webm" });
-        await uploadFile(file, "audio");
+        await uploadFile(new File([blob], `voice-${Date.now()}.webm`, { type: "audio/webm" }), "audio");
       };
       rec.start();
       setRecording(true);
@@ -185,28 +239,8 @@ export function IncidentWizardForm({
         });
       }, 1000);
     } catch {
-      alert("Microphone access denied.");
+      toast.error("Microphone access was denied.");
     }
-  };
-
-  const stopRecording = () => {
-    mediaRef.current?.stop();
-    setRecording(false);
-    if (recTimer.current) {
-      window.clearInterval(recTimer.current);
-      recTimer.current = null;
-    }
-  };
-
-  const dropPosToCoords = (ev: MouseEvent<HTMLDivElement>) => {
-    const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-    const y = Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height));
-    setForm((f) => ({
-      ...f,
-      coord_x: Number((3.2 + x * 0.5).toFixed(6)),
-      coord_y: Number((6.55 - y * 0.2).toFixed(6)),
-    }));
   };
 
   const pickSavedLocation = (id: string) => {
@@ -221,367 +255,16 @@ export function IncidentWizardForm({
     }));
   };
 
-  const updateDescription = (next: string) => setForm((f) => ({ ...f, description: next.slice(0, 1000) }));
+  const coord: [number, number] | null = form.coord_x != null && form.coord_y != null ? [Number(form.coord_x), Number(form.coord_y)] : null;
+  const zoneOptions = Array.from(new Set([defaultZone, ...savedLocations.map((l) => l.name)].filter(Boolean)));
 
-  const renderStep = () => {
-    switch (step) {
-      case 0:
-        return (
-          <div className="space-y-4">
-            <Field label="Incident type">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(Object.keys(typeMeta) as IncidentType[]).map((type) => {
-                  const active = form.type === type;
-                  const icon = type === "medical" ? "⚕" : type === "fire" ? "🔥" : type === "intrusion" ? "🛑" : type === "robbery" ? "💥" : "•";
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, type }))}
-                      className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${
-                        active ? "border-primary bg-primary/10 text-primary" : "border-border bg-surface hover:bg-surface-2"
-                      }`}
-                    >
-                      <span className="text-base">{icon}</span>
-                      <div>
-                        <div className="text-sm font-medium">{typeMeta[type]}</div>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Select incident class</div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </Field>
-
-            <Field label="Severity">
-              <div className="grid grid-cols-5 gap-2">
-                {([1, 2, 3, 4, 5] as Severity[]).map((severity) => {
-                  const meta = severityMeta[severity];
-                  const active = form.severity === severity;
-                  return (
-                    <button
-                      key={severity}
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, severity }))}
-                      className={`rounded-xl border px-3 py-3 text-left ${
-                        active ? `border-${meta.token} bg-${meta.token}/15` : "border-border bg-surface"
-                      }`}
-                    >
-                      <div className={`text-sm font-semibold text-${meta.token}`}>S{severity}</div>
-                      <div className="text-xs">{meta.label}</div>
-                      <div className="text-[10px] text-muted-foreground">{meta.sublabel}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </Field>
-
-            <Field label="Title">
-              <input
-                className="input"
-                maxLength={100}
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="Short description"
-              />
-            </Field>
-
-            <Field label={`Description (${form.description.length}/1000)`}>
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-2">
-                  <ToolbarButton
-                    label="Bold"
-                    onClick={() => insertFormatting(descRef, "**", "**", updateDescription)}
-                  />
-                  <ToolbarButton
-                    label="Italic"
-                    onClick={() => insertFormatting(descRef, "_", "_", updateDescription)}
-                  />
-                  <ToolbarButton
-                    label="Bullets"
-                    onClick={() => insertFormatting(descRef, "- ", "", updateDescription)}
-                  />
-                </div>
-                <textarea
-                  ref={descRef}
-                  className="input min-h-36 resize-none"
-                  maxLength={1000}
-                  value={form.description}
-                  onChange={(e) => updateDescription(e.target.value)}
-                  placeholder="Describe what happened, what was seen, and any immediate risks."
-                />
-                <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                  Rich text is captured as structured plain text for reliable incident processing and review.
-                </div>
-              </div>
-            </Field>
-          </div>
-        );
-      case 1:
-        return (
-          <div className="space-y-4">
-            <Field label="Saved location">
-              <select className="input" value={form.location_id} onChange={(e) => pickSavedLocation(e.target.value)}>
-                <option value="">Use manual location</option>
-                {savedLocations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="GPS / Manual pin">
-              <div className="grid gap-4 lg:grid-cols-[1fr_0.75fr]">
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={captureGps}
-                    disabled={gpsLoading}
-                    className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm hover:bg-surface-2 disabled:opacity-60"
-                  >
-                    {gpsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
-                    Detect GPS
-                  </button>
-
-                  <div
-                    ref={dropRef}
-                    onClick={dropPosToCoords}
-                    className="relative h-56 overflow-hidden rounded-2xl border border-border bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.14),transparent_25%),linear-gradient(180deg,rgba(255,255,255,0.05),transparent)]"
-                  >
-                    <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:20px_20px]" />
-                    <div className="absolute left-4 top-4 rounded-full border border-border bg-card px-3 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Click to drop pin
-                    </div>
-                    {form.coord_x != null && form.coord_y != null ? (
-                      <div
-                        className="absolute -translate-x-1/2 -translate-y-1/2"
-                        style={{
-                          left: `${((Number(form.coord_x) - 3.2) / 0.5) * 100}%`,
-                          top: `${((6.55 - Number(form.coord_y)) / 0.2) * 100}%`,
-                        }}
-                      >
-                        <div className="grid h-10 w-10 place-items-center rounded-full border border-critical/60 bg-critical/15 text-critical">
-                          <MapPin className="h-5 w-5" />
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <Field label="Indoor?">
-                    <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-                      <input type="checkbox" checked={form.indoor} onChange={(e) => setForm((f) => ({ ...f, indoor: e.target.checked }))} />
-                      Indoor location
-                    </label>
-                  </Field>
-                  <Field label="Floor / zone">
-                    <input
-                      className="input"
-                      value={form.floor}
-                      onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value }))}
-                      placeholder="e.g. Floor 3, NW Wing"
-                      disabled={!form.indoor}
-                    />
-                  </Field>
-                  <Field label="Address fallback">
-                    <input
-                      className="input"
-                      value={form.addressFallback}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, addressFallback: e.target.value, location: e.target.value }))
-                      }
-                      placeholder="Street address or landmark"
-                    />
-                  </Field>
-                  <div className="rounded-xl border border-border bg-surface p-3 text-xs text-muted-foreground">
-                    {form.coord_x != null && form.coord_y != null ? (
-                      <>
-                        Selected coordinates: <span className="font-mono text-foreground">{Number(form.coord_y).toFixed(5)}, {Number(form.coord_x).toFixed(5)}</span>
-                      </>
-                    ) : (
-                      "No coordinates selected yet."
-                    )}
-                  </div>
-                </div>
-              </div>
-            </Field>
-
-            <Field label="Zone">
-              <select className="input" value={form.zone} onChange={(e) => setForm((f) => ({ ...f, zone: e.target.value }))}>
-                {Array.from(
-                  new Set([
-                    defaultZone,
-                    ...savedLocations.map((loc) => loc.name),
-                    "Lekki Phase 1",
-                    "VI Waterfront",
-                    "Ikoyi Heights",
-                    "Ajah Estate",
-                  ]),
-                ).map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-        );
-      case 2:
-        return (
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Number of suspects">
-                <input type="number" min={0} max={999} className="input" value={form.suspect_count} onChange={(e) => setForm((f) => ({ ...f, suspect_count: e.target.value }))} />
-              </Field>
-              <Field label="Victim name">
-                <input className="input" value={form.victim_name} onChange={(e) => setForm((f) => ({ ...f, victim_name: e.target.value }))} />
-              </Field>
-            </div>
-            <Field label="Suspect description">
-              <textarea
-                className="input min-h-28 resize-none"
-                value={form.suspect_description}
-                onChange={(e) => setForm((f) => ({ ...f, suspect_description: e.target.value }))}
-                placeholder="Appearance, clothing, vehicle, direction of travel, distinguishing marks..."
-              />
-            </Field>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Victim contact">
-                <input className="input" value={form.victim_contact} onChange={(e) => setForm((f) => ({ ...f, victim_contact: e.target.value }))} />
-              </Field>
-              <Field label="Witnesses">
-                <input className="input" value={form.witnesses} onChange={(e) => setForm((f) => ({ ...f, witnesses: e.target.value }))} />
-              </Field>
-            </div>
-          </div>
-        );
-      case 3:
-        return (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border bg-surface p-3 text-xs text-muted-foreground">
-              Drag and drop files below or use the action buttons. Limits: 5 photos, 2 videos, 1 voice note, 3 documents.
-            </div>
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (e.dataTransfer.files.length > 0) void addDroppedFiles(e.dataTransfer.files);
-              }}
-              className="rounded-2xl border border-dashed border-border bg-surface/60 p-4"
-            >
-              <div className="flex flex-wrap gap-2">
-                <EvBtn icon={Camera} label={`Photos (${counts.image}/${LIMITS.image})`} onClick={() => photoIn.current?.click()} loading={uploadingKind === "image"} />
-                <EvBtn icon={Video} label={`Videos (${counts.video}/${LIMITS.video})`} onClick={() => videoIn.current?.click()} loading={uploadingKind === "video"} />
-                {recording ? (
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    className="inline-flex items-center gap-2 rounded-xl border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical"
-                  >
-                    <Square className="h-3.5 w-3.5" />
-                    Stop ({recSeconds}s)
-                  </button>
-                ) : (
-                  <EvBtn icon={Mic} label={`Voice note (${counts.audio}/${LIMITS.audio})`} onClick={startRecording} loading={uploadingKind === "audio"} />
-                )}
-                <EvBtn icon={FileText} label={`Documents (${counts.document}/${LIMITS.document})`} onClick={() => docIn.current?.click()} loading={uploadingKind === "document"} />
-              </div>
-              <div className="mt-3 flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-                <CloudUpload className="h-3.5 w-3.5" />
-                Drop files here for automatic upload and classification
-              </div>
-            </div>
-
-            <input ref={photoIn} type="file" accept="image/*" hidden multiple onChange={(e) => e.target.files?.[0] && addDroppedFiles(e.target.files)} />
-            <input ref={videoIn} type="file" accept="video/*" hidden multiple onChange={(e) => e.target.files?.[0] && addDroppedFiles(e.target.files)} />
-            <input ref={docIn} type="file" accept=".pdf,application/pdf,.doc,.docx,.txt" hidden multiple onChange={(e) => e.target.files?.[0] && addDroppedFiles(e.target.files)} />
-
-            <div className="grid gap-2">
-              {evidence.length === 0 ? (
-                <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">No evidence added yet.</div>
-              ) : (
-                evidence.map((item) => (
-                  <div key={item.path} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2">
-                    {item.previewUrl ? (
-                      <img src={item.previewUrl} alt="" className="h-10 w-10 rounded object-cover" />
-                    ) : (
-                      <div className="grid h-10 w-10 place-items-center rounded bg-card text-[10px] uppercase text-muted-foreground">
-                        {item.kind[0]}
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{item.name}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {(item.size / 1024).toFixed(0)} KB · {item.kind}
-                      </div>
-                    </div>
-                    <button type="button" onClick={() => removeEvidence(item)} className="rounded-md border border-border bg-card p-2 text-muted-foreground hover:text-critical">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        );
-      default:
-        return (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-border bg-surface p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Review</div>
-              <h3 className="mt-1 text-lg font-semibold">Confirm incident before submission</h3>
-              <p className="mt-1 text-sm text-muted-foreground">Submitting saves the incident and takes you straight to the AI analysis view.</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <SummaryCard label="Type" value={typeMeta[form.type]} />
-              <SummaryCard label="Severity" value={`S${form.severity} · ${severityMeta[form.severity].label}`} />
-              <SummaryCard label="Title" value={form.title || "Untitled"} />
-              <SummaryCard label="Location" value={form.addressFallback || form.location || "Unspecified"} />
-              <SummaryCard label="Zone" value={form.zone} />
-              <SummaryCard label="Floor" value={form.indoor && form.floor ? form.floor : "Not set"} />
-              <SummaryCard label="Coordinates" value={form.coord_x != null && form.coord_y != null ? `${Number(form.coord_y).toFixed(5)}, ${Number(form.coord_x).toFixed(5)}` : "None"} />
-              <SummaryCard label="People" value={`${form.suspect_count || 0} suspect(s)`} />
-              <SummaryCard label="Evidence" value={`${evidence.length} item(s)`} />
-            </div>
-            {form.indoor && form.floor && (
-              <SummaryCard label="Floor / indoor note" value={form.floor} wide />
-            )}
-            {form.description && (
-              <div className="rounded-2xl border border-border bg-surface p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Description preview</div>
-                <div className="mt-2 whitespace-pre-wrap text-sm leading-6">{form.description}</div>
-              </div>
-            )}
-            <div className="rounded-2xl border border-border bg-surface p-4 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2 text-foreground">
-                <CheckCircle2 className="h-4 w-4 text-resolved" />
-                Ready to submit and queue AI analysis
-              </div>
-              <div className="mt-2">
-                The incident payload includes people, location, severity, and evidence attachments already uploaded to storage.
-                After submission, command intake continues asynchronously while analysis and dispatch planning complete.
-              </div>
-              {loading && (
-                <div className="mt-3 flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Logging incident and starting AI analysis...
-                </div>
-              )}
-            </div>
-          </div>
-        );
-    }
-  };
-
-  const payload = useMemo<IncidentSubmitPayload>(() => {
-    return {
+  const payload = useMemo<IncidentSubmitPayload>(
+    () => ({
       type: form.type,
       severity: form.severity,
       title: form.title || undefined,
       location: form.location.trim() || form.addressFallback.trim() || "Unspecified",
-      zone: form.zone,
+      zone: form.zone.trim() || "Unspecified",
       floor: form.indoor && form.floor ? form.floor.trim() : undefined,
       description: form.description.trim() || undefined,
       coord_x: form.coord_x,
@@ -596,225 +279,396 @@ export function IncidentWizardForm({
       victim_contact: form.victim_contact || undefined,
       witnesses: form.witnesses || undefined,
       evidence: evidence.map(({ path, kind, size, name }) => ({ path, kind, size, name })),
-    };
-  }, [evidence, form]);
+    }),
+    [evidence, form],
+  );
+
+  const sevLabel = severityMeta[form.severity as Severity];
+  const last = step === STEPS.length - 1;
+
+  const renderStep = () => {
+    switch (step) {
+      case 0:
+        return (
+          <>
+            <div className="fl">
+              <span className="lbl" id="wiz-type">Incident type</span>
+              <div role="radiogroup" aria-labelledby="wiz-type" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(118px,100%),1fr))", gap: 8 }}>
+                {(Object.keys(typeMeta) as IncidentType[]).map((type) => {
+                  const active = form.type === type;
+                  const Icon = TYPE_ICON[type] ?? Ellipsis;
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setForm((f) => ({ ...f, type }))}
+                      className="card col g6 text-left"
+                      style={{ padding: 12, alignItems: "flex-start", ...(active ? { borderColor: "var(--blue-hi)", background: "var(--blue-bg)", boxShadow: "0 0 0 1px var(--blue-hi) inset" } : {}) }}
+                    >
+                      <Icon size={18} strokeWidth={1.75} className="ic" style={{ color: active ? "var(--blue-hi)" : "var(--tx-2)" }} />
+                      <span style={{ fontSize: 13, fontWeight: 550 }}>{typeMeta[type]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="fl">
+              <span className="lbl" id="wiz-sev">Severity</span>
+              <div role="radiogroup" aria-labelledby="wiz-sev" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(104px,100%),1fr))", gap: 8 }}>
+                {([5, 4, 3, 2, 1] as Severity[]).map((s) => {
+                  const active = form.severity === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setForm((f) => ({ ...f, severity: s }))}
+                      className="card col g4 text-left"
+                      style={{ padding: "10px 12px", alignItems: "flex-start", ...(active ? { boxShadow: `0 0 0 2px var(--s${s}) inset`, borderColor: "transparent" } : {}) }}
+                    >
+                      <Sev level={s} label />
+                      <span className="t3" style={{ fontSize: 12 }}>{severityMeta[s].sublabel}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="fl">
+              <label htmlFor="wiz-title">Title</label>
+              <input id="wiz-title" className="in" maxLength={100} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Short summary, e.g. Smoke from generator room" />
+            </div>
+            <div className="fl">
+              <label htmlFor="wiz-desc">
+                Description <span className="t3">· {form.description.length}/1000</span>
+              </label>
+              <textarea
+                id="wiz-desc"
+                className="in"
+                rows={5}
+                maxLength={1000}
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value.slice(0, 1000) }))}
+                placeholder="What happened, what was seen, and any immediate risks."
+              />
+            </div>
+          </>
+        );
+      case 1:
+        return (
+          <>
+            <div className="fl">
+              <label htmlFor="wiz-saved">Saved location</label>
+              <select id="wiz-saved" className="in" value={form.location_id} onChange={(e) => pickSavedLocation(e.target.value)}>
+                <option value="">Not one of our saved locations</option>
+                {savedLocations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>{loc.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="fl">
+              <span className="lbl">Exact position</span>
+              <LocationPicker value={coord} center={coord} onChange={([lng, lat]) => setForm((f) => ({ ...f, coord_x: lng, coord_y: lat }))} />
+              {tokenData && !tokenData.token && (
+                <span className="t3" style={{ fontSize: 12 }}>The map isn’t available on this deployment — use your current GPS position or a saved location.</span>
+              )}
+              <div className="row g8 wrap">
+                <button type="button" onClick={captureGps} disabled={gpsLoading} className="b b-sec">
+                  {gpsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed size={14} strokeWidth={1.75} />}
+                  Use my current position
+                </button>
+                {coord ? (
+                  <>
+                    <span className="mono t2" style={{ fontSize: 12 }}>{coord[1].toFixed(5)}, {coord[0].toFixed(5)}</span>
+                    <button type="button" className="b b-sm b-gh" onClick={() => setForm((f) => ({ ...f, coord_x: undefined, coord_y: undefined }))}>
+                      Clear
+                    </button>
+                  </>
+                ) : (
+                  <span className="t3" style={{ fontSize: 12 }}>No position yet — the incident will be listed but not mapped.</span>
+                )}
+              </div>
+            </div>
+            <div className="row g12 wrap">
+              <div className="fl" style={{ flex: "1 1 220px" }}>
+                <label htmlFor="wiz-address">Address or landmark</label>
+                <input id="wiz-address" className="in" value={form.addressFallback} onChange={(e) => setForm((f) => ({ ...f, addressFallback: e.target.value, location: e.target.value }))} placeholder="e.g. Block 12, Flat 3B" />
+              </div>
+              <div className="fl" style={{ flex: "1 1 180px" }}>
+                <label htmlFor="wiz-zone">Zone</label>
+                <input id="wiz-zone" className="in" list="wiz-zones" value={form.zone} onChange={(e) => setForm((f) => ({ ...f, zone: e.target.value }))} placeholder="e.g. Gate C" />
+                <datalist id="wiz-zones">
+                  {zoneOptions.map((z) => (
+                    <option key={z} value={z} />
+                  ))}
+                </datalist>
+              </div>
+            </div>
+            <div className="row g12 wrap" style={{ alignItems: "flex-end" }}>
+              <label className="row g8" style={{ fontSize: 13 }}>
+                <input type="checkbox" checked={form.indoor} onChange={(e) => setForm((f) => ({ ...f, indoor: e.target.checked }))} />
+                Indoors
+              </label>
+              <div className="fl" style={{ flex: "1 1 200px" }}>
+                <label htmlFor="wiz-floor">Floor or wing</label>
+                <input id="wiz-floor" className="in" value={form.floor} onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value }))} placeholder="e.g. Floor 3, NW wing" disabled={!form.indoor} />
+              </div>
+            </div>
+          </>
+        );
+      case 2:
+        return (
+          <>
+            <div className="row g12 wrap">
+              <div className="fl" style={{ flex: "1 1 160px" }}>
+                <label htmlFor="wiz-suspects">Number of suspects</label>
+                <input id="wiz-suspects" type="number" min={0} max={999} className="in" value={form.suspect_count} onChange={(e) => setForm((f) => ({ ...f, suspect_count: e.target.value }))} />
+              </div>
+              <div className="fl" style={{ flex: "2 1 240px" }}>
+                <label htmlFor="wiz-victim">Victim name</label>
+                <input id="wiz-victim" className="in" value={form.victim_name} onChange={(e) => setForm((f) => ({ ...f, victim_name: e.target.value }))} />
+              </div>
+            </div>
+            <div className="fl">
+              <label htmlFor="wiz-suspect-desc">Suspect description</label>
+              <textarea id="wiz-suspect-desc" className="in" rows={4} value={form.suspect_description} onChange={(e) => setForm((f) => ({ ...f, suspect_description: e.target.value }))} placeholder="Appearance, clothing, vehicle, direction of travel, distinguishing marks" />
+            </div>
+            <div className="row g12 wrap">
+              <div className="fl" style={{ flex: "1 1 220px" }}>
+                <label htmlFor="wiz-contact">Victim contact</label>
+                <input id="wiz-contact" className="in" value={form.victim_contact} onChange={(e) => setForm((f) => ({ ...f, victim_contact: e.target.value }))} />
+              </div>
+              <div className="fl" style={{ flex: "1 1 220px" }}>
+                <label htmlFor="wiz-witnesses">Witnesses</label>
+                <input id="wiz-witnesses" className="in" value={form.witnesses} onChange={(e) => setForm((f) => ({ ...f, witnesses: e.target.value }))} />
+              </div>
+            </div>
+          </>
+        );
+      case 3:
+        return (
+          <>
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files);
+              }}
+              className="card col g12"
+              style={{ padding: 16, borderStyle: "dashed", borderColor: "var(--line-3)" }}
+            >
+              <div className="row g8 wrap">
+                <EvBtn icon={Camera} label={`Photos ${counts.image}/${LIMITS.image}`} onClick={() => photoIn.current?.click()} loading={uploadingKind === "image"} />
+                <EvBtn icon={Video} label={`Videos ${counts.video}/${LIMITS.video}`} onClick={() => videoIn.current?.click()} loading={uploadingKind === "video"} />
+                {recording ? (
+                  <button type="button" onClick={stopRecording} className="b b-red">
+                    <Square size={13} strokeWidth={2} /> Stop recording · {recSeconds}s
+                  </button>
+                ) : (
+                  <EvBtn icon={Mic} label={`Voice note ${counts.audio}/${LIMITS.audio}`} onClick={startRecording} loading={uploadingKind === "audio"} />
+                )}
+                <EvBtn icon={FileText} label={`Documents ${counts.document}/${LIMITS.document}`} onClick={() => docIn.current?.click()} loading={uploadingKind === "document"} />
+              </div>
+              <span className="row g6 t3" style={{ fontSize: 12 }}>
+                <Upload size={13} strokeWidth={1.75} /> Or drop files here. Up to 5 photos, 2 videos, 1 voice note and 3 documents.
+              </span>
+            </div>
+            <input ref={photoIn} type="file" accept="image/*" hidden multiple onChange={(e) => e.target.files?.[0] && addFiles(e.target.files)} />
+            <input ref={videoIn} type="file" accept="video/*" hidden multiple onChange={(e) => e.target.files?.[0] && addFiles(e.target.files)} />
+            <input ref={docIn} type="file" accept=".pdf,application/pdf,.doc,.docx,.txt" hidden multiple onChange={(e) => e.target.files?.[0] && addFiles(e.target.files)} />
+            {evidence.length === 0 ? (
+              <div className="empty">No evidence added yet. You can also add it later from the incident.</div>
+            ) : (
+              <div className="pn list">
+                {evidence.map((item) => (
+                  <div key={item.path} className="row g10" style={{ padding: "8px 12px" }}>
+                    {item.previewUrl ? (
+                      <img src={item.previewUrl} alt="" className="h-10 w-10 rounded object-cover" />
+                    ) : (
+                      <span className="av av-lg" style={{ borderRadius: 8 }}>{item.kind === "audio" ? <Mic size={14} strokeWidth={1.75} /> : item.kind === "video" ? <Video size={14} strokeWidth={1.75} /> : <FileText size={14} strokeWidth={1.75} />}</span>
+                    )}
+                    <div className="f1">
+                      <div className="trunc" style={{ fontWeight: 550 }}>{item.name}</div>
+                      <div className="t3 mono" style={{ fontSize: 11 }}>{(item.size / 1024).toFixed(0)} KB · {item.kind}</div>
+                    </div>
+                    <button type="button" onClick={() => void removeEvidence(item)} className="ibtn" style={{ width: 30, height: 30 }} aria-label={`Remove ${item.name}`}>
+                      <Trash2 size={14} strokeWidth={1.75} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        );
+      default:
+        return (
+          <>
+            <dl className="kv card" style={{ margin: 0, padding: "12px 14px", gap: "8px 18px" }}>
+              <dt>Type</dt>
+              <dd>{typeMeta[form.type]}</dd>
+              <dt>Severity</dt>
+              <dd><Sev level={form.severity} label /></dd>
+              <dt>Title</dt>
+              <dd>{form.title || <span className="t3">Untitled</span>}</dd>
+              <dt>Location</dt>
+              <dd>{form.addressFallback || form.location || <span className="t3">Unspecified</span>}</dd>
+              <dt>Zone</dt>
+              <dd>{form.zone || <span className="t3">Unspecified</span>}</dd>
+              <dt>Floor</dt>
+              <dd>{form.indoor && form.floor ? form.floor : <span className="t3">Not set</span>}</dd>
+              <dt>Position</dt>
+              <dd className="mono">{coord ? `${coord[1].toFixed(5)}, ${coord[0].toFixed(5)}` : <span className="t3">Not mapped</span>}</dd>
+              <dt>People</dt>
+              <dd>{form.suspect_count || 0} suspect(s){form.victim_name ? ` · victim ${form.victim_name}` : ""}</dd>
+              <dt>Evidence</dt>
+              <dd>{evidence.length} file(s)</dd>
+            </dl>
+            {form.description && (
+              <div className="card" style={{ padding: "12px 14px" }}>
+                <span className="eyebrow">Description</span>
+                <p className="mt-1 whitespace-pre-wrap" style={{ fontSize: 13, lineHeight: 1.55 }}>{form.description}</p>
+              </div>
+            )}
+            <label className="row g8" style={{ fontSize: 13 }}>
+              <input type="checkbox" checked={form.client_visible} onChange={(e) => setForm((f) => ({ ...f, client_visible: e.target.checked }))} />
+              Visible to the client admin
+            </label>
+          </>
+        );
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-sm">
-      <div className="min-h-full p-4 sm:p-6">
-        <div className="mx-auto my-4 w-full max-w-5xl overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
-          <div className="border-b border-border/70 bg-gradient-to-r from-primary/10 via-transparent to-resolved/10 px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Log incident</div>
-                <h2 className="mt-1 text-lg font-semibold sm:text-xl">Step-by-step incident intake</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Create the report, attach evidence, and hand it directly into the AI command flow.</p>
-              </div>
-              <button onClick={onClose} className="rounded-full border border-border bg-surface p-2 text-muted-foreground hover:bg-surface-2">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-              {STEP_TITLES.map((title, idx) => (
-                <button
-                  key={title}
-                  type="button"
-                  onClick={() => setStep(idx)}
-                  className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-wider ${
-                    step === idx ? "border-primary bg-primary/10 text-primary" : "border-border bg-surface text-muted-foreground"
-                  }`}
-                >
-                  <span className="grid h-5 w-5 place-items-center rounded-full border border-current/20 text-[10px]">{idx + 1}</span>
-                  {title}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              onSubmit(payload);
-            }}
-            className="grid gap-5 px-4 py-4 sm:px-5 sm:py-5 lg:grid-cols-[1.2fr_0.8fr]"
-          >
-            <div className="space-y-5">
-              {renderStep()}
-
-              {error && <div className="rounded-xl border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">{error}</div>}
-
-              <div className="sticky bottom-0 z-20 -mx-4 border-t border-border/70 bg-card/95 px-4 pb-2 pt-4 backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:px-0 sm:pb-0">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setStep((s) => Math.max(0, s - 1))}
-                    disabled={step === 0}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs disabled:opacity-40"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" /> Back
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: "var(--ink-0)" }} role="dialog" aria-modal="true" aria-label="Log incident">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (last) onSubmit(payload);
+          else setStep((s) => Math.min(STEPS.length - 1, s + 1));
+        }}
+        className="mx-auto flex w-full flex-wrap items-start"
+        style={{ maxWidth: 1360, padding: 16, gap: 20 }}
+      >
+        <div className="col g12" style={{ flex: "1 1 240px", minWidth: 0, maxWidth: "100%" }}>
+          <button type="button" onClick={onClose} className="row g4 t3 hover:text-tx-1 self-start" style={{ fontSize: 12 }}>
+            <ArrowLeft size={13} strokeWidth={1.75} /> Incidents
+          </button>
+          <h2 style={{ fontSize: 15, fontWeight: 600 }}>Log incident</h2>
+          <ol className="col" style={{ listStyle: "none", margin: 0, padding: 0, gap: 2 }}>
+            {STEPS.map((s, idx) => {
+              const current = idx === step;
+              const done = idx < step;
+              return (
+                <li key={s.title}>
+                  <button type="button" onClick={() => setStep(idx)} className="row g10 w-full text-left" style={{ padding: "10px 12px", borderRadius: 8, background: current ? "var(--ink-2)" : undefined }} aria-current={current ? "step" : undefined}>
+                    <span
+                      className="grid place-items-center"
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: "50%",
+                        fontSize: 12,
+                        fontWeight: current ? 700 : 500,
+                        ...(current ? { background: "var(--blue)", color: "#fff" } : done ? { background: "var(--ok-bg)", color: "#7DE0AA" } : { border: "1.5px solid var(--line-3)", color: "var(--tx-3)" }),
+                      }}
+                    >
+                      {idx + 1}
+                    </span>
+                    <span className="col">
+                      <b style={{ fontSize: 13, fontWeight: current ? 600 : 500, color: current ? "var(--tx-1)" : "var(--tx-3)" }}>{s.title}</b>
+                      <span className="t3" style={{ fontSize: 12 }}>{s.hint}</span>
+                    </span>
                   </button>
-
-                  <div className="flex items-center gap-2">
-                    {step < STEP_TITLES.length - 1 ? (
-                      <button
-                        type="button"
-                        onClick={() => setStep((s) => Math.min(STEP_TITLES.length - 1, s + 1))}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-medium text-primary-foreground"
-                      >
-                        Next <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
-                    ) : (
-                      <button
-                        type="submit"
-                        disabled={loading || !!uploadingKind}
-                        className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-                      >
-                        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                        Submit & Get AI Analysis
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <aside className="hidden space-y-4 lg:block">
-              <div className="rounded-2xl border border-border bg-surface p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Live summary</div>
-                <div className="mt-3 space-y-2">
-                  <PreviewLine label="Type" value={typeMeta[form.type]} />
-                  <PreviewLine label="Severity" value={`S${form.severity} · ${severityMeta[form.severity].label}`} />
-                  <PreviewLine label="Location" value={form.addressFallback || form.location || "Unspecified"} />
-                  <PreviewLine label="Zone" value={form.zone} />
-                  <PreviewLine label="Floor" value={form.indoor && form.floor ? form.floor : "Not set"} />
-                  <PreviewLine label="Suspects" value={form.suspect_count || "0"} />
-                  <PreviewLine label="Evidence" value={`${evidence.length} file(s)`} />
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-surface p-4">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  <Move className="h-3.5 w-3.5" /> Location intelligence
-                </div>
-                <div className="mt-3 rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground">
-                  {form.coord_x != null && form.coord_y != null ? (
-                    <>
-                      Coordinates: <span className="font-mono text-foreground">{Number(form.coord_y).toFixed(5)}, {Number(form.coord_x).toFixed(5)}</span>
-                    </>
-                  ) : (
-                    "Drop a pin or detect GPS to seed the incident location."
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-surface p-4">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                  <Grip className="h-3.5 w-3.5" /> Evidence status
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <MiniChip label="Photos" value={`${counts.image}/5`} />
-                  <MiniChip label="Videos" value={`${counts.video}/2`} />
-                  <MiniChip label="Voice" value={`${counts.audio}/1`} />
-                  <MiniChip label="Docs" value={`${counts.document}/3`} />
-                </div>
-              </div>
-            </aside>
-          </form>
+                </li>
+              );
+            })}
+          </ol>
+          <div className="card t3" style={{ padding: "10px 12px", fontSize: 12 }}>
+            On submit, Lemtik saves the incident, starts AI analysis and opens the response view.
+          </div>
         </div>
-      </div>
+
+        <div className="col g16" style={{ flex: "999 1 520px", minWidth: 0 }}>
+          <div className="row g8">
+            <div className="f1">
+              <span className="eyebrow">Step {step + 1} of {STEPS.length}</span>
+              <h1 className="ph1" style={{ marginTop: 4 }}>
+                {["What happened?", "Where is it?", "Who was involved?", "Add evidence", "Check and submit"][step]}
+              </h1>
+            </div>
+            <button type="button" onClick={onClose} className="ibtn" aria-label="Close without saving">
+              <X size={16} strokeWidth={1.75} />
+            </button>
+          </div>
+          {renderStep()}
+          {error && (
+            <div className="tg tg-fail" role="alert" style={{ height: "auto", padding: "8px 10px", fontSize: 12.5, whiteSpace: "normal" }}>
+              {error}
+            </div>
+          )}
+          <div className="row g8 sticky bottom-0" style={{ borderTop: "1px solid var(--line-1)", paddingTop: 14, paddingBottom: 8, background: "var(--ink-0)" }}>
+            {step === 0 ? (
+              <button type="button" onClick={onClose} className="b b-gh">Cancel</button>
+            ) : (
+              <button type="button" onClick={() => setStep((s) => Math.max(0, s - 1))} className="b b-gh">
+                <ArrowLeft size={15} strokeWidth={1.75} /> Back
+              </button>
+            )}
+            <span className="flex-auto" />
+            {uploadingKind && (
+              <span className="row g6 t3" style={{ fontSize: 12 }}>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…
+              </span>
+            )}
+            <button type="submit" disabled={loading || !!uploadingKind} className="b b-pri b-lg">
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {last ? "Submit incident" : `Continue to ${STEPS[step + 1].title.toLowerCase()}`}
+              {!last && <ArrowRight size={15} strokeWidth={1.75} />}
+            </button>
+          </div>
+        </div>
+
+        <aside className="col g12 max-[900px]:hidden" style={{ flex: "1 1 300px", minWidth: 0, maxWidth: "100%" }}>
+          <section className="pn">
+            <div className="pn-h">
+              <ListChecks size={15} strokeWidth={1.75} className="ic" />
+              <h3>Live summary</h3>
+            </div>
+            <div className="pn-b">
+              <dl className="kv" style={{ margin: 0 }}>
+                <dt>Type</dt>
+                <dd>{typeMeta[form.type]}</dd>
+                <dt>Severity</dt>
+                <dd><Sev level={form.severity} label /></dd>
+                <dt>Location</dt>
+                <dd>{form.addressFallback || form.location || <span className="t3">Not set</span>}</dd>
+                <dt>Zone</dt>
+                <dd>{form.zone || <span className="t3">Not set</span>}</dd>
+                <dt>Position</dt>
+                <dd className="mono">{coord ? `${coord[1].toFixed(4)}, ${coord[0].toFixed(4)}` : <span className="t3">Not mapped</span>}</dd>
+                <dt>Suspects</dt>
+                <dd>{form.suspect_count || "0"}</dd>
+                <dt>Evidence</dt>
+                <dd>{evidence.length} file(s)</dd>
+              </dl>
+            </div>
+          </section>
+          <div className="card t3" style={{ padding: "10px 12px", fontSize: 12 }}>
+            {sevLabel ? `S${form.severity} · ${sevLabel.sublabel}. ` : ""}Severity sets alert routing; you can change it on the incident later.
+          </div>
+        </aside>
+      </form>
     </div>
   );
 }
 
-function insertFormatting(
-  ref: RefObject<HTMLTextAreaElement>,
-  prefix: string,
-  suffix: string,
-  update: (value: string) => void,
-) {
-  const el = ref.current;
-  if (!el) return;
-  const start = el.selectionStart ?? el.value.length;
-  const end = el.selectionEnd ?? el.value.length;
-  const selected = el.value.slice(start, end) || "text";
-  const next = `${el.value.slice(0, start)}${prefix}${selected}${suffix}${el.value.slice(end)}`;
-  update(next);
-  queueMicrotask(() => {
-    el.focus();
-    const pos = start + prefix.length + selected.length + suffix.length;
-    el.setSelectionRange(pos, pos);
-  });
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function EvBtn({ icon: Icon, label, onClick, loading }: { icon: LucideIcon; label: string; onClick: () => void; loading: boolean }): ReactNode {
   return (
-    <label className="block">
-      <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      {children}
-    </label>
-  );
-}
-
-function ToolbarButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2"
-    >
-      <Sparkles className="h-3 w-3" /> {label}
-    </button>
-  );
-}
-
-function EvBtn({
-  icon: Icon,
-  label,
-  onClick,
-  loading,
-}: {
-  icon: typeof Camera;
-  label: string;
-  onClick: () => void;
-  loading: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs hover:bg-surface-2 disabled:opacity-50"
-    >
-      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+    <button type="button" onClick={onClick} disabled={loading} className="b b-sec">
+      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon size={14} strokeWidth={1.75} />}
       {label}
     </button>
-  );
-}
-
-function SummaryCard({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
-  return (
-    <div className={`rounded-2xl border border-border bg-surface px-3 py-3 ${wide ? "md:col-span-2" : ""}`}>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
-  );
-}
-
-function PreviewLine({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-3 py-2 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium text-foreground">{value}</span>
-    </div>
-  );
-}
-
-function MiniChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
   );
 }
