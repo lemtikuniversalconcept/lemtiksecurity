@@ -173,3 +173,27 @@ export const assignIncidentToMe = createServerFn({ method: "POST" })
     if (error) throwSafeError("incidents.assign", error, "Access denied or unable to assign incident.");
     return { ok: true, officer: name };
   });
+
+// Status-change events from the activity log, so analytics can measure real response and
+// resolution times (report → first acknowledgement/response, report → resolved) instead of
+// estimating them.
+export const listIncidentStatusChanges = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ since: z.string().datetime() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    const { data: rows, error } = await context.supabase
+      .from("incident_activity")
+      .select("incident_id, created_at, meta")
+      .eq("organisation_id", orgId)
+      .eq("kind", "status_changed")
+      .gte("created_at", data.since)
+      .order("created_at", { ascending: true })
+      .limit(5000);
+    if (error) throwSafeError("incidents.statusChanges", error, "Unable to load incident timings.");
+    return (rows ?? []).map((r) => ({
+      incident_id: r.incident_id,
+      at: r.created_at,
+      to: (r.meta as { to?: string } | null)?.to ?? null,
+    }));
+  });
