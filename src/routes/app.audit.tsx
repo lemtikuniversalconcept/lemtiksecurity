@@ -5,20 +5,8 @@ import { useMemo, useState } from "react";
 import { listOrgAuditLog } from "@/lib/audit.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { requireSectionAccess } from "@/lib/rbac";
-import {
-  Activity,
-  BadgeAlert,
-  Download,
-  FileJson,
-  FileText,
-  Filter,
-  Loader2,
-  ShieldAlert,
-  ShieldCheck,
-  Users,
-  UserCog,
-  Settings2,
-} from "lucide-react";
+import { Download, FileJson, FileText, Loader2, Search } from "lucide-react";
+import { Empty, Kpi, Notice, PageHeader } from "@/components/nw";
 
 export const Route = createFileRoute("/app/audit")({
   head: () => ({ meta: [{ title: "Audit log · Lemtik SOD" }] }),
@@ -33,7 +21,7 @@ export const Route = createFileRoute("/app/audit")({
 
 function Audit() {
   const load = useServerFn(listOrgAuditLog);
-  useRealtimeInvalidate("audit_log", [["audit_log"]]);
+  useRealtimeInvalidate("audit_log", [["org-audit-log"]]);
   const { data = [], isLoading, error } = useQuery({
     queryKey: ["org-audit-log"],
     queryFn: () => load(),
@@ -101,137 +89,138 @@ function Audit() {
     if (typeof window !== "undefined") window.print();
   };
 
+  const label = (prefix: string, v: string) => (v === "all" || v === "" ? `${prefix}: all` : v);
+
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-5 print:border-0 print:bg-transparent">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Organisation audit</div>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Immutable audit log</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-300">
-              Read-only organisation history. Every row is append-only and includes user, role, action type, affected resource, details, and IP address where available.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <button onClick={exportCsv} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2">
-              <Download className="h-3.5 w-3.5" /> CSV
-            </button>
-            <button onClick={exportJson} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2">
-              <FileJson className="h-3.5 w-3.5" /> JSON
-            </button>
-            <button onClick={exportPdf} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2">
-              <FileText className="h-3.5 w-3.5" /> PDF
-            </button>
-          </div>
-        </div>
-      </section>
+    <div className="col g16">
+      <PageHeader title="Audit log" sub="Every action in this organisation, in order. Rows can be added but never edited or deleted.">
+        <button type="button" className="b b-sec" onClick={exportCsv} disabled={!filtered.length}>
+          <Download className="h-4 w-4" /> CSV
+        </button>
+        <button type="button" className="b b-gh" onClick={exportJson} disabled={!filtered.length}>
+          <FileJson className="h-4 w-4" /> JSON
+        </button>
+        <button type="button" className="b b-gh" onClick={exportPdf}>
+          <FileText className="h-4 w-4" /> Print
+        </button>
+      </PageHeader>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Metric label="Rows visible" value={summary.total.toString()} icon={Activity} />
-        <Metric label="Autonomous" value={summary.autonomous.toString()} icon={ShieldAlert} tone="critical" />
-        <Metric label="Access control" value={summary.access.toString()} icon={UserCog} tone="warn" />
-        <Metric label="Reports/config" value={(summary.report + summary.config).toString()} icon={ShieldCheck} tone="good" />
+      <div className="kpis">
+        <Kpi label="Rows shown" value={summary.total} unit={rows.length !== summary.total ? `of ${rows.length}` : undefined} />
+        <Kpi label="Automated actions" value={summary.autonomous} />
+        <Kpi label="Access changes" value={summary.access} />
+        <Kpi label="Reports and config" value={summary.report + summary.config} />
       </div>
 
-      <section className="rounded-lg border border-border bg-card p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Filters</div>
-            <h2 className="text-lg font-semibold">User, role, action, resource, severity, date, search</h2>
+      <section className="pn">
+        <div className="row g8 wrap" style={{ padding: "12px 14px" }}>
+          <label className="in row g8" style={{ width: 240 }}>
+            <Search className="h-4 w-4 t3" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search details" aria-label="Search details" className="f1" style={{ background: "transparent", border: 0, outline: "none", color: "inherit", minWidth: 0 }} />
+          </label>
+          <FilterSelect value={userFilter} onChange={setUserFilter} options={users.map((u) => (u === "all" ? "" : u))} render={(v) => label("Person", v)} aria="Person" />
+          <FilterSelect value={roleFilter} onChange={setRoleFilter} options={roles} render={(v) => label("Role", v)} aria="Role" />
+          <FilterSelect value={actionFilter} onChange={setActionFilter} options={actions} render={(v) => (v === "all" ? "Action: all" : formatAction(v))} aria="Action" />
+          <FilterSelect value={resourceFilter} onChange={setResourceFilter} options={resources} render={(v) => label("Resource", v)} aria="Resource" />
+          <FilterSelect value={severityFilter} onChange={setSeverityFilter} options={["all", "5", "4", "3", "2", "1"]} render={(v) => (v === "all" ? "Severity: all" : `Severity ${v}`)} aria="Severity" />
+          <input type="date" className="in mono" style={{ width: "auto" }} aria-label="From" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input type="date" className="in mono" style={{ width: "auto" }} aria-label="To" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        </div>
+        {isLoading ? (
+          <Empty>
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading audit log…
+          </Empty>
+        ) : error ? (
+          <div className="pn-b">
+            <Notice tone="fail">{(error as Error).message}</Notice>
           </div>
-          <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-            <Filter className="h-3.5 w-3.5" /> Search is full text over the audit payload
-          </div>
-        </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-4">
-          <Select value={userFilter} onChange={setUserFilter} options={users} />
-          <Select value={roleFilter} onChange={setRoleFilter} options={roles} />
-          <Select value={actionFilter} onChange={setActionFilter} options={actions} />
-          <Select value={resourceFilter} onChange={setResourceFilter} options={resources} />
-          <Select value={severityFilter} onChange={setSeverityFilter} options={["all", "5", "4", "3", "2", "1"]} />
-          <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
-            <Settings2 className="h-4 w-4 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search details" className="bg-transparent text-sm outline-none" />
-          </div>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm" />
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm" />
-        </div>
-      </section>
-
-      {isLoading ? (
-        <div className="rounded-lg border border-border bg-card p-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading audit log…
-        </div>
-      ) : error ? (
-        <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">
-          {(error as Error).message}
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <Th>Timestamp</Th>
-                <Th>User</Th>
-                <Th>Role</Th>
-                <Th>Action type</Th>
-                <Th>Resource affected</Th>
-                <Th>Details</Th>
-                <Th>IP address</Th>
-                <Th>Flags</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((row: any) => (
-                <tr key={row.id} className="hover:bg-surface/60">
-                  <Td>{new Intl.DateTimeFormat("en-NG", { dateStyle: "medium", timeStyle: "medium" }).format(new Date(row.created_at))}</Td>
-                  <Td>
-                    <div className="font-medium">{row.user_name}</div>
-                    <div className="text-[10px] text-muted-foreground">{row.actor_id ? row.actor_id.slice(0, 8) : "system"}</div>
-                  </Td>
-                  <Td className="text-xs uppercase tracking-wider text-muted-foreground">{row.role}</Td>
-                  <Td>
-                    <div className="font-medium">{formatAction(row.action)}</div>
-                    <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Severity {row.severity ?? 1}</div>
-                  </Td>
-                  <Td className="font-mono text-xs">{row.resource}</Td>
-                  <Td className="max-w-[26rem] text-xs text-muted-foreground">
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-5">{JSON.stringify(row.details ?? {}, null, 2)}</pre>
-                  </Td>
-                  <Td className="font-mono text-xs text-muted-foreground">{row.ip_address ?? "—"}</Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(row.flags ?? []).length === 0 ? (
-                        <span className="text-[10px] text-muted-foreground">None</span>
-                      ) : row.flags.map((flag: string) => <FlagBadge key={flag} flag={flag} />)}
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
+        ) : filtered.length === 0 ? (
+          <Empty>{rows.length ? "No rows match these filters." : "Nothing has been recorded yet."}</Empty>
+        ) : (
+          <div className="scroll">
+            <table className="tbl">
+              <thead>
                 <tr>
-                  <Td colSpan={8}>
-                    <div className="py-10 text-center text-sm text-muted-foreground">
-                      No audit rows matched the current filters.
-                    </div>
-                  </Td>
+                  <th>When</th>
+                  <th>Who</th>
+                  <th>Action</th>
+                  <th>Resource</th>
+                  <th>Details</th>
+                  <th>IP</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <div className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground print:hidden">
-        <div className="flex items-start gap-2">
-          <ShieldAlert className="mt-0.5 h-4 w-4 text-critical" />
-          <div>
-            <div className="font-medium text-foreground">Append-only guarantee</div>
-            <div>No edit or delete actions are exposed here. Rows are read from the live audit table and filtered client-side only.</div>
+              </thead>
+              <tbody>
+                {filtered.map((row: any) => (
+                  <tr key={row.id} style={{ verticalAlign: "top" }}>
+                    <td className="mono t2" style={{ whiteSpace: "nowrap", fontSize: 12 }}>
+                      {new Date(row.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </td>
+                    <td>
+                      <div className="col">
+                        <b>{row.user_name ?? "System"}</b>
+                        <span className="t3" style={{ fontSize: 11.5 }}>
+                          {row.role ?? (row.actor_id ? "" : "automated")}
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="col g4">
+                        <span>{formatAction(row.action)}</span>
+                        <span className="row g4 wrap">
+                          {(row.flags ?? []).map((f: string) => (
+                            <span key={f} className={`tg${f === "autonomous" ? " tg-ai" : f === "access" ? " tg-warn" : ""}`}>
+                              {FLAG_LABEL[f] ?? f}
+                            </span>
+                          ))}
+                          {Number(row.severity) >= 4 && <span className="tg tg-fail">Severity {row.severity}</span>}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="mono t2" style={{ fontSize: 12 }}>
+                      {row.resource}
+                    </td>
+                    <td style={{ maxWidth: 420 }}>
+                      <details>
+                        <summary className="t2" style={{ cursor: "pointer", fontSize: 12 }}>
+                          {summariseDetails(row.details)}
+                        </summary>
+                        <pre className="mono t2" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 11, margin: "6px 0 0" }}>
+                          {JSON.stringify(row.details ?? {}, null, 2)}
+                        </pre>
+                      </details>
+                    </td>
+                    <td className="mono t3" style={{ fontSize: 12 }}>
+                      {row.ip_address ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
+  );
+}
+
+const FLAG_LABEL: Record<string, string> = { autonomous: "Automated", access: "Access", report: "Report", config: "Config" };
+
+function summariseDetails(details: unknown) {
+  if (!details || typeof details !== "object") return "No details";
+  const keys = Object.keys(details as Record<string, unknown>);
+  if (!keys.length) return "No details";
+  return keys.slice(0, 3).join(", ") + (keys.length > 3 ? ` +${keys.length - 3}` : "");
+}
+
+function FilterSelect({ value, onChange, options, render, aria }: { value: string; onChange: (v: string) => void; options: string[]; render: (v: string) => string; aria: string }) {
+  return (
+    <select className="in" style={{ width: "auto", maxWidth: 220 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label={aria}>
+      {options.map((o) => (
+        <option key={o || "all"} value={o}>
+          {render(o)}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -254,80 +243,3 @@ function download(name: string, type: string, body: string) {
   URL.revokeObjectURL(url);
 }
 
-function Select({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-}) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm">
-      {options.map((opt) => (
-        <option key={opt} value={opt}>{opt}</option>
-      ))}
-    </select>
-  );
-}
-
-function FlagBadge({ flag }: { flag: string }) {
-  const meta =
-    flag === "autonomous"
-      ? { label: "Autonomous", tone: "critical" as const, icon: ShieldAlert }
-      : flag === "access"
-        ? { label: "Access control", tone: "warn" as const, icon: UserCog }
-        : flag === "report"
-          ? { label: "Report downloaded", tone: "good" as const, icon: FileText }
-          : { label: "Config changed", tone: "neutral" as const, icon: Settings2 };
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider ${
-      meta.tone === "critical"
-        ? "border-critical/30 bg-critical/10 text-critical"
-        : meta.tone === "warn"
-          ? "border-high/30 bg-high/10 text-high"
-          : meta.tone === "good"
-            ? "border-resolved/30 bg-resolved/10 text-resolved"
-            : "border-border bg-surface text-muted-foreground"
-    }`}>
-      <meta.icon className="h-3 w-3" />
-      {meta.label}
-    </span>
-  );
-}
-
-function Metric({ label, value, icon: Icon, tone = "neutral" }: {
-  label: string;
-  value: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: "neutral" | "good" | "warn" | "critical";
-}) {
-  const toneClass =
-    tone === "good"
-      ? "text-resolved bg-resolved/10 border-resolved/30"
-      : tone === "warn"
-        ? "text-high bg-high/10 border-high/30"
-        : tone === "critical"
-          ? "text-critical bg-critical/10 border-critical/30"
-          : "text-muted-foreground bg-surface border-border";
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={`grid h-7 w-7 place-items-center rounded-md border ${toneClass}`}>
-          <Icon className="h-3.5 w-3.5" />
-        </div>
-      </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
-    </div>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-3 text-left font-medium">{children}</th>;
-}
-
-function Td({ children, colSpan }: { children: React.ReactNode; colSpan?: number }) {
-  return <td colSpan={colSpan} className="px-4 py-3 align-top">{children}</td>;
-}
