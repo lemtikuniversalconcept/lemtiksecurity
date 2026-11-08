@@ -16,10 +16,14 @@ async function assertAdmin(supabase: any, userId: string, orgId: string) {
     throw new Error("Access denied. Admin role required.");
 }
 
-function defaultInvitePassword(email: string) {
-  const local = email.split("@")[0] ?? "user";
-  const safeLocal = local.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() || "USER";
-  return `LEM-2026-${safeLocal}`;
+// A random initial password for a new login. (This used to be "LEM-2026-<NAME>", which anyone
+// who knew a person's email address could guess.)
+function randomInitialPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let out = "";
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}-${out.slice(12, 16)}`;
 }
 
 async function findAuthUserByEmail(email: string) {
@@ -36,32 +40,24 @@ async function findAuthUserByEmail(email: string) {
   return null;
 }
 
+/**
+ * Makes sure the invited email has a login. An existing login is left exactly as it is: an
+ * organisation admin must never be able to set or reset the password of an account they don't
+ * own (that was an account-takeover path, including through "Resend invite").
+ */
 async function provisionAuthUserForInvite(input: {
   email: string;
   password?: string | null;
   orgId: string;
   role: string;
   invitedByName?: string | null;
-}) {
+}): Promise<{ userId: string; created: boolean; password: string | null }> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const email = input.email.toLowerCase().trim();
-  const password = (input.password?.trim() || defaultInvitePassword(email)).slice(0, 128);
   const existing = await findAuthUserByEmail(email);
+  if (existing) return { userId: existing.id, created: false, password: null };
 
-  if (existing) {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
-      password,
-      email_confirm: true,
-      user_metadata: {
-        invited_role: input.role,
-        organisation_id: input.orgId,
-        invited_by: input.invitedByName ?? null,
-      },
-    });
-    if (error) throwSafeError("users.provisionExisting", error, "Unable to provision login.");
-    return { userId: existing.id, password };
-  }
-
+  const password = (input.password?.trim() || randomInitialPassword()).slice(0, 128);
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
@@ -73,7 +69,7 @@ async function provisionAuthUserForInvite(input: {
     },
   });
   if (error || !data.user) throwSafeError("users.createAuth", error ?? new Error("Unable to create auth user."), "Unable to provision login.");
-  return { userId: data.user.id, password };
+  return { userId: data.user.id, created: true, password };
 }
 
 async function sendInvitationEmail(input: {
@@ -295,7 +291,13 @@ export const createInvite = createServerFn({ method: "POST" })
       actionDetail: { email: invite.email, role: data.role } as any,
     });
 
-    return { ok: true, invite, delivery_warning: deliveryWarning, login_provisioned: true };
+    return {
+      ok: true,
+      invite,
+      delivery_warning: deliveryWarning,
+      login_provisioned: provisioned.created,
+      existing_account: !provisioned.created,
+    };
   });
 
 export const resendInvite = createServerFn({ method: "POST" })
@@ -357,7 +359,7 @@ export const bulkInvite = createServerFn({ method: "POST" })
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     await assertAdmin(context.supabase, context.userId, orgId);
 
-    const results: Array<{ email: string; ok: boolean; error?: string }> = [];
+    const results: Array<{ email: string; ok: boolean; error?: string; existing_account?: boolean; password?: string | null }> = [];
     const { data: meProf } = await context.supabase
       .from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle();
     const { data: org } = await context.supabase
@@ -366,7 +368,7 @@ export const bulkInvite = createServerFn({ method: "POST" })
     for (const row of data.rows) {
       const email = row.email.toLowerCase().trim();
       try {
-        await provisionAuthUserForInvite({
+        const provisioned = await provisionAuthUserForInvite({
           email,
           password: row.password,
           orgId,
@@ -387,7 +389,14 @@ export const bulkInvite = createServerFn({ method: "POST" })
           invitedBy: meProf?.display_name ?? null,
           inviteUrl: null,
         });
-        results.push({ email, ok: true, error: deliveryWarning ?? undefined });
+        results.push({
+          email,
+          ok: true,
+          error: deliveryWarning ?? undefined,
+          existing_account: !provisioned.created,
+          // Only for accounts created here, and only when the admin didn't choose one: they need it to tell the person.
+          password: provisioned.created && !row.password ? provisioned.password : null,
+        });
       } catch (e: any) {
         results.push({ email, ok: false, error: e?.message ?? "Failed" });
       }
