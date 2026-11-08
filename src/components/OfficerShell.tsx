@@ -1,73 +1,87 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { CalendarDays, Home, MapPinned, Radio, ShieldAlert, MessageSquareMore, Navigation2, Menu } from "lucide-react";
-import type { ReactNode } from "react";
+import { Bell, FileText, Home, Route as RouteIcon, Siren, Sun, Moon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useMyNotifications } from "@/components/officer/kit";
 
-const nav = [
-  { to: "/officer/home", label: "Home", icon: Home },
-  { to: "/officer/patrol", label: "Patrol", icon: MapPinned },
-  { to: "/officer/dispatch", label: "Dispatch", icon: Navigation2 },
-  { to: "/officer/incident/new", label: "Report", icon: ShieldAlert },
-  { to: "/officer/schedule", label: "Schedule", icon: CalendarDays },
-  { to: "/officer/notifications", label: "Alerts", icon: MessageSquareMore },
-];
+const DAYLIGHT_KEY = "lemtik.officer.daylight";
 
+/**
+ * The officer app is a phone app: one narrow column with a thumb-reach tab bar. On a desktop it
+ * stays phone-width so supervisors see exactly what officers see.
+ */
 export function OfficerShell({ children }: { children?: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { data: notifications = [] } = useMyNotifications();
+  const unread = notifications.filter((n) => !n.read).length;
+  const [daylight, setDaylight] = useState(false);
+
+  useEffect(() => {
+    try {
+      setDaylight(window.localStorage.getItem(DAYLIGHT_KEY) === "1");
+    } catch {
+      /* storage blocked: default to night */
+    }
+  }, []);
+  const toggleDaylight = () => {
+    setDaylight((d) => {
+      try {
+        window.localStorage.setItem(DAYLIGHT_KEY, d ? "0" : "1");
+      } catch {
+        /* ignore */
+      }
+      return !d;
+    });
+  };
+
+  const isOn = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  const tabs = [
+    { to: "/officer/home", label: "Home", icon: Home },
+    { to: "/officer/patrol", label: "Patrol", icon: RouteIcon },
+    { to: "/officer/sos", label: "SOS", icon: Siren, sos: true },
+    { to: "/officer/incident/new", label: "Report", icon: FileText },
+    { to: "/officer/notifications", label: "Alerts", icon: Bell, badge: unread },
+  ] as const;
+
+  // The install intro is a full page of its own, without the tab bar.
+  if (pathname === "/officer" || pathname === "/officer/") {
+    return <div className={`min-h-screen ${daylight ? "light" : ""}`} style={{ background: "var(--ink-0)", color: "var(--tx-1)" }}>{children ?? <Outlet />}</div>;
+  }
 
   return (
-    <div className="min-h-screen bg-[#08111f] text-slate-100">
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col lg:flex-row">
-        <aside className="border-b border-white/10 bg-slate-950/70 px-4 py-4 backdrop-blur lg:w-80 lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300/80">Officer PWA</div>
-              <div className="mt-1 text-xl font-semibold tracking-tight">Lemtik Patrol</div>
-            </div>
-            <div className="grid h-10 w-10 place-items-center rounded-2xl bg-cyan-400/15 text-cyan-200 ring-1 ring-cyan-300/30">
-              <Radio className="h-5 w-5" />
-            </div>
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-4">
-            <div className="text-[11px] uppercase tracking-[0.2em] text-cyan-200/80">Connection</div>
-            <div className="mt-1 text-sm font-medium">Online sync ready</div>
-            <div className="mt-2 text-xs text-slate-300">
-              Critical actions queue automatically when the network drops and sync on reconnect.
-            </div>
-          </div>
-
-          <nav className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-            {nav.map((item) => {
-              const active = pathname === item.to || pathname.startsWith(item.to + "/");
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-colors ${
-                    active
-                      ? "border-cyan-300/40 bg-cyan-300/15 text-white"
-                      : "border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <main className="flex-1 p-4 pb-24 sm:p-6 lg:p-8">
-          <header className="mb-6 flex items-center justify-between gap-4 rounded-3xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Field officer app</div>
-              <h1 className="mt-1 text-lg font-semibold">Mobile-first patrol operations</h1>
-            </div>
-            <Menu className="h-5 w-5 text-slate-400 lg:hidden" />
-          </header>
+    <div className={daylight ? "light" : ""} style={{ background: "var(--ink-0)", color: "var(--tx-1)", minHeight: "100dvh" }}>
+      <div className="col" style={{ maxWidth: 480, margin: "0 auto", minHeight: "100dvh", borderLeft: "1px solid var(--line-1)", borderRight: "1px solid var(--line-1)", background: "var(--ink-0)" }}>
+        <main className="col f1" style={{ paddingBottom: 76 }}>
           {children ?? <Outlet />}
         </main>
+        <nav className="tapbar" aria-label="Officer app" style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, zIndex: 40 }}>
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const on = isOn(t.to);
+            return (
+              <Link key={t.to} to={t.to} className={`${on ? "on" : ""}${"sos" in t && t.sos ? " sos" : ""}`} aria-current={on ? "page" : undefined}>
+                <span className="ic relative" style={{ display: "inline-flex" }}>
+                  <Icon size={22} strokeWidth={"sos" in t && t.sos ? 2.4 : 1.8} />
+                  {"badge" in t && t.badge ? (
+                    <span className="badge" style={{ position: "absolute", top: -6, right: -10, minWidth: 16, height: 16, borderRadius: 8, background: "var(--s5)", color: "#0A0C10", font: "700 10px/16px var(--m)", textAlign: "center", padding: "0 4px" }}>
+                      {t.badge > 9 ? "9+" : t.badge}
+                    </span>
+                  ) : null}
+                </span>
+                {t.label}
+              </Link>
+            );
+          })}
+        </nav>
+        <button
+          type="button"
+          onClick={toggleDaylight}
+          className="ibtn"
+          aria-label={daylight ? "Switch to night mode" : "Switch to daylight mode"}
+          title={daylight ? "Night mode" : "Daylight mode (easier to read in sun)"}
+          style={{ position: "fixed", right: "max(12px, calc(50% - 240px + 12px))", bottom: 84, zIndex: 41, width: 36, height: 36, borderRadius: 18 }}
+        >
+          {daylight ? <Moon size={16} /> : <Sun size={16} />}
+        </button>
       </div>
     </div>
   );

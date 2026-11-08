@@ -1,103 +1,124 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { CheckCircle2, ChevronLeft, CloudOff } from "lucide-react";
 import { createIncident } from "@/lib/incidents.functions";
 import { getActiveOrg, listLocations } from "@/lib/orgs.functions";
 import * as offline from "@/lib/offlineQueue";
 import { IncidentReportForm, type IncidentSubmitPayload } from "@/components/IncidentReportForm";
-import { CloudUpload, WifiOff } from "lucide-react";
+import { NetPill, useOnline } from "@/components/officer/kit";
 
 export const Route = createFileRoute("/officer/incident/new")({
   component: NewIncident,
 });
 
 function NewIncident() {
-  const queryClient = useQueryClient();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const online = useOnline();
   const create = useServerFn(createIncident);
   const fetchActiveOrg = useServerFn(getActiveOrg);
   const fetchLocations = useServerFn(listLocations);
-  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
-  const [pending, setPending] = useState<offline.QueuedIncident[]>([]);
+  const [done, setDone] = useState<null | { offline: boolean; code?: string; id?: string }>(null);
+  const [formKey, setFormKey] = useState(0);
 
-  const { data: activeOrg } = useQuery({ queryKey: ["officer-active-org"], queryFn: () => fetchActiveOrg() });
-  const { data: savedLocations = [] } = useQuery({
-    queryKey: ["officer-saved-locations"],
-    queryFn: () => fetchLocations(),
-    enabled: !!activeOrg,
-  });
-  const defaultZone = savedLocations[0]?.name || activeOrg?.name || "Unspecified";
+  const { data: org } = useQuery({ queryKey: ["officer-active-org"], queryFn: () => fetchActiveOrg() });
+  const { data: locations = [] } = useQuery({ queryKey: ["officer-saved-locations"], queryFn: () => fetchLocations(), enabled: !!org });
 
-  const refreshPending = () => setPending(offline.list());
-
+  // Send anything saved offline as soon as the connection returns.
   useEffect(() => {
-    refreshPending();
-    const goOnline = async () => {
-      setOnline(true);
-      const sent = await offline.flush((payload) => create({ data: payload }) as Promise<unknown>);
-      if (sent > 0) queryClient.invalidateQueries({ queryKey: ["incidents"] });
-      refreshPending();
-    };
-    const goOffline = () => setOnline(false);
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    const unsub = offline.subscribe(refreshPending);
-    return () => {
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
-      unsub();
-    };
-  }, [create, queryClient]);
+    if (!online) return;
+    offline
+      .flush((payload) => create({ data: payload }) as Promise<unknown>)
+      .then((sent) => {
+        if (sent > 0) void qc.invalidateQueries({ queryKey: ["incidents"] });
+      })
+      .catch(() => undefined);
+  }, [online, create, qc]);
 
-  const submitMut = useMutation({
+  const submit = useMutation({
     mutationFn: async (payload: IncidentSubmitPayload) => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
+      if (!navigator.onLine) {
         offline.enqueue(payload);
-        refreshPending();
         return { offline: true } as const;
       }
-      await create({ data: payload });
-      return { offline: false } as const;
+      const row = (await create({ data: payload })) as any;
+      return { offline: false, code: row?.code as string | undefined, id: row?.id as string | undefined } as const;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["incidents"] });
+    onSuccess: (r) => {
+      setDone(r);
+      qc.invalidateQueries({ queryKey: ["incidents"] });
+      qc.invalidateQueries({ queryKey: ["officer-incidents"] });
     },
   });
 
-  if (!activeOrg) {
+  const header = (
+    <div className="o-h">
+      <Link to="/officer/home" className="ibtn" aria-label="Back">
+        <ChevronLeft size={18} />
+      </Link>
+      <h1 className="f1">Report</h1>
+      <NetPill />
+    </div>
+  );
+
+  if (done) {
     return (
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-sm text-slate-300">
-        Loading organisation context...
-      </div>
+      <>
+        {header}
+        <div className="o-b" style={{ alignItems: "center", textAlign: "center", paddingTop: 40 }}>
+          {done.offline ? <CloudOff size={48} style={{ color: "var(--warn)" }} /> : <CheckCircle2 size={48} style={{ color: "var(--ok)" }} />}
+          <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{done.offline ? "Saved on this phone" : "Report sent"}</h2>
+          <p className="t2" style={{ margin: 0, maxWidth: 320 }}>
+            {done.offline ? "It sends automatically when you're back online. If it's urgent, use the radio now." : `Command can see it now${done.code ? ` as ${done.code}` : ""}.`}
+          </p>
+          <div className="col g10" style={{ width: "100%", marginTop: 12 }}>
+            {done.id && (
+              <Link to="/officer/incident/$id" params={{ id: done.id }} className="bigbtn" style={{ background: "var(--ink-2)", color: "var(--tx-1)", borderColor: "var(--line-2)" }}>
+                View the report
+              </Link>
+            )}
+            <button
+              type="button"
+              className="bigbtn"
+              style={{ background: "var(--blue)", color: "#fff" }}
+              onClick={() => {
+                setDone(null);
+                setFormKey((k) => k + 1);
+              }}
+            >
+              Report something else
+            </button>
+            <button type="button" className="b b-gh" style={{ alignSelf: "center" }} onClick={() => navigate({ to: "/officer/home" })}>
+              Back to home
+            </button>
+          </div>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Report</div>
-        <h2 className="mt-2 text-2xl font-semibold">Quick incident report</h2>
-        <p className="mt-2 text-sm text-slate-300">
-          Fast entry flow for field officers. Reports use your org locations when available and queue locally when offline.
-        </p>
-      </section>
-
-      <div className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm ${online ? "border-cyan-300/20 bg-cyan-300/10 text-cyan-100" : "border-amber-300/20 bg-amber-300/10 text-amber-100"}`}>
-        <div className="flex items-center gap-2">
-          {online ? <CloudUpload className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
-          <span>{online ? `${pending.length} incident${pending.length === 1 ? "" : "s"} pending sync.` : "Offline. Reports will queue locally."}</span>
-        </div>
+    <>
+      {header}
+      <div className="o-b">
+        {!org ? (
+          <div className="o-card t3">Loading…</div>
+        ) : (
+          <IncidentReportForm
+            key={formKey}
+            organisationId={org.id}
+            savedLocations={locations as any[]}
+            defaultZone={(locations as any[])[0]?.name || org.name || "Unspecified"}
+            onSubmit={(payload) => submit.mutate(payload)}
+            loading={submit.isPending}
+            error={submit.error instanceof Error ? submit.error.message : null}
+            onClose={() => navigate({ to: "/officer/home" })}
+            online={online}
+          />
+        )}
       </div>
-
-      <IncidentReportForm
-        organisationId={activeOrg.id}
-        savedLocations={savedLocations}
-        defaultZone={defaultZone}
-        onSubmit={(payload) => submitMut.mutate(payload)}
-        loading={submitMut.isPending}
-        error={submitMut.error instanceof Error ? submitMut.error.message : null}
-        onClose={() => window.history.back()}
-      />
-    </div>
+    </>
   );
 }
