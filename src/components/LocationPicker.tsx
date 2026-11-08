@@ -13,7 +13,7 @@ export function useMapboxToken() {
 }
 
 /** A real map: click to drop the pin. Renders nothing when no Mapbox token is configured. */
-export function LocationPicker({ value, center, onChange, height = 240 }: { value: LngLat | null; center?: LngLat | null; onChange: (c: LngLat) => void; height?: number }) {
+export function LocationPicker({ value, center, onChange, height = 240, readOnly = false }: { value: LngLat | null; center?: LngLat | null; onChange?: (c: LngLat) => void; height?: number; readOnly?: boolean }) {
   const { data } = useMapboxToken();
   const token = data?.token ?? "";
   const container = useRef<HTMLDivElement | null>(null);
@@ -39,8 +39,8 @@ export function LocationPicker({ value, center, onChange, height = 240 }: { valu
         zoom: value || center ? 15 : 11,
         attributionControl: false,
       });
-      map.getCanvas().style.cursor = "crosshair";
-      map.on("click", (e) => onChangeRef.current([Number(e.lngLat.lng.toFixed(6)), Number(e.lngLat.lat.toFixed(6))]));
+      if (!readOnly) map.getCanvas().style.cursor = "crosshair";
+      map.on("click", (e) => !readOnly && onChangeRef.current?.([Number(e.lngLat.lng.toFixed(6)), Number(e.lngLat.lat.toFixed(6))]));
       map.on("load", () => setReady(true));
       mapRef.current = map;
     })();
@@ -76,9 +76,11 @@ export function LocationPicker({ value, center, onChange, height = 240 }: { valu
   return (
     <div className="map" style={{ height }}>
       <div ref={container} className="absolute inset-0" />
-      <div className="glass" style={{ position: "absolute", left: 10, top: 10, padding: "4px 10px", fontSize: 12 }}>
-        Click the map to drop the pin
-      </div>
+      {!readOnly && (
+        <div className="glass" style={{ position: "absolute", left: 10, top: 10, padding: "4px 10px", fontSize: 12 }}>
+          Click the map to drop the pin
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
-import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
   getIncidentDetail,
@@ -15,61 +16,48 @@ import {
   acknowledgeEscalation,
   updateIncidentEvidence,
 } from "@/lib/incidentDetail.functions";
-import { listMembers, listLocations } from "@/lib/orgs.functions";
-import { findProximityMembers } from "@/lib/orgs.functions";
-import { listPatrols } from "@/lib/patrols.functions";
+import { listMembers, listLocations, findProximityMembers } from "@/lib/orgs.functions";
 import { createDispatchAlert } from "@/lib/alerts.functions";
-import {
-  severityMeta,
-  statusMeta,
-  typeMeta,
-  type Severity,
-  type IncidentStatus,
-  type IncidentType,
-} from "@/lib/mockData";
-import { SeverityBadge } from "@/components/SeverityBadge";
+import { severityMeta, statusMeta, typeMeta, type Severity, type IncidentStatus, type IncidentType } from "@/lib/mockData";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { orgRoom, officerRoom, publishRealtimeEvent } from "@/lib/realtime.events";
 import { requireSectionAccess } from "@/lib/rbac";
+import { Avatar, Confidence, Notice, Sev, elapsed, timeAgo, useNow } from "@/components/nw";
+import { IncidentProposals } from "@/components/AiProposals";
+import { LocationPicker } from "@/components/LocationPicker";
 import {
   ArrowLeft,
-  BrainCircuit,
-  ChevronRight,
-  CircleCheckBig,
-  CircleX,
-  Lightbulb,
+  ArrowUpRight,
+  BellRing,
+  Check,
+  ClipboardList,
+  Clock4,
+  Download,
+  FileText,
+  History,
+  Info,
+  Link as LinkIcon,
   Loader2,
-  Send,
+  MapPin,
+  MessageSquare,
+  Mic,
+  Navigation,
   Paperclip,
   Phone,
-  ShieldAlert,
-  Link as LinkIcon,
-  Clock,
-  User,
-  Image as ImageIcon,
-  FileText,
-  Video as VideoIcon,
-  Mic,
-  CheckCircle2,
-  MessageSquare,
-  AlertOctagon,
-  MapPinned,
-  Radio,
+  PhoneCall,
+  Plus,
+  RotateCcw,
+  Send,
+  Shield,
   ShieldCheck,
   Siren,
   Sparkles,
-  Truck,
-  Users,
-  Layers3,
-  ClipboardList,
-  ImageUp,
-  LayoutPanelTop,
-  Map as MapIcon,
-  Shield,
-  FolderOpen,
+  UserCheck,
+  Video as VideoIcon,
+  X,
 } from "lucide-react";
 
-type IncidentTab = "overview" | "analysis" | "activity" | "evidence" | "escalation" | "related";
+type IncidentTab = "response" | "overview" | "evidence" | "timeline" | "escalations" | "related";
 type AnyRecord = Record<string, any>;
 
 export const Route = createFileRoute("/app/incidents/$id")({
@@ -78,18 +66,12 @@ export const Route = createFileRoute("/app/incidents/$id")({
     const access = context.appAccess;
     if (access.specRole === "field_officer") {
       const [{ data: incident }, { data: profile }] = await Promise.all([
-        supabase
-          .from("incidents")
-          .select("id, reported_by, officer")
-          .eq("id", params.id)
-          .maybeSingle(),
+        supabase.from("incidents").select("id, reported_by, officer").eq("id", params.id).maybeSingle(),
         supabase.from("profiles").select("display_name").eq("user_id", access.userId).maybeSingle(),
       ]);
       const reporterOwned = incident?.reported_by === access.userId;
       const officerOwned = !!profile?.display_name && incident?.officer === profile.display_name;
-      if (!reporterOwned && !officerOwned) {
-        throw redirect({ to: "/officer/home" });
-      }
+      if (!reporterOwned && !officerOwned) throw redirect({ to: "/officer/home" });
       return { appAccess: access };
     }
     requireSectionAccess(access, ["security_manager", "operator", "client_admin"]);
@@ -98,13 +80,7 @@ export const Route = createFileRoute("/app/incidents/$id")({
   component: IncidentDetailPage,
 });
 
-const STATUS_FLOW: IncidentStatus[] = [
-  "reported",
-  "acknowledged",
-  "responding",
-  "contained",
-  "resolved",
-];
+const STATUS_FLOW: IncidentStatus[] = ["reported", "acknowledged", "responding", "contained", "resolved"];
 const ESCALATION_TARGETS = [
   { key: "police", label: "Nigeria Police", phone: "112" },
   { key: "lasema", label: "LASEMA", phone: "767" },
@@ -112,106 +88,44 @@ const ESCALATION_TARGETS = [
   { key: "custom", label: "Custom contact", phone: "" },
 ] as const;
 
-function fmt(iso: string) {
-  return new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
-}
-function fmtPrecise(iso: string) {
-  return new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "medium" });
-}
-function since(iso: string) {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+const fmt = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("en-GB");
 function duration(fromIso: string, toIso?: string) {
-  const ms = (toIso ? new Date(toIso).getTime() : Date.now()) - new Date(fromIso).getTime();
-  const m = Math.floor(ms / 60000);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  const m = Math.floor(((toIso ? new Date(toIso).getTime() : Date.now()) - new Date(fromIso).getTime()) / 60000);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function humanList(values: string[]) {
-  const filtered = values.filter(Boolean);
-  if (!filtered.length) return "";
-  if (filtered.length === 1) return filtered[0];
-  if (filtered.length === 2) return `${filtered[0]} and ${filtered[1]}`;
-  return `${filtered.slice(0, -1).join(", ")}, and ${filtered[filtered.length - 1]}`;
-}
-
 function firstString(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
+  for (const v of values) if (typeof v === "string" && v.trim()) return v.trim();
   return "";
 }
-
 function listFromValue(value: unknown) {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
+  if (Array.isArray(value)) return value.filter((i): i is string => typeof i === "string" && !!i.trim());
+  if (typeof value === "string" && value.trim()) return value.split(",").map((i) => i.trim()).filter(Boolean);
   return [];
 }
-
-function isRecord(value: unknown): value is AnyRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
+const isRecord = (v: unknown): v is AnyRecord => !!v && typeof v === "object" && !Array.isArray(v);
 function firstRecordArray(...values: unknown[]) {
-  for (const value of values) {
-    if (Array.isArray(value)) {
-      const records = value.filter(isRecord);
-      if (records.length > 0) {
-        return records as AnyRecord[];
-      }
-    }
+  for (const v of values) if (Array.isArray(v)) {
+    const r = v.filter(isRecord);
+    if (r.length) return r as AnyRecord[];
   }
-  return [];
+  return [] as AnyRecord[];
 }
-
-function toDisplayNumber(value: unknown, fallback: number) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function toDisplayPercent(value: unknown, fallback: number) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return numeric <= 1 ? Math.round(numeric * 100) : Math.round(numeric);
-}
-
-function isMedicalIncident(incident: any) {
-  const blob = `${incident.title ?? ""} ${incident.description ?? ""} ${incident.type ?? ""}`.toLowerCase();
-  return /medical|injur|bleed|unconscious|collapse|heart|stab|shoot|gunshot|overdose/.test(blob);
-}
-
-function isArmedIncident(incident: any) {
-  const blob = `${incident.title ?? ""} ${incident.description ?? ""} ${incident.type ?? ""}`.toLowerCase();
-  return /armed|weapon|gun|knife|firearm|machete|hostage|gunshot/.test(blob);
+function percentOrNull(value: unknown) {
+  const n = Number(value);
+  if (value == null || value === "" || !Number.isFinite(n)) return null;
+  return n <= 1 ? Math.round(n * 100) : Math.round(n);
 }
 
 function IncidentDetailPage() {
   const { id } = Route.useParams();
   const { appAccess } = Route.useRouteContext();
-  const navigate = useNavigate();
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<IncidentTab>("overview");
+  const now = useNow(1000);
+  const readOnly = appAccess.specRole === "client_admin";
+  const [tab, setTab] = useState<IncidentTab>("response");
+  const [pendingStatus, setPendingStatus] = useState<IncidentStatus | null>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
   const get = useServerFn(getIncidentDetail);
   const transition = useServerFn(transitionIncidentStatus);
   const reassign = useServerFn(reassignIncident);
@@ -225,7 +139,6 @@ function IncidentDetailPage() {
   const patchEvidence = useServerFn(updateIncidentEvidence);
   const fetchMembers = useServerFn(listMembers);
   const fetchLocations = useServerFn(listLocations);
-  const fetchPatrols = useServerFn(listPatrols);
   const fetchProximity = useServerFn(findProximityMembers);
 
   useRealtimeInvalidate("incidents", [["incident", id]]);
@@ -234,22 +147,10 @@ function IncidentDetailPage() {
   useRealtimeInvalidate("incident_escalations", [["incident", id]]);
   useRealtimeInvalidate("organisation_locations", [["locations"], ["incident", id]]);
   useRealtimeInvalidate("profiles", [["members"]]);
-  useRealtimeInvalidate("patrols", [["patrols"]]);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["incident", id],
-    queryFn: () => get({ data: { id } }),
-  });
+  const { data, isLoading, error } = useQuery({ queryKey: ["incident", id], queryFn: () => get({ data: { id } }) });
   const { data: members = [] } = useQuery({ queryKey: ["members"], queryFn: () => fetchMembers() });
-  const { data: locations = [] } = useQuery({
-    queryKey: ["locations"],
-    queryFn: () => fetchLocations(),
-  });
-  const { data: patrols = [] } = useQuery({
-    queryKey: ["patrols"],
-    queryFn: () => fetchPatrols(),
-  });
-  const [analysisLifecycle, setAnalysisLifecycle] = useState<{ analysisStatus: string; dispatchPlanStatus: string } | null>(null);
+  const { data: locations = [] } = useQuery({ queryKey: ["locations"], queryFn: () => fetchLocations() });
   const reportedBy = data?.incident?.reported_by ?? null;
   const { data: reporterProfile } = useQuery({
     queryKey: ["incident-reporter", reportedBy],
@@ -261,15 +162,7 @@ function IncidentDetailPage() {
     enabled: !!reportedBy,
   });
 
-  useEffect(() => {
-    const pending = typeof window !== "undefined" ? sessionStorage.getItem("lemtik-open-incident-tab") : null;
-    if (pending !== id) return;
-    setActiveTab("analysis");
-    sessionStorage.removeItem("lemtik-open-incident-tab");
-  }, [id]);
-
-  // Opening a guest-triggered incident is what clears it from the flashing sidebar
-  // alert — acknowledged_at is what that alert watches for.
+  // Opening a guest-triggered incident is what clears it from the priority bar's guest SOS alert.
   useEffect(() => {
     const incident = data?.incident as { source?: string; acknowledged_at?: string | null } | undefined;
     if (!incident || incident.source !== "consumer_pwa" || incident.acknowledged_at) return;
@@ -277,82 +170,19 @@ function IncidentDetailPage() {
   }, [data?.incident, id]);
 
   useEffect(() => {
-    const markerKey = `lemtik-incident-analysis:${id}`;
-    if (typeof window === "undefined") return;
-    const raw = sessionStorage.getItem(markerKey);
-    if (!raw) {
-      setAnalysisLifecycle(null);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as { analysis_status?: string; dispatch_plan_status?: string };
-      setAnalysisLifecycle({
-        analysisStatus: String(parsed.analysis_status ?? "pending"),
-        dispatchPlanStatus: String(parsed.dispatch_plan_status ?? "pending"),
-      });
-    } catch {
-      sessionStorage.removeItem(markerKey);
-      setAnalysisLifecycle(null);
-    }
+    if (sessionStorage.getItem("lemtik-open-incident-tab") !== id) return;
+    setTab("response");
+    sessionStorage.removeItem("lemtik-open-incident-tab");
   }, [id]);
-
-  useEffect(() => {
-    const markerKey = `lemtik-incident-analysis:${id}`;
-    const incident = data?.incident as any | undefined;
-    if (!incident) return;
-    const hasAnalysis = isRecord(incident.analysis) && Object.keys(incident.analysis as AnyRecord).length > 0;
-    const hasDispatchPlan = isRecord(incident.dispatch_plan) && Object.keys(incident.dispatch_plan as AnyRecord).length > 0;
-    if (hasAnalysis || hasDispatchPlan) {
-      if (typeof window !== "undefined") {
-        sessionStorage.removeItem(markerKey);
-      }
-      setAnalysisLifecycle({ analysisStatus: "ready", dispatchPlanStatus: "ready" });
-      return;
-    }
-    if (typeof window !== "undefined") {
-      const raw = sessionStorage.getItem(markerKey);
-      if (!raw) {
-        setAnalysisLifecycle(null);
-      }
-    }
-  }, [data?.incident?.analysis, data?.incident?.dispatch_plan, id]);
-
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["incident", id] });
 
   useEffect(() => {
     const channel = supabase
       .channel(`incident-live:${id}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "incidents", filter: `id=eq.${id}` },
-        (payload) => {
-          const next = payload.new as Record<string, any>;
-          const previous = (payload.old as Record<string, any> | null) ?? null;
-          const statusChanged = !!previous && previous.status !== next.status;
-          qc.setQueryData(["incident", id], (old: any) => {
-            if (!old) return old;
-            return {
-              ...old,
-              incident: {
-                ...(old.incident ?? {}),
-                ...next,
-              },
-            };
-          });
-          const nextAnalysis = next.analysis;
-          const nextDispatchPlan = next.dispatch_plan;
-          const markerKey = `lemtik-incident-analysis:${id}`;
-          if ((nextAnalysis && Object.keys(nextAnalysis).length > 0) || (nextDispatchPlan && Object.keys(nextDispatchPlan).length > 0)) {
-            if (typeof window !== "undefined") {
-              sessionStorage.removeItem(markerKey);
-            }
-            setAnalysisLifecycle({ analysisStatus: "ready", dispatchPlanStatus: "ready" });
-          }
-          if (statusChanged) {
-            void qc.invalidateQueries({ queryKey: ["incident", id] });
-          }
-        },
-      )
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "incidents", filter: `id=eq.${id}` }, (payload) => {
+        const next = payload.new as AnyRecord;
+        qc.setQueryData(["incident", id], (old: any) => (old ? { ...old, incident: { ...(old.incident ?? {}), ...next } } : old));
+        if ((payload.old as AnyRecord | null)?.status !== next.status) void qc.invalidateQueries({ queryKey: ["incident", id] });
+      })
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -360,438 +190,147 @@ function IncidentDetailPage() {
   }, [id, qc]);
 
   const inc = data?.incident as any | undefined;
-  const incidentPoint: [number, number] = (() => {
-    if (!inc) return [3.4219, 6.4281];
-    if (inc.coord_x != null && inc.coord_y != null) {
-      return [Number(inc.coord_x), Number(inc.coord_y)];
-    }
-    const direct = locations.find(
-      (loc: any) => loc.id === inc.location_id && loc.coord_x != null && loc.coord_y != null,
+
+  // Only a real position: the incident's own, its saved location's, or a same-named zone's.
+  const incidentPoint = useMemo<[number, number] | null>(() => {
+    if (!inc) return null;
+    if (inc.coord_x != null && inc.coord_y != null) return [Number(inc.coord_x), Number(inc.coord_y)];
+    const loc = (locations as any[]).find(
+      (l) => (l.id === inc.location_id || l.name?.toLowerCase() === String(inc.zone ?? "").toLowerCase()) && l.coord_x != null && l.coord_y != null,
     );
-    if (direct) return [Number(direct.coord_x), Number(direct.coord_y)];
-    const sameZone = locations.find(
-      (loc: any) =>
-        loc.name?.toLowerCase() === String(inc.zone ?? "").toLowerCase() &&
-        loc.coord_x != null &&
-        loc.coord_y != null,
-    );
-    if (sameZone) return [Number(sameZone.coord_x), Number(sameZone.coord_y)];
-    return [3.4219, 6.4281];
-  })();
+    return loc ? [Number(loc.coord_x), Number(loc.coord_y)] : null;
+  }, [inc, locations]);
 
   const { data: proximity = [] } = useQuery({
-    queryKey: ["incident-proximity", id, incidentPoint[0], incidentPoint[1]],
+    queryKey: ["incident-proximity", id, incidentPoint?.[0], incidentPoint?.[1]],
     queryFn: () =>
-      fetchProximity({
-        data: {
-          coord_x: incidentPoint[0],
-          coord_y: incidentPoint[1],
-          incident_id: id,
-          org_id: appAccess.orgId,
-          limit: 6,
-        },
-      }) as Promise<Array<{
-        id: string;
-        user_id: string;
-        name: string;
-        role: string;
-        zone: string;
-        status: string;
-        coordinates: [number, number];
-        distance: number;
-        source: string;
-      }>>,
-    enabled: !!inc,
+      fetchProximity({ data: { coord_x: incidentPoint![0], coord_y: incidentPoint![1], incident_id: id, org_id: appAccess.orgId, limit: 6 } }) as Promise<
+        Array<{ id: string; user_id: string; name: string; role: string; zone: string; status: string; distance: number }>
+      >,
+    enabled: !!inc && !!incidentPoint,
   });
 
-  // Records the operator's decision on the AI's dispatch recommendation — accepted
-  // as-is, or edited with a note on what changed and why. Written as an
-  // incident_activity row of kind "operator_decision", which pairs with the AI's
-  // own "ai_recommendation" row (written by relationship_api when orchestration
-  // completes) to form the accept/edit accountability trail. Both kinds are
-  // append-only at the database level once written.
-  // Declared here (before the loading/error early returns below) rather than
-  // further down where it's used — a hook after a conditional return changes
-  // the hook count between the loading and loaded renders, which is a Rules of
-  // Hooks violation (React error #310, crashes the whole incident detail page).
   const [decisionNote, setDecisionNote] = useState("");
   const [editingDecision, setEditingDecision] = useState(false);
   const [recordingDecision, setRecordingDecision] = useState(false);
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="row g8 t2">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading incident…
       </div>
     );
   }
-  if (error || !data) {
-    return <div className="text-sm text-critical">Failed to load incident.</div>;
-  }
+  if (error || !data || !inc) return <Notice tone="fail">Couldn’t load this incident.</Notice>;
 
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["incident", id] });
   const evidenceItems = Array.isArray(inc.evidence) ? inc.evidence : [];
-  const reportedAt = inc.reported_at;
-  const firstResponse = (data.activity as any[]).find(
-    (a) => a.kind === "status_changed" && a.meta?.to === "acknowledged",
-  );
   const activityRows = data.activity as any[];
   const escalationRows = data.escalations as any[];
   const linkedIncidents = data.linkedIncidents as any[];
   const suggestedRows = data.suggested as any[];
-  const patrolRows = patrols as any[];
-  const incidentAnalysis = isRecord(inc.analysis) ? (inc.analysis as AnyRecord) : {};
-  const dispatchPlan = isRecord(inc.dispatch_plan) ? (inc.dispatch_plan as AnyRecord) : {};
-  const agentOutput = isRecord(inc.agent_output) ? (inc.agent_output as AnyRecord) : {};
-  const analysisContext = isRecord(incidentAnalysis.historical_context) ? (incidentAnalysis.historical_context as AnyRecord) : {};
-  const agentContext = isRecord(agentOutput.historical_context) ? (agentOutput.historical_context as AnyRecord) : {};
-  const aiPayload = { ...incidentAnalysis, ...dispatchPlan, ...agentOutput, ...analysisContext, ...agentContext };
-  const severityScore = Number(inc.severity) || 1;
-  const osintItems = firstRecordArray(
-    incidentAnalysis.intelligence_items,
-    incidentAnalysis.related_intelligence,
-    incidentAnalysis.osint_items,
-    dispatchPlan.intelligence_items,
-    dispatchPlan.related_intelligence,
-    dispatchPlan.osint_items,
-    agentOutput.intelligence_items,
-    agentOutput.related_intelligence,
-    agentOutput.osint_items,
-  );
-  const osintCount = osintItems.length > 0 ? osintItems.length : suggestedRows.length;
-  const reporterLabel = reporterProfile?.display_name || (reportedBy ? "Front Desk" : "System");
-  const armed = isArmedIncident(inc);
-  const medical = isMedicalIncident(inc);
-  const responsePenalty = firstResponse ? 0 : 6;
-  const fallbackConfidence = clamp(
-    Math.round(70 + severityScore * 4 + osintCount * 3 + Math.min(8, proximity.length * 2) - responsePenalty),
-    78,
-    97,
-  );
-  const confidence = toDisplayPercent(
-    aiPayload.confidence ?? aiPayload.recommendation_confidence ?? aiPayload.analysis_confidence,
-    fallbackConfidence,
-  );
-  const analysisStatus = firstString(inc.analysis_status, inc.analysis_state, inc.ai_status, analysisLifecycle?.analysisStatus);
-  const dispatchPlanStatus = firstString(inc.dispatch_plan_status, inc.plan_status, analysisLifecycle?.dispatchPlanStatus);
-  const analysisPending =
-    ["pending", "queued", "analyzing", "processing"].includes(analysisStatus) ||
-    ["pending", "queued", "analyzing", "processing"].includes(dispatchPlanStatus) ||
-    (!analysisStatus && !Object.keys(incidentAnalysis).length && !Object.keys(dispatchPlan).length && ["reported", "acknowledged"].includes(String(inc.status)));
-  const threatLevel =
-    firstString(
-      aiPayload.threat_level,
-      aiPayload.threatLevel,
-      aiPayload.threat_assessment,
-      aiPayload.risk_level,
-      aiPayload.severity_label,
-    ) ||
-    (severityScore >= 5 || armed
-      ? "Critical"
-      : severityScore >= 4 || escalationRows.length > 0
-        ? "High"
-        : severityScore >= 3 || osintCount > 1
-          ? "Elevated"
-          : "Guarded");
-  const suspectStatus =
-    firstString(aiPayload.suspect_status, aiPayload.suspectStatus, aiPayload.person_of_interest_status) ||
-    (armed ? "Potentially armed" : severityScore >= 4 ? "Unconfirmed suspect" : "Not confirmed");
-  const historicalContext = (() => {
-    const nearby = suggestedRows.slice(0, 3);
-    const labels = nearby.map((item: any) => `${typeMeta[item.type as IncidentType]} · ${since(item.reported_at)}`);
-    const summary =
-      firstString(
-        aiPayload.situation_summary,
-        aiPayload.context_summary,
-        aiPayload.intelligence_summary,
-        aiPayload.historical_summary,
-        aiPayload.summary,
-        aiPayload.pattern_summary,
-      ) ||
-      (nearby.length
-        ? `The same zone has ${nearby.length} related signal${nearby.length === 1 ? "" : "s"} in the last 24 hours: ${humanList(labels)}.`
-        : `No matching 24-hour zone pattern detected. Recent activity remains incident-specific.`);
-    return {
-      zoneScore: toDisplayPercent(
-        aiPayload.area_risk_score ?? aiPayload.zone_score ?? aiPayload.risk_score ?? aiPayload.risk,
-        clamp(45 + osintCount * 8 + severityScore * 5 + escalationRows.length * 7, 0, 100),
-      ),
-      trend:
-        firstString(aiPayload.trend, aiPayload.pattern_trend, aiPayload.zone_trend, aiPayload.risk_trend) ||
-        (osintCount >= 3 ? "rising" : osintCount === 2 ? "steady" : "contained"),
-      summary,
-    };
-  })();
+  const analysis = isRecord(inc.analysis) ? inc.analysis : {};
+  const plan = isRecord(inc.dispatch_plan) ? inc.dispatch_plan : {};
+  const agent = isRecord(inc.agent_output) ? inc.agent_output : {};
+  const ai = { ...analysis, ...plan, ...agent, ...(isRecord(analysis.historical_context) ? analysis.historical_context : {}), ...(isRecord(agent.historical_context) ? agent.historical_context : {}) };
+  const hasAi = Object.keys(analysis).length + Object.keys(plan).length + Object.keys(agent).length > 0;
+  const aiSummary = firstString(ai.situation_summary, ai.context_summary, ai.intelligence_summary, ai.summary, ai.historical_summary, ai.pattern_summary);
+  const aiConfidence = percentOrNull(ai.confidence ?? ai.recommendation_confidence ?? ai.analysis_confidence);
+  const aiThreat = firstString(ai.threat_level, ai.threatLevel, ai.threat_assessment, ai.risk_level);
+  const aiSuspectStatus = firstString(ai.suspect_status, ai.suspectStatus);
+  const aiModel = firstString(ai.model, ai.model_name, agent.model);
+  const aiZoneScore = percentOrNull(ai.area_risk_score ?? ai.zone_score ?? ai.risk_score);
+  const aiTrend = firstString(ai.trend, ai.pattern_trend, ai.zone_trend, ai.risk_trend);
+  const analysisPending = !hasAi && ["reported", "acknowledged"].includes(String(inc.status));
+  const reporterLabel = reporterProfile?.display_name || (reportedBy ? "Unknown member" : "System");
+  const statusTimes = new Map<string, string>();
+  for (const a of [...activityRows].reverse()) if (a.kind === "status_changed" && a.meta?.to && !statusTimes.has(a.meta.to)) statusTimes.set(a.meta.to, a.created_at);
+  statusTimes.set("reported", inc.reported_at);
+  const open = inc.status !== "resolved" && inc.status !== "closed";
+  const currentIdx = inc.status === "escalated" ? 2 : STATUS_FLOW.indexOf(inc.status);
+  const nextStatus = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1 ? STATUS_FLOW[currentIdx + 1] : null;
+  const title = inc.title || typeMeta[inc.type as IncidentType];
 
-  const normalizeOfficerCard = (officer: AnyRecord, idx: number, fallback?: any) => {
-    const routeSegments = [
-      firstString(officer.zone, fallback?.zone, inc.zone),
-      firstString(officer.location, fallback?.location, inc.location),
-      idx === 0 ? "fastest responder path" : "secondary coverage lane",
-    ].filter(Boolean);
-    const distance = toDisplayNumber(officer.distance ?? officer.distance_m ?? officer.distance_meters ?? officer.distance_metres ?? fallback?.distance ?? 0, 0);
-    const etaFallbackMinutes = Math.max(1, Math.round(distance / 95));
+  const payloadOfficers = firstRecordArray(
+    analysis.recommended_officers, analysis.recommended_responders, analysis.dispatch_recommendations,
+    plan.recommended_officers, plan.recommended_responders, plan.dispatch_recommendations,
+    agent.recommended_officers, agent.recommended_responders, agent.dispatch_recommendations,
+  );
+  const responders = (payloadOfficers.length ? payloadOfficers : (proximity as AnyRecord[])).map((o, idx) => {
+    const near = payloadOfficers.length ? (proximity as AnyRecord[]).find((p) => p.id === o.id || p.user_id === o.user_id || p.name === o.name) : o;
+    const distance = Number(o.distance ?? o.distance_m ?? o.distance_meters ?? near?.distance);
     return {
-      id: firstString(officer.id, officer.officer_id, officer.user_id, officer.member_user_id, fallback?.id, `${inc.id}-officer-${idx}`),
-      name: firstString(officer.name, officer.display_name, officer.officer_name, officer.full_name, fallback?.name) || `Officer ${idx + 1}`,
-      role: firstString(officer.role, officer.position, officer.assignment_role, fallback?.role) || "operator",
-      zone: firstString(officer.zone, officer.location_zone, officer.last_zone, fallback?.zone, inc.zone) || "Unknown",
-      distance,
-      eta:
-        firstString(officer.eta, officer.eta_display, officer.eta_text, fallback?.eta) ||
-        `${Math.floor(etaFallbackMinutes / 60) ? `${Math.floor(etaFallbackMinutes / 60)}h ` : ""}${etaFallbackMinutes % 60 || etaFallbackMinutes}m`,
-      route:
-        firstString(officer.route, officer.dispatch_route, officer.route_summary, fallback?.route) ||
-        humanList(routeSegments),
-      equipment: listFromValue(officer.equipment).length > 0 ? listFromValue(officer.equipment) : fallback?.equipment || ["Radio", "Torch"],
-      instructions:
-        firstString(officer.instructions, officer.guidance, officer.note, fallback?.instructions) ||
-        (idx === 0
-          ? "Move first, secure the perimeter, confirm victim safety, and report state changes every 60 seconds."
-          : "Stage nearby, preserve an exit lane, and stay available for relief or containment support."),
+      id: firstString(o.user_id, o.id, o.officer_id, o.member_user_id, near?.user_id, near?.id) || `${inc.id}-officer-${idx}`,
+      name: firstString(o.name, o.display_name, o.officer_name, o.full_name, near?.name) || `Officer ${idx + 1}`,
+      zone: firstString(o.zone, o.location_zone, near?.zone),
+      distance: Number.isFinite(distance) ? distance : null,
+      eta: firstString(o.eta, o.eta_display, o.eta_text),
+      route: firstString(o.route, o.dispatch_route, o.route_summary),
+      equipment: listFromValue(o.equipment),
+      instructions: firstString(o.instructions, o.guidance, o.note),
+      fromAi: payloadOfficers.length > 0,
     };
+  });
+  const assignedName = inc.officer as string | null;
+
+  const payloadActions = firstRecordArray(
+    analysis.autonomous_actions, analysis.infrastructure_actions, analysis.action_recommendations,
+    plan.autonomous_actions, plan.infrastructure_actions, plan.action_recommendations,
+    agent.autonomous_actions, agent.infrastructure_actions, agent.action_recommendations,
+  );
+  const latestAction = new Map<string, any>();
+  for (const row of activityRows) {
+    if (!["autonomous_action", "override_action"].includes(row.kind)) continue;
+    const key = row.meta?.action_id || row.meta?.id || row.meta?.key;
+    if (key && !latestAction.has(String(key))) latestAction.set(String(key), row);
+  }
+  const siteActions = payloadActions.map((a, idx) => {
+    const actionId = firstString(a.id, a.action_id) || `${inc.id}-action-${idx}`;
+    return {
+      id: actionId,
+      label: firstString(a.label, a.title, a.name) || `Action ${idx + 1}`,
+      auto: a.auto_execute === true || a.auto === true || a.kind === "auto" || a.execution_mode === "auto",
+      blocked: a.blocked === true || a.state === "blocked" || a.status === "blocked",
+      detail: firstString(a.detail, a.description, a.reason, a.summary),
+      approval: firstString(a.approval, a.approval_level, a.required_approval),
+      risk: firstString(a.risk, a.risk_level),
+      confidence: percentOrNull(a.confidence),
+      last: latestAction.get(actionId) ?? null,
+    };
+  });
+  const payloadVehicles = firstRecordArray(analysis.vehicle_recommendations, analysis.recommended_vehicles, plan.vehicle_recommendations, plan.recommended_vehicles, agent.vehicle_recommendations, agent.recommended_vehicles);
+
+  const runDispatchAction = async (action: "dispatch_ping" | "dispatch_route", officer: { id: string; name: string; distance: number | null }, message: string) => {
+    try {
+      await recordAction({ data: { incident_id: id, kind: action, message, meta: { officer_id: officer.id, officer_name: officer.name, distance_m: officer.distance == null ? null : Math.round(officer.distance) } } });
+      await dispatchAlert({
+        data: {
+          incident_id: id,
+          recipient_user_id: officer.id,
+          title: action === "dispatch_ping" ? `Dispatch ping · ${inc.code}` : `Route sent · ${inc.code}`,
+          body: `${message} ${action === "dispatch_route" ? "Open the navigation view for turn-by-turn guidance." : "Open the incident card for details and instructions."}`,
+          action: action === "dispatch_route" ? "Open navigation" : "Acknowledge dispatch",
+          alert_type: action === "dispatch_route" ? "incident_route" : "incident_assigned",
+          severity: Math.max(Number(inc.severity) || 1, 3),
+        },
+      });
+      publishRealtimeEvent(officerRoom(officer.id), action === "dispatch_ping" ? "officer:ping" : "officer:dispatch", { incident_id: id, incident_code: inc.code, action, message, officer_id: officer.id, officer_name: officer.name, severity: inc.severity });
+      publishRealtimeEvent(orgRoom(appAccess.orgId), action === "dispatch_ping" ? "officer:pinged" : "incident:updated", { incident_id: id, officer_id: officer.id, officer_name: officer.name, action, severity: inc.severity });
+      toast.success(action === "dispatch_ping" ? `Pinged ${officer.name}` : `Route sent to ${officer.name}`);
+      await invalidate();
+    } catch (err) {
+      toast.error("Couldn’t reach that officer", { description: err instanceof Error ? err.message : undefined });
+    }
   };
 
-  const payloadOfficerRecommendations = firstRecordArray(
-    incidentAnalysis.recommended_officers,
-    incidentAnalysis.recommended_responders,
-    incidentAnalysis.dispatch_recommendations,
-    dispatchPlan.recommended_officers,
-    dispatchPlan.recommended_responders,
-    dispatchPlan.dispatch_recommendations,
-    agentOutput.recommended_officers,
-    agentOutput.recommended_responders,
-    agentOutput.dispatch_recommendations,
-  );
-  const recommendedOfficers =
-    payloadOfficerRecommendations.length > 0
-      ? payloadOfficerRecommendations.map((officer, idx) => normalizeOfficerCard(officer, idx, proximity[idx]))
-      : proximity.map((officer: any, idx) => normalizeOfficerCard(officer, idx));
-
-  const payloadVehicleRecommendations = firstRecordArray(
-    incidentAnalysis.vehicle_recommendations,
-    incidentAnalysis.recommended_vehicles,
-    dispatchPlan.vehicle_recommendations,
-    dispatchPlan.recommended_vehicles,
-    agentOutput.vehicle_recommendations,
-    agentOutput.recommended_vehicles,
-  );
-  const vehicleRecommendations =
-    payloadVehicleRecommendations.length > 0
-      ? payloadVehicleRecommendations.map((vehicle, idx) => ({
-          id: firstString(vehicle.id, vehicle.vehicle_id, `${inc.id}-vehicle-${idx}`),
-          code: firstString(vehicle.code, vehicle.vehicle_code, vehicle.name, `Vehicle ${idx + 1}`) || `Vehicle ${idx + 1}`,
-          name: firstString(vehicle.name, vehicle.label, vehicle.vehicle_name, `Vehicle ${idx + 1}`) || `Vehicle ${idx + 1}`,
-          driver: firstString(vehicle.driver, vehicle.assigned_to, vehicle.operator, "Unassigned") || "Unassigned",
-          fuel: clamp(toDisplayPercent(vehicle.fuel ?? vehicle.fuel_level ?? vehicle.battery, 0), 0, 100),
-          eta: firstString(vehicle.eta, vehicle.eta_display, vehicle.eta_text, "—") || "—",
-          capacity: firstString(vehicle.capacity, vehicle.seats, vehicle.seating, "—") || "—",
-          status: firstString(vehicle.status, vehicle.state, "available") || "available",
-        }))
-      : patrolRows
-          .filter((patrol: any) => patrol.status !== "complete")
-          .slice(0, 3)
-          .map((patrol: any, idx: number) => {
-            const fuelLevel = clamp(
-              78 - Number(patrol.checked_in ?? 0) * 6 - (patrol.status === "delayed" ? 18 : 0) - idx * 5,
-              12,
-              100,
-            );
-            const etaMinutes = clamp(
-              Math.round((Number(patrol.waypoints ?? 1) - Number(patrol.checked_in ?? 0)) * 2.5 + idx * 3),
-              4,
-              38,
-            );
-            return {
-              id: patrol.id,
-              code: patrol.code,
-              name: patrol.name,
-              driver: patrol.officer || "Unassigned",
-              fuel: fuelLevel,
-              eta: `${etaMinutes}m`,
-              capacity: `${Math.max(Number(patrol.waypoints ?? 0), 1)} seats`,
-              status: patrol.status,
-            };
-          });
-
-  const payloadAutonomousActions = firstRecordArray(
-    incidentAnalysis.autonomous_actions,
-    incidentAnalysis.infrastructure_actions,
-    incidentAnalysis.action_recommendations,
-    dispatchPlan.autonomous_actions,
-    dispatchPlan.infrastructure_actions,
-    dispatchPlan.action_recommendations,
-    agentOutput.autonomous_actions,
-    agentOutput.infrastructure_actions,
-    agentOutput.action_recommendations,
-  );
-  const autonomousActions =
-    payloadAutonomousActions.map((action, idx) => {
-      const isAuto =
-        action.auto_execute === true ||
-        action.auto === true ||
-        action.kind === "auto" ||
-        action.execution_mode === "auto";
-      return {
-        id: firstString(action.id, action.action_id, `${inc.id}-action-${idx}`),
-        label: firstString(action.label, action.title, action.name, `Action ${idx + 1}`) || `Action ${idx + 1}`,
-        kind: isAuto ? "auto" : "approval",
-        detail: firstString(action.detail, action.description, action.reason, action.summary, "Pending review from the AI command layer.") || "Pending review from the AI command layer.",
-        impact: firstString(action.impact, action.benefit, action.effect, "Operational impact under review.") || "Operational impact under review.",
-        state: firstString(action.state, action.status, isAuto ? "executing" : "recommended") || (isAuto ? "executing" : "recommended"),
-        approval: firstString(action.approval, action.approval_level, action.required_approval, "Supervisor") || "Supervisor",
-        risk: firstString(action.risk, action.risk_level, "Medium") || "Medium",
-        savings: firstString(action.savings, action.time_savings, action.estimated_savings, "—") || "—",
-        meta: isRecord(action.meta) ? action.meta : { zone: inc.zone, location: inc.location },
-      } as const;
-    });
-
-  const activeOverrides = (() => {
-    const payloadOverrides = firstRecordArray(
-      incidentAnalysis.active_overrides,
-      incidentAnalysis.overrides,
-      dispatchPlan.active_overrides,
-      dispatchPlan.overrides,
-      agentOutput.active_overrides,
-      agentOutput.overrides,
-      agentOutput.override_status,
-    );
-    if (payloadOverrides.length > 0) {
-      return payloadOverrides.map((item, idx) => ({
-        id: firstString(item.id, item.action_id, `${inc.id}-override-${idx}`),
-        label: firstString(item.label, item.title, item.name, item.action, `Override ${idx + 1}`) || `Override ${idx + 1}`,
-        status: firstString(item.status, item.state, "Active") || "Active",
-        updatedAt: firstString(item.updated_at, item.last_updated_at, item.created_at) || null,
-        actor: firstString(item.actor, item.actor_name, item.updated_by) || null,
-      }));
-    }
-
-    const latestByAction = new Map<string, any>();
-    for (const row of activityRows) {
-      if (!["autonomous_action", "override_action"].includes(row.kind)) continue;
-      const actionId = row.meta?.action_id || row.meta?.id || row.meta?.key || row.message;
-      if (!actionId) continue;
-      latestByAction.set(String(actionId), row);
-    }
-    return autonomousActions
-      .map((action) => {
-        const latest = latestByAction.get(action.id);
-        if (latest) {
-          return {
-            ...action,
-            status: latest.meta?.state === "denied" ? "Denied" : latest.meta?.state === "approved" ? "Active" : latest.meta?.state === "executing" ? "Executing" : "Recorded",
-            updatedAt: latest.created_at,
-            actor: latest.actor_name,
-          };
-        }
-        if (action.kind === "auto") {
-          return { ...action, status: "Executing", updatedAt: reportedAt, actor: "Master Agent" };
-        }
-        return { ...action, status: action.state === "pending" ? "Awaiting approval" : "Recommended", updatedAt: null, actor: null };
+  const assignTo = (uid: string | null) =>
+    reassign({ data: { id, member_user_id: uid } })
+      .then(() => {
+        publishRealtimeEvent(orgRoom(appAccess.orgId), "incident:assigned", { incident_id: id, incident_code: inc.code, member_user_id: uid });
+        toast.success(uid ? "Assigned" : "Unassigned");
+        return invalidate();
       })
-      .filter((item) => item.status === "Executing" || item.status === "Active" || item.status === "Awaiting approval");
-  })();
-  const payloadRelated = firstRecordArray(
-    incidentAnalysis.related_incidents,
-    incidentAnalysis.related,
-    incidentAnalysis.linked_incidents,
-    agentOutput.related_incidents,
-    agentOutput.related,
-    agentOutput.linked_incidents,
-  );
-  const allRelated = [...linkedIncidents, ...suggestedRows, ...payloadRelated]
-    .filter((item: any, idx, arr) => arr.findIndex((candidate: any) => candidate.id === item.id) === idx)
-    .filter((item: any) => item.id !== inc.id);
-  const payloadMapPoints = firstRecordArray(
-    incidentAnalysis.map_points,
-    dispatchPlan.map_points,
-    agentOutput.map_points,
-    agentOutput.tracking_points,
-  );
-  const mapPoints =
-    payloadMapPoints.length > 0
-      ? payloadMapPoints
-          .map((point, idx) => ({
-            id: firstString(point.id, point.incident_id, `${inc.id}-point-${idx}`),
-            label: firstString(point.label, point.code, point.name, `Point ${idx + 1}`) || `Point ${idx + 1}`,
-            lng: Number(point.lng ?? point.longitude ?? point.coord_x ?? incidentPoint[0]),
-            lat: Number(point.lat ?? point.latitude ?? point.coord_y ?? incidentPoint[1]),
-            severity: Number(point.severity ?? point.level ?? inc.severity ?? 1),
-          }))
-          .filter((point) => Number.isFinite(point.lng) && Number.isFinite(point.lat))
-      : [
-          { id: inc.id, label: inc.code, lng: Number(inc.coord_x ?? incidentPoint[0]), lat: Number(inc.coord_y ?? incidentPoint[1]), severity: Number(inc.severity) },
-          ...allRelated
-            .filter((item: any) => item.coord_x != null && item.coord_y != null)
-            .map((item: any) => ({
-              id: item.id,
-              label: item.code,
-              lng: Number(item.coord_x),
-              lat: Number(item.coord_y),
-              severity: Number(item.severity ?? 1),
-            })),
-        ];
-
-  const autoApproveHandler = async (action: (typeof autonomousActions)[number], approved: boolean) => {
-    if (approved) {
-      await recordAction({
-        data: {
-          incident_id: id,
-          kind: "autonomous_action",
-          message: `${action.label} approved`,
-          meta: { action_id: action.id, state: "approved", action: action.label, source: "master-agent" },
-        },
-      });
-    } else {
-      await recordAction({
-        data: {
-          incident_id: id,
-          kind: "autonomous_action",
-          message: `${action.label} denied`,
-          meta: { action_id: action.id, state: "denied", action: action.label, source: "master-agent" },
-        },
-      });
-    }
-    await invalidate();
-  };
-
-  const runDispatchAction = async (action: string, officer: any, message: string) => {
-    await recordAction({
-      data: {
-        incident_id: id,
-        kind: action,
-        message,
-        meta: { officer_id: officer.id, officer_name: officer.name, distance_m: Math.round(officer.distance) },
-      },
-    });
-    await dispatchAlert({
-      data: {
-        incident_id: id,
-        recipient_user_id: officer.id,
-        title: action === "dispatch_ping" ? `Dispatch ping · ${inc.code}` : `Route sent · ${inc.code}`,
-        body: `${message} ${action === "dispatch_route" ? "Open the navigation view for turn-by-turn guidance." : "Open the incident card for details and instructions."}`,
-        action: action === "dispatch_route" ? "Open navigation" : "Acknowledge dispatch",
-        alert_type: action === "dispatch_route" ? "incident_route" : "incident_assigned",
-        severity: Math.max(Number(inc.severity) || 1, 3),
-      },
-    });
-    publishRealtimeEvent(officerRoom(officer.id), action === "dispatch_ping" ? "officer:ping" : "officer:dispatch", {
-      incident_id: id,
-      incident_code: inc.code,
-      action,
-      message,
-      officer_id: officer.id,
-      officer_name: officer.name,
-      severity: inc.severity,
-    });
-    publishRealtimeEvent(orgRoom(appAccess.orgId), action === "dispatch_ping" ? "officer:pinged" : "incident:updated", {
-      incident_id: id,
-      officer_id: officer.id,
-      officer_name: officer.name,
-      action,
-      severity: inc.severity,
-    });
-    await invalidate();
-  };
+      .catch((err) => toast.error("Couldn’t change the assignment", { description: err instanceof Error ? err.message : undefined }));
 
   const recordOperatorDecision = async (decision: "accepted" | "edited", note?: string) => {
     setRecordingDecision(true);
@@ -800,16 +339,8 @@ function IncidentDetailPage() {
         data: {
           incident_id: id,
           kind: "operator_decision",
-          message:
-            decision === "accepted"
-              ? `Operator accepted the AI recommendation as-is (${recommendedOfficers.length} officer${recommendedOfficers.length === 1 ? "" : "s"}).`
-              : `Operator changed the AI recommendation: ${note}`,
-          meta: {
-            decision,
-            note: note ?? null,
-            recommended_officer_ids: recommendedOfficers.map((officer) => officer.id),
-            recommended_officer_count: recommendedOfficers.length,
-          },
+          message: decision === "accepted" ? `Operator accepted the AI recommendation as-is (${responders.length} officer${responders.length === 1 ? "" : "s"}).` : `Operator changed the AI recommendation: ${note}`,
+          meta: { decision, note: note ?? null, recommended_officer_ids: responders.map((o) => o.id), recommended_officer_count: responders.length },
         },
       });
       await invalidate();
@@ -820,1102 +351,612 @@ function IncidentDetailPage() {
     }
   };
 
-  const incidentTitle = inc.title || typeMeta[inc.type as IncidentType];
-  const timeOpen = duration(reportedAt);
+  const decideSiteAction = async (action: (typeof siteActions)[number], state: "approved" | "denied" | "reverted") => {
+    await recordAction({
+      data: { incident_id: id, kind: "autonomous_action", message: `${action.label} ${state}`, meta: { action_id: action.id, state, action: action.label, source: state === "reverted" ? "manual-override" : "master-agent" } },
+    });
+    await invalidate();
+  };
+
+  const quickEscalate = (target: "police" | "lasema", label: string, phone: string) =>
+    escalate({ data: { incident_id: id, target, contact_name: label, contact_phone: phone, message: `Escalation for ${inc.code} at ${inc.location}.` } })
+      .then(() => {
+        toast.success(`Logged escalation to ${label}`);
+        return invalidate();
+      })
+      .catch((err) => toast.error("Couldn’t log the escalation", { description: err instanceof Error ? err.message : undefined }));
+
+  const tabs: { value: IncidentTab; label: string; count?: number }[] = [
+    { value: "response", label: "Response" },
+    { value: "overview", label: "Overview" },
+    { value: "evidence", label: "Evidence", count: evidenceItems.length },
+    { value: "timeline", label: "Timeline", count: activityRows.length },
+    { value: "escalations", label: "Escalations", count: escalationRows.length },
+    { value: "related", label: "Related", count: linkedIncidents.length + suggestedRows.length },
+  ];
 
   return (
-    <div className="space-y-5">
-      <button
-        onClick={() => navigate({ to: "/app/incidents" })}
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" /> Back to incidents
-      </button>
-
-      <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-        <div className="border-b border-border/70 bg-gradient-to-r from-primary/10 via-transparent to-resolved/10 px-5 py-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                <BrainCircuit className="h-3.5 w-3.5 text-primary" />
-                Unified incident detail
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs text-muted-foreground">{inc.code}</span>
-                <SeverityBadge severity={inc.severity as Severity} />
-                <span className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] uppercase tracking-wider">
-                  {typeMeta[inc.type as IncidentType]}
-                </span>
-                <StatusBadge status={inc.status} />
-                {!inc.client_visible && (
-                  <span className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Internal
-                  </span>
-                )}
-              </div>
-              <h1 className="text-xl font-semibold">{incidentTitle}</h1>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <span>Assigned to: {inc.officer || "Unassigned"}</span>
-                <span>Reported by: {reporterLabel}</span>
-                <span>Reported {fmt(reportedAt)}</span>
-                <span>{since(reportedAt)} since reported</span>
-                <span>Total time open: {timeOpen}</span>
-              </div>
-            </div>
-            <div className="grid gap-2 text-right">
-              <div className="rounded-lg border border-border bg-surface px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Confidence score
-                </div>
-                <div className="text-2xl font-semibold tabular-nums">{confidence}%</div>
-              </div>
-              <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                <div className="text-[10px] uppercase tracking-wider">Threat level</div>
-                <div className="mt-1 text-sm font-medium text-foreground">{threatLevel}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Metric icon={LayoutPanelTop} label="Status" value={statusMeta[inc.status] ?? inc.status} tone="resolved" />
-            <Metric
-              icon={ShieldAlert}
-              label="Threat assessment"
-              value={threatLevel}
-              tone={armed ? "critical" : severityScore >= 4 ? "warning" : "resolved"}
-            />
-            <Metric
-              icon={Radio}
-              label="Response age"
-              value={duration(reportedAt)}
-              tone={firstResponse ? "resolved" : "warning"}
-            />
-            <Metric
-              icon={Sparkles}
-              label="Area risk"
-              value={`${historicalContext.zoneScore}/100`}
-              tone={historicalContext.zoneScore >= 70 ? "critical" : historicalContext.zoneScore >= 45 ? "warning" : "resolved"}
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-border/60 pt-4">
-            {([
-              ["overview", "Overview", ClipboardList],
-              ["analysis", "AI Analysis", BrainCircuit],
-              ["activity", "Activity Log", Clock],
-              ["evidence", "Evidence", FolderOpen],
-              ["escalation", "Escalation History", Shield],
-              ["related", "Related Incidents", Layers3],
-            ] as const).map(([key, label, Icon]) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-wider transition ${
-                  activeTab === key
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-surface text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="px-5 py-5">
-          {activeTab === "overview" && (
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Location</div>
-                      <h2 className="text-sm font-semibold">{inc.location}</h2>
-                    </div>
-                    <MapIcon className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-                    <MiniStat label="Zone" value={inc.zone} />
-                    <MiniStat label="Floor" value={inc.floor || "Not set"} />
-                    <MiniStat label="Reported" value={fmt(reportedAt)} />
-                    <MiniStat label="Time since reported" value={since(reportedAt)} />
-                    <MiniStat label="Time open" value={timeOpen} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Full description</div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">
-                    {inc.description || inc.title || "No narrative entered yet."}
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Persons involved</div>
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    <MiniStat label="Suspect" value={inc.suspect_description || "Not specified"} />
-                    <MiniStat label="Victim" value={inc.victim_name || "Not specified"} />
-                    <MiniStat label="Witnesses" value={inc.witnesses || "Not specified"} />
-                    <MiniStat label="Contact" value={inc.victim_contact || "Not specified"} />
-                  </div>
-                </div>
-
-                <NotesPanel
-                  notes={data.notes as any[]}
-                  onAdd={(body, client_visible) =>
-                    addNote({ data: { incident_id: id, body, client_visible } }).then(invalidate)
-                  }
-                />
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Current state</div>
-                      <h3 className="text-sm font-semibold">Status and assignment controls</h3>
-                    </div>
-                    <LayoutPanelTop className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <AssignControl
-                      current={inc.officer}
-                      members={members}
-                      onAssign={(uid) => reassign({ data: { id, member_user_id: uid } }).then(() => {
-                        publishRealtimeEvent(orgRoom(appAccess.orgId), "incident:assigned", {
-                          incident_id: id,
-                          incident_code: inc.code,
-                          member_user_id: uid,
-                        });
-                        invalidate();
-                      })}
-                    />
-                    <StatusControl
-                      current={inc.status}
-                      onChange={(status, note) => transition({ data: { id, status, note } }).then(() => {
-                        publishRealtimeEvent(orgRoom(appAccess.orgId), "incident:updated", {
-                          incident_id: id,
-                          incident_code: inc.code,
-                          status,
-                          note,
-                        });
-                        invalidate();
-                      })}
-                    />
-                  </div>
-                  <div className="mt-4 grid gap-2 text-xs md:grid-cols-2">
-                    <MiniStat label="Assigned officer" value={inc.officer || "Unassigned"} />
-                    <MiniStat label="Reported by" value={reporterLabel} />
-                    <MiniStat label="First response" value={firstResponse ? duration(reportedAt, firstResponse.created_at) : "—"} />
-                    <MiniStat label="Visibility" value={inc.client_visible ? "Client visible" : "Internal only"} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Priority ranking</div>
-                      <h3 className="text-sm font-semibold">Nearest responders</h3>
-                    </div>
-                    <Users className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {recommendedOfficers.map((officer, idx) => (
-                      <div key={officer.id} className={`rounded-lg border p-3 ${idx === 0 ? "border-critical/40 bg-critical/10" : "border-border bg-card"}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-medium">{officer.name}</div>
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                              {officer.role.replace("_", " ")} · {officer.zone} · {Math.round(officer.distance)}m away
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-mono tabular-nums">{officer.eta}</div>
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">ETA</div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "analysis" && (
-            <div className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr]">
-              <div className="space-y-4">
-                {analysisPending && (
-                  <div className="rounded-xl border border-primary/20 bg-primary/10 p-4">
-                    <div className="flex items-center gap-3">
-                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                      <div>
-                        <div className="text-sm font-semibold text-foreground">AI analysis running</div>
-                        <div className="text-xs text-muted-foreground">
-                          The incident has been logged and is waiting for the analysis and dispatch plan payloads to arrive.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Situation summary</div>
-                      <h3 className="text-sm font-semibold">Plain-English incident synthesis</h3>
-                    </div>
-                    <span className="rounded-md border border-resolved/30 bg-resolved/10 px-2 py-1 text-[10px] uppercase tracking-wider text-resolved">
-                      Historical context included
-                    </span>
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-foreground">
-                    {`This is a ${severityMeta[inc.severity as Severity]?.label ?? `severity ${inc.severity}`} ${typeMeta[inc.type as IncidentType].toLowerCase()} incident at ${inc.location}. ${inc.officer ? `Officer ${inc.officer} is already attached.` : "No officer is formally assigned yet."} ${osintCount > 0 ? `The area has ${osintCount} nearby signal${osintCount === 1 ? "" : "s"} and the pattern is ${historicalContext.trend}.` : "No direct matching zone pattern is visible in the last 24 hours."}`}
-                  </p>
-                  <div className="mt-4 grid gap-2 md:grid-cols-3">
-                    <MiniStat label="Threat level" value={threatLevel} />
-                    <MiniStat label="Suspect status" value={suspectStatus} />
-                    <MiniStat label="Armed status" value={armed ? "Potentially armed" : "No weapon signal"} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Dispatch section</div>
-                      <h3 className="text-sm font-semibold">Recommended responders</h3>
-                    </div>
-                    <span className="rounded-md border border-border bg-card px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Proximity finder
-                    </span>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {recommendedOfficers.map((officer, idx) => (
-                      <div key={officer.id} className={`rounded-xl border p-4 ${idx === 0 ? "border-critical/40 bg-critical/10" : "border-border bg-card"}`}>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-sm font-semibold">{officer.name}</div>
-                              {idx === 0 && (
-                                <span className="rounded-full border border-critical/40 bg-critical/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-critical">
-                                  Primary
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                              {officer.role.replace("_", " ")} · {officer.zone} · {Math.round(officer.distance)}m away
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-mono tabular-nums">{officer.eta}</div>
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">ETA</div>
-                          </div>
-                        </div>
-                        <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-                          <div className="rounded-lg border border-border bg-surface px-3 py-2">
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Route</div>
-                            <div className="mt-1">{officer.route}</div>
-                          </div>
-                          <div className="rounded-lg border border-border bg-surface px-3 py-2">
-                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Equipment</div>
-                            <div className="mt-1">{humanList(officer.equipment)}</div>
-                          </div>
-                        </div>
-                        <div className="mt-3 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                          {officer.instructions}
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            onClick={() => runDispatchAction("dispatch_ping", officer, `Pinged ${officer.name} for incident ${inc.code}`)}
-                            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2"
-                          >
-                            <Radio className="h-3.5 w-3.5" /> Ping
-                          </button>
-                          <button
-                            onClick={() => runDispatchAction("dispatch_route", officer, `Sent route instructions to ${officer.name} for incident ${inc.code}`)}
-                            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2"
-                          >
-                            <MapPinned className="h-3.5 w-3.5" /> Send route
-                          </button>
-                          <button
-                            onClick={() => reassign({ data: { id, member_user_id: officer.id } }).then(() => {
-                              publishRealtimeEvent(orgRoom(appAccess.orgId), "incident:assigned", {
-                                incident_id: id,
-                                incident_code: inc.code,
-                                member_user_id: officer.id,
-                              });
-                              invalidate();
-                            })}
-                            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] uppercase tracking-wider text-primary-foreground hover:opacity-95"
-                          >
-                            <Users className="h-3.5 w-3.5" /> Assign
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Operator review</div>
-                      <h3 className="text-sm font-semibold">Accept or change this recommendation</h3>
-                    </div>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Whatever you decide is logged permanently against this incident — accepted as-is, or changed with your note attached.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      disabled={recordingDecision}
-                      onClick={() => recordOperatorDecision("accepted")}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] uppercase tracking-wider text-primary-foreground hover:opacity-95 disabled:opacity-60"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" /> Accept recommendation
-                    </button>
-                    <button
-                      disabled={recordingDecision}
-                      onClick={() => setEditingDecision((current) => !current)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2 disabled:opacity-60"
-                    >
-                      <ClipboardList className="h-3.5 w-3.5" /> Log a change
-                    </button>
-                  </div>
-                  {editingDecision && (
-                    <div className="mt-3 space-y-2">
-                      <textarea
-                        value={decisionNote}
-                        onChange={(e) => setDecisionNote(e.target.value)}
-                        placeholder="What are you changing from the AI's recommendation, and why?"
-                        rows={3}
-                        className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs"
-                      />
-                      <button
-                        disabled={recordingDecision || !decisionNote.trim()}
-                        onClick={() => recordOperatorDecision("edited", decisionNote.trim())}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] uppercase tracking-wider text-primary-foreground hover:opacity-95 disabled:opacity-60"
-                      >
-                        <Send className="h-3.5 w-3.5" /> Save decision
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {vehicleRecommendations.length > 0 && (
-                  <div className="rounded-xl border border-border bg-card p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Vehicle recommendations</div>
-                        <h4 className="text-sm font-semibold">Available patrol units</h4>
-                      </div>
-                      <Truck className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      {vehicleRecommendations.map((vehicle) => (
-                        <div key={vehicle.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="font-medium">{vehicle.code}</div>
-                            <span className="rounded border border-border bg-card px-2 py-0.5 text-[10px] uppercase tracking-wider">
-                              {vehicle.status}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-muted-foreground">Driver: {vehicle.driver}</div>
-                          <div className="mt-1 grid grid-cols-3 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                            <span>Fuel {vehicle.fuel}%</span>
-                            <span>ETA {vehicle.eta}</span>
-                            <span>{vehicle.capacity}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Autonomous actions</div>
-                      <h3 className="text-sm font-semibold">Infrastructure response suggestions</h3>
-                    </div>
-                    <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    {autonomousActions.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-border bg-surface p-6 text-center text-sm text-muted-foreground">
-                        No autonomous actions recommended for this incident.
-                        <div className="mt-2 text-xs">
-                          Connect smart infrastructure devices in{" "}
-                          <Link to="/app/settings">Settings → Infrastructure</Link>{" "}
-                          to enable automated response actions.
-                        </div>
-                      </div>
-                    ) : autonomousActions.map((action) => {
-                      const isAuto = action.kind === "auto";
-                      return (
-                        <div key={action.id} className="rounded-xl border border-border bg-card p-4">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-sm font-semibold">{action.label}</div>
-                                <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                                  {isAuto ? "AUTO" : "Needs approval"}
-                                </span>
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">{action.detail}</div>
-                            </div>
-                            <div className="text-right text-xs text-muted-foreground">
-                              {isAuto ? (
-                                <div className="rounded-full border border-resolved/40 bg-resolved/10 px-2 py-1 text-[10px] uppercase tracking-wider text-resolved">
-                                  EXECUTING...
-                                </div>
-                              ) : (
-                                <>
-                                  <div className="text-[10px] uppercase tracking-wider">Approval</div>
-                                  <div className="mt-1">{action.approval}</div>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          <div className="mt-3 grid gap-2 md:grid-cols-2">
-                            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                              <div className="text-[10px] uppercase tracking-wider">Impact</div>
-                              <div className="mt-1 text-foreground">{action.impact}</div>
-                            </div>
-                            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                              <div className="text-[10px] uppercase tracking-wider">Status</div>
-                              <div className="mt-1 text-foreground">
-                                {isAuto ? "Running from the automation queue" : `${action.risk} risk · ${action.savings} saved`}
-                              </div>
-                            </div>
-                          </div>
-                          {!isAuto && (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <button
-                                onClick={() => autoApproveHandler(action, true)}
-                                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] uppercase tracking-wider text-primary-foreground"
-                              >
-                                <CircleCheckBig className="h-3.5 w-3.5" /> Approve
-                              </button>
-                              <button
-                                onClick={() => autoApproveHandler(action, false)}
-                                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2"
-                              >
-                                <CircleX className="h-3.5 w-3.5" /> Deny
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Intelligence section</div>
-                      <h3 className="text-sm font-semibold">Area intelligence and pattern context</h3>
-                    </div>
-                    <Sparkles className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-sm leading-6">
-                    {historicalContext.summary}
-                  </div>
-                  <div className="mt-3 grid gap-2 md:grid-cols-2">
-                    <MiniStat label="Area risk score" value={`${historicalContext.zoneScore}/100`} />
-                    <MiniStat label="Trend" value={historicalContext.trend} />
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {suggestedRows.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">No adjacent intelligence items were found for this zone.</div>
-                    ) : (
-                      suggestedRows.slice(0, 4).map((item: any) => (
-                        <div key={item.id} className="rounded-lg border border-border bg-card px-3 py-2">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium">{typeMeta[item.type as IncidentType]}</div>
-                              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                                {item.location} · {item.zone}
-                              </div>
-                            </div>
-                            <div className="text-right text-xs text-muted-foreground">
-                              <div>{since(item.reported_at)}</div>
-                              <div className="mt-1">Severity {item.severity}</div>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {medical && (
-                  <div className="rounded-xl border border-critical/40 bg-critical/10 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-critical/80">Medical alert</div>
-                        <h3 className="text-sm font-semibold text-foreground">First aid and ambulance readiness required</h3>
-                      </div>
-                      <Siren className="h-4 w-4 text-critical" />
-                    </div>
-                    <div className="mt-3 text-sm leading-6">
-                      First aid indicators are present in the incident details. Keep a certified responder close,
-                      clear the route, and contact LASAMBUS at <span className="font-semibold">767</span> if escalation is required.
-                    </div>
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      <MiniStat label="Recommended responder" value={recommendedOfficers[0]?.name ?? "Nearest available officer"} />
-                      <MiniStat label="Emergency line" value="LASAMBUS 767" />
-                    </div>
-                  </div>
-                )}
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Escalation options</div>
-                      <h3 className="text-sm font-semibold">Pre-filled emergency contacts</h3>
-                    </div>
-                    <AlertOctagon className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-3 grid gap-2">
-                    {[
-                      { target: "police" as const, label: "Call Nigeria Police 199", phone: "199" },
-                      { target: "lasema" as const, label: "Call LASAMBUS 767", phone: "767" },
-                    ].map((item) => (
-                      <button
-                        key={item.target}
-                        onClick={() =>
-                          escalate({
-                            data: {
-                              incident_id: id,
-                              target: item.target,
-                              contact_name: item.label,
-                              contact_phone: item.phone,
-                              message: `Urgent escalation requested from AI command panel for ${inc.code} at ${inc.location}.`,
-                            },
-                          }).then(invalidate)
-                        }
-                        className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-left text-sm hover:bg-surface-2"
-                      >
-                        <span>{item.label}</span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    ))}
-                    <button
-                      onClick={() =>
-                        escalate({
-                          data: {
-                            incident_id: id,
-                            target: "custom",
-                            contact_name: "Security Manager",
-                            contact_phone: "",
-                            message: `Please review incident ${inc.code} in ${inc.location}. AI Command Panel requested manager escalation.`,
-                          },
-                        }).then(invalidate)
-                      }
-                      className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-left text-sm hover:bg-surface-2"
-                    >
-                      <span>Escalate to Security Manager</span>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Active overrides status</div>
-                      <h3 className="text-sm font-semibold">Currently active autonomous actions</h3>
-                    </div>
-                    <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {activeOverrides.length === 0 ? (
-                      <div className="text-xs text-muted-foreground">No autonomous overrides are currently active.</div>
-                    ) : (
-                      activeOverrides.map((action) => (
-                        <div key={action.id} className="rounded-lg border border-border bg-card px-3 py-2">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-medium">{action.label}</div>
-                              <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                                {action.status} · {action.actor ?? "Master Agent"}
-                              </div>
-                            </div>
-                            <div className="text-right text-[10px] uppercase tracking-wider text-muted-foreground">
-                              {action.updatedAt ? since(action.updatedAt) : "Live"}
-                            </div>
-                          </div>
-                          <div className="mt-2 flex justify-end">
-                            <button
-                              onClick={() =>
-                                recordAction({
-                                  data: {
-                                    incident_id: id,
-                                    kind: "autonomous_action",
-                                    message: `${action.label} reverted manually`,
-                                    meta: {
-                                      action_id: action.id,
-                                      state: "reverted",
-                                      action: action.label,
-                                      source: "manual-override",
-                                    },
-                                  },
-                                }).then(invalidate)
-                              }
-                              className="text-[10px] uppercase tracking-wider text-primary hover:underline"
-                            >
-                              Revert override
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "activity" && (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-surface p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Activity log</div>
-                    <h3 className="text-sm font-semibold">Immutable audit trail</h3>
-                  </div>
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  This log is append-only. Entries can be observed, exported, and reviewed, but not edited or deleted.
-                </p>
-              </div>
-              <Timeline activity={activityRows} />
-            </div>
-          )}
-
-          {activeTab === "evidence" && (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-surface p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Evidence</div>
-                    <h3 className="text-sm font-semibold">Upload, custody, and legal handling</h3>
-                  </div>
-                  <ImageUp className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
-                  <MiniStat label="Files attached" value={`${evidenceItems.length}`} />
-                  <MiniStat label="Legal flags" value={`${evidenceItems.filter((item: any) => item.legal).length}`} />
-                  <MiniStat label="Custody entries" value={`${evidenceItems.reduce((count: number, item: any) => count + (Array.isArray(item.chain_of_custody) ? item.chain_of_custody.length : 0), 0)}`} />
-                </div>
-              </div>
-              <EvidencePanel
-                organisationId={inc.organisation_id}
-                evidence={evidenceItems}
-                onAdd={(items) => addEvidence({ data: { incident_id: id, items } }).then(invalidate)}
-                onToggleLegal={(path, legal) =>
-                  patchEvidence({ data: { incident_id: id, path, legal, note: legal ? "Marked for chain of custody" : "Legal flag cleared" } }).then(invalidate)
-                }
-              />
-            </div>
-          )}
-
-          {activeTab === "escalation" && (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-surface p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Escalation history</div>
-                    <h3 className="text-sm font-semibold">Who was contacted, when, and what happened</h3>
-                  </div>
-                  <AlertOctagon className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
-                  <MiniStat label="Escalations" value={`${escalationRows.length}`} />
-                  <MiniStat label="Acknowledged" value={`${escalationRows.filter((row: any) => row.acknowledged).length}`} />
-                  <MiniStat
-                    label="Avg response"
-                    value={
-                      escalationRows.some((row: any) => row.acknowledged && row.acknowledged_at)
-                        ? `${Math.round(
-                            escalationRows
-                              .filter((row: any) => row.acknowledged && row.acknowledged_at)
-                              .reduce((acc: number, row: any) => acc + (new Date(row.acknowledged_at).getTime() - new Date(row.created_at).getTime()), 0) /
-                              escalationRows.filter((row: any) => row.acknowledged && row.acknowledged_at).length /
-                              60000,
-                          )}m`
-                        : "—"
-                    }
-                  />
-                </div>
-              </div>
-              <EscalationPanel
-                escalations={data.escalations as any[]}
-                onEscalate={(t, name, phone, message) =>
-                  escalate({
-                    data: {
-                      incident_id: id,
-                      target: t,
-                      contact_name: name,
-                      contact_phone: phone,
-                      message,
-                    },
-                  }).then(invalidate)
-                }
-                onAck={(eid) => ackEsc({ data: { id: eid } }).then(invalidate)}
-                incident={inc}
-              />
-            </div>
-          )}
-
-          {activeTab === "related" && (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-surface p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Related incidents map</div>
-                    <h3 className="text-sm font-semibold">System-suggested and manually linked incidents</h3>
-                  </div>
-                  <Layers3 className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  This preview clusters all known related incidents around the active case using available incident coordinates.
-                </p>
-              </div>
-              <RelatedMapPreview points={mapPoints} base={incidentPoint} />
-              <LinkedPanel
-                linked={linkedIncidents}
-                suggested={suggestedRows}
-                onLink={(lid) =>
-                  linkInc({ data: { incident_id: id, linked_incident_id: lid } }).then(invalidate)
-                }
-              />
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-sm font-medium truncate">{value}</div>
-      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: IncidentStatus }) {
-  const color =
-    status === "resolved"
-      ? "text-resolved"
-      : status === "escalated"
-        ? "text-critical"
-        : status === "responding"
-          ? "text-high"
-          : status === "closed"
-            ? "text-muted-foreground"
-            : "text-foreground";
-  return (
-    <span className={`text-[10px] uppercase tracking-wider font-semibold ${color}`}>
-      {statusMeta[status] ?? status}
-    </span>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-xs font-medium truncate">{value}</div>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  tone = "resolved",
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  tone?: "resolved" | "warning" | "critical";
-  icon?: any;
-}) {
-  const toneClass =
-    tone === "critical"
-      ? "border-critical/30 bg-critical/10 text-critical"
-      : tone === "warning"
-        ? "border-high/30 bg-high/10 text-high"
-        : "border-border bg-surface text-foreground";
-  return (
-    <div className={`rounded-xl border px-3 py-3 ${toneClass}`}>
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-        {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
-        {label}
+    <div className="col g12">
+      <div className="row g8 t3" style={{ fontSize: 12 }}>
+        <Link to="/app/incidents" className="row g4 t3 hover:text-tx-1">
+          <ArrowLeft size={13} strokeWidth={1.75} /> Incidents
+        </Link>
+        <span>/</span>
+        <span className="mono">{inc.code}</span>
       </div>
-      <div className="mt-1 text-sm font-medium leading-5">{value}</div>
-    </div>
-  );
-}
 
-function AssignControl({
-  current,
-  members,
-  onAssign,
-}: {
-  current: string | null;
-  members: any[];
-  onAssign: (uid: string | null) => Promise<unknown>;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs hover:bg-surface-2"
-      >
-        <User className="h-3.5 w-3.5" /> {current ? `Reassign (${current})` : "Assign officer"}
-      </button>
-      {open && (
-        <div className="absolute z-20 mt-1 w-64 rounded-md border border-border bg-card p-1 shadow-lg max-h-72 overflow-y-auto">
-          <button
-            onClick={() => {
-              onAssign(null);
-              setOpen(false);
-            }}
-            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-surface-2 text-muted-foreground"
-          >
-            — Unassign —
-          </button>
-          {members.map((m: any) => (
-            <button
-              key={m.id}
-              onClick={() => {
-                onAssign(m.user_id);
-                setOpen(false);
-              }}
-              className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-surface-2"
-            >
-              <div>{m.profile?.display_name || "Member"}</div>
-              <div className="text-[10px] text-muted-foreground capitalize">
-                {m.role.replace("_", " ")}
-              </div>
-            </button>
-          ))}
+      <div className="row g16 wrap" style={{ alignItems: "center" }}>
+        <div className="col g6 min-w-0">
+          <div className="row g10 wrap">
+            <Sev level={inc.severity} label />
+            <h1 className="ph1" style={{ fontSize: 22 }}>{title}</h1>
+            <span className="mono t3" style={{ fontSize: 13 }}>{inc.code}</span>
+            {!inc.client_visible && <span className="tg">Internal</span>}
+          </div>
+          <div className="row g12 wrap t2" style={{ fontSize: 12.5 }}>
+            <span className="row g4"><MapPin size={13} strokeWidth={1.75} /> {[inc.location, inc.zone, inc.floor].filter(Boolean).join(" · ")}</span>
+            <span className="row g4"><UserCheck size={13} strokeWidth={1.75} /> Reported by {reporterLabel}</span>
+            <span className="row g4"><Clock4 size={13} strokeWidth={1.75} /> {fmt(inc.reported_at)}</span>
+          </div>
         </div>
-      )}
-    </div>
-  );
-}
+        <span className="flex-auto" />
+        <div className="col" style={{ alignItems: "flex-end" }}>
+          <span className="t3" style={{ fontSize: 11.5 }}>{open ? "Open for" : "Closed after"}</span>
+          <span className="mono" style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-.02em", color: open && Number(inc.severity) >= 4 ? "#FF8E90" : "var(--tx-1)" }}>
+            {open ? elapsed(inc.reported_at, now) : duration(inc.reported_at, statusTimes.get(inc.status) ?? inc.updated_at)}
+          </span>
+        </div>
+        <div className="vr" />
+        <div className="col g4">
+          <span className="t3" style={{ fontSize: 11.5 }}>Assigned</span>
+          <span className="row g4">
+            {assignedName ? <span title={assignedName}><Avatar name={assignedName} own /></span> : <span className="tg tg-warn">Nobody</span>}
+            {!readOnly && (
+              <span className="relative">
+                <button type="button" className="ibtn" style={{ width: 24, height: 24, borderRadius: "50%" }} aria-label="Change assignment" aria-expanded={assignOpen} onClick={() => setAssignOpen((o) => !o)}>
+                  <Plus size={13} strokeWidth={1.75} />
+                </button>
+                {assignOpen && (
+                  <div className="pn absolute right-0 z-30 mt-1 w-64 overflow-y-auto shadow-2xl" style={{ maxHeight: 300, background: "var(--ink-2)", borderColor: "var(--line-2)" }}>
+                    <button type="button" className="w-full px-3 py-2 text-left t3 hover:bg-ink-3" onClick={() => { setAssignOpen(false); void assignTo(null); }}>
+                      Unassign
+                    </button>
+                    {(members as any[]).map((m) => (
+                      <button key={m.id} type="button" className="row g8 w-full px-3 py-2 text-left hover:bg-ink-3" onClick={() => { setAssignOpen(false); void assignTo(m.user_id); }}>
+                        <Avatar name={m.profile?.display_name} />
+                        <span className="f1 trunc">{m.profile?.display_name || "Member"}</span>
+                        <span className="t3 capitalize" style={{ fontSize: 11 }}>{String(m.role).replace("_", " ")}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </span>
+            )}
+          </span>
+        </div>
+        {!readOnly && (
+          <>
+            <button type="button" className="b b-sec" onClick={() => setTab("escalations")}>
+              <ArrowUpRight size={15} strokeWidth={1.75} /> Escalate
+            </button>
+            {nextStatus && (
+              <button type="button" className="b b-pri" onClick={() => setPendingStatus(nextStatus)}>
+                Mark {statusMeta[nextStatus].toLowerCase()}
+              </button>
+            )}
+            <label className="relative">
+              <span className="sr-only">Set any status</span>
+              <select className="in" style={{ height: 32, width: "auto" }} value="" onChange={(e) => e.target.value && setPendingStatus(e.target.value as IncidentStatus)}>
+                <option value="">More…</option>
+                {([...STATUS_FLOW, "escalated", "closed"] as IncidentStatus[]).filter((s) => s !== inc.status).map((s) => (
+                  <option key={s} value={s}>Set to {statusMeta[s]}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+      </div>
 
-function StatusControl({
-  current,
-  onChange,
-}: {
-  current: IncidentStatus;
-  onChange: (s: IncidentStatus, note: string) => Promise<unknown>;
-}) {
-  const [pending, setPending] = useState<IncidentStatus | null>(null);
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const all: IncidentStatus[] = [...STATUS_FLOW, "escalated", "closed"];
-  return (
-    <>
-      <div className="flex flex-wrap gap-1.5">
-        {all.map((s) => (
-          <button
-            key={s}
-            disabled={s === current}
-            onClick={() => {
-              setPending(s);
-              setNote("");
-              setErr(null);
-            }}
-            className={`rounded-md border px-2.5 py-1 text-[11px] uppercase tracking-wider ${
-              s === current
-                ? "border-primary/60 bg-primary/15 text-primary"
-                : "border-border bg-surface text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {statusMeta[s] ?? s}
+      <div className="row g8 wrap" aria-label="Incident lifecycle">
+        {STATUS_FLOW.map((s, idx) => {
+          const done = inc.status === "resolved" || inc.status === "closed" ? true : idx < currentIdx;
+          const current = idx === currentIdx && open;
+          const at = statusTimes.get(s);
+          return (
+            <span key={s} className="row g8">
+              {idx > 0 && <span style={{ width: 32, height: 2, background: done || current ? "var(--ok)" : "var(--line-2)", display: "block" }} />}
+              <span className="row g8">
+                {done ? (
+                  <span className="grid place-items-center" style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--ok)", color: "#06140C" }}><Check size={12} strokeWidth={2.5} /></span>
+                ) : current ? (
+                  <span className="grid place-items-center" style={{ width: 18, height: 18, borderRadius: "50%", border: "2px solid var(--blue-hi)" }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--blue-hi)", display: "block" }} /></span>
+                ) : (
+                  <span style={{ width: 18, height: 18, borderRadius: "50%", border: "1.5px solid var(--line-3)", display: "block" }} />
+                )}
+                <span className="col">
+                  <span style={{ fontSize: 12.5, fontWeight: current ? 600 : 500, color: current ? "var(--tx-1)" : done ? "var(--tx-2)" : "var(--tx-3)" }}>{statusMeta[s]}</span>
+                  {at && (done || current) && <span className="mono t3" style={{ fontSize: 11 }}>{current && s !== "reported" ? "since " : ""}{fmtTime(at)}</span>}
+                </span>
+              </span>
+            </span>
+          );
+        })}
+        {inc.status === "escalated" && <span className="tg tg-fail">Escalated</span>}
+      </div>
+
+      <div className="tabs" role="tablist" aria-label="Incident sections">
+        {tabs.map((t) => (
+          <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} className={`tab${tab === t.value ? " on" : ""}`} onClick={() => setTab(t.value)}>
+            {t.value === "response" && <Sparkles size={14} strokeWidth={1.75} />}
+            {t.label}
+            {t.count !== undefined && <span className="c">{t.count}</span>}
           </button>
         ))}
       </div>
-      {pending && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm px-4">
-          <div className="w-full max-w-md rounded-lg border border-border bg-card p-5">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Transition status
-            </div>
-            <h3 className="mt-1 text-lg font-semibold">
-              {statusMeta[current]} → {statusMeta[pending]}
-            </h3>
-            <textarea
-              autoFocus
-              rows={3}
-              required
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Reason / note (required for accountability)"
-              className="mt-3 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm resize-none"
-            />
-            {err && <div className="mt-2 text-xs text-critical">{err}</div>}
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                onClick={() => setPending(null)}
-                className="rounded-md border border-border bg-surface px-3 py-2 text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={busy || !note.trim()}
-                onClick={async () => {
-                  setBusy(true);
-                  setErr(null);
-                  try {
-                    await onChange(pending, note.trim());
-                    setPending(null);
-                  } catch (e) {
-                    setErr((e as Error).message);
-                  } finally {
-                    setBusy(false);
+
+      {tab === "response" && (
+        <div className="flex flex-wrap items-start" style={{ gap: 12 }}>
+          <div className="col g12" style={{ flex: "1 1 280px", minWidth: 0, maxWidth: "100%" }}>
+            {incidentPoint ? <LocationPicker value={incidentPoint} center={incidentPoint} height={220} readOnly /> : <div className="card empty" style={{ padding: 14 }}>No position recorded for this incident, so it isn’t on the map and nearby officers can’t be ranked by distance.</div>}
+            <section className="pn">
+              <div className="pn-h"><Info size={15} strokeWidth={1.75} className="ic" /><h3>Situation</h3></div>
+              <div className="pn-b">
+                <dl className="kv" style={{ margin: 0 }}>
+                  <dt>Suspects</dt><dd>{[inc.suspect_count ? `${inc.suspect_count}` : null, inc.suspect_description].filter(Boolean).join(" · ") || <span className="t3">Not recorded</span>}</dd>
+                  {aiSuspectStatus && (<><dt>Suspect status</dt><dd>{aiSuspectStatus} <span className="tg tg-ai">AI</span></dd></>)}
+                  {aiThreat && (<><dt>Threat</dt><dd>{aiThreat} <span className="tg tg-ai">AI</span></dd></>)}
+                  <dt>Victims</dt><dd>{[inc.victim_name, inc.victim_contact].filter(Boolean).join(" · ") || <span className="t3">None recorded</span>}</dd>
+                  <dt>Witnesses</dt><dd>{inc.witnesses || <span className="t3">None recorded</span>}</dd>
+                  {aiZoneScore != null && (<><dt>Zone risk</dt><dd>{aiZoneScore}/100{aiTrend ? ` · ${aiTrend}` : ""} <span className="tg tg-ai">AI</span></dd></>)}
+                  <dt>Reported by</dt><dd>{reporterLabel}</dd>
+                  <dt>Visibility</dt><dd>{inc.client_visible ? "Client can see it" : "Internal only"}</dd>
+                </dl>
+              </div>
+            </section>
+            <section className="pn">
+              <div className="pn-h">
+                <Paperclip size={15} strokeWidth={1.75} className="ic" /><h3>Evidence</h3><span className="meta">{evidenceItems.length}</span>
+                <span className="flex-auto" />
+                <button type="button" className="b b-sm b-gh" onClick={() => setTab("evidence")}>{evidenceItems.length ? "View all" : "Add"}</button>
+              </div>
+              <div className="pn-b">
+                {evidenceItems.length === 0 ? (
+                  <div className="empty">No evidence attached yet.</div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                    {evidenceItems.slice(0, 4).map((ev: any) => <EvidenceThumb key={ev.path} ev={ev} />)}
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <div className="col g12" style={{ flex: "999 1 520px", minWidth: 0 }}>
+            {hasAi && aiSummary ? (
+              <section className="ai" style={{ padding: "12px 14px" }}>
+                <div className="row g8 wrap">
+                  <span className="ai-h"><Sparkles size={15} strokeWidth={1.75} /> Situation summary</span>
+                  {aiModel && <span className="t3" style={{ fontSize: 11.5 }}>{aiModel}</span>}
+                  <span className="flex-auto" />
+                  <Confidence value={aiConfidence} />
+                </div>
+                <p style={{ marginTop: 8, fontSize: 14, lineHeight: 1.55 }}>{aiSummary}</p>
+                {(aiThreat || listFromValue(ai.tags).length > 0) && (
+                  <div className="row g8 wrap" style={{ marginTop: 10 }}>
+                    {aiThreat && <span className="tg">Threat · {aiThreat}</span>}
+                    {listFromValue(ai.tags).map((t) => <span key={t} className="tg">{t}</span>)}
+                  </div>
+                )}
+              </section>
+            ) : (
+              <section className="card row g10" style={{ padding: "12px 14px" }}>
+                {analysisPending ? <Loader2 className="h-4 w-4 animate-spin t3" /> : <Sparkles size={15} strokeWidth={1.75} className="ic t3" />}
+                <span className="t2" style={{ fontSize: 12.5 }}>
+                  {analysisPending ? "AI analysis is running — the summary and dispatch plan appear here when they arrive." : "No AI summary for this incident."}
+                </span>
+              </section>
+            )}
+
+            <section className="pn">
+              <div className="pn-h">
+                <Navigation size={15} strokeWidth={1.75} className="ic" />
+                <h3>Dispatch</h3>
+                <span className="meta">{responders.length ? (responders[0].fromAi ? "AI recommendation" : `Nearest by distance · ${responders.length}`) : "No responders ranked"}</span>
+              </div>
+              <div className="pn-b col g8">
+                {assignedName && !responders.some((r) => r.name === assignedName) && (
+                  <div className="ai done row g10" style={{ padding: "10px 12px" }}>
+                    <Avatar name={assignedName} size="lg" own />
+                    <b className="f1" style={{ fontSize: 13.5 }}>{assignedName}</b>
+                    <span className="tg tg-ok"><Check size={12} strokeWidth={2.4} /> Assigned</span>
+                  </div>
+                )}
+                {responders.length === 0 ? (
+                  <div className="empty">{incidentPoint ? "No officers with a known position are near this incident." : "Add a position to the incident to rank officers by distance."}</div>
+                ) : (
+                  responders.map((o, idx) => {
+                    const isAssigned = assignedName === o.name;
+                    return (
+                      <div key={o.id} className={`${isAssigned ? "ai done" : o.fromAi ? "ai" : "card"} col g8`} style={{ padding: "10px 12px" }}>
+                        <div className="row g10">
+                          <span className="mono t3" style={{ fontSize: 12 }}>#{idx + 1}</span>
+                          <Avatar name={o.name} size="lg" own />
+                          <div className="f1 col">
+                            <div className="row g8 wrap">
+                              <b style={{ fontSize: 13.5 }}>{o.name}</b>
+                              {isAssigned ? <span className="tg tg-ok"><Check size={12} strokeWidth={2.4} /> Assigned</span> : o.fromAi ? <span className="tg tg-ai"><Sparkles size={12} strokeWidth={1.75} /> Proposed</span> : null}
+                            </div>
+                            <div className="row g12 wrap t2" style={{ fontSize: 12 }}>
+                              {o.zone && <span className="row g4"><MapPin size={12} strokeWidth={1.75} /> {o.zone}</span>}
+                              {o.distance != null && <span>{Math.round(o.distance)} m away</span>}
+                            </div>
+                          </div>
+                          {o.eta && (
+                            <div className="col" style={{ alignItems: "flex-end" }}>
+                              <span className="t3" style={{ fontSize: 11 }}>ETA</span>
+                              <span className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{o.eta}</span>
+                            </div>
+                          )}
+                        </div>
+                        {(o.instructions || o.route) && <div className="t2" style={{ fontSize: 12.5, paddingLeft: 66 }}>{[o.instructions, o.route && `Route: ${o.route}`].filter(Boolean).join(" ")}</div>}
+                        {!readOnly && (
+                          <div className="row g6 wrap" style={{ paddingLeft: 66 }}>
+                            {o.equipment.map((e) => <span key={e} className="tg">{e}</span>)}
+                            <span className="flex-auto" />
+                            <button type="button" className="b b-sm b-sec" onClick={() => runDispatchAction("dispatch_ping", o, `Pinged ${o.name} for incident ${inc.code}`)}><BellRing size={13} strokeWidth={1.75} /> Ping</button>
+                            <button type="button" className="b b-sm b-sec" onClick={() => runDispatchAction("dispatch_route", o, `Sent route instructions to ${o.name} for incident ${inc.code}`)}><Navigation size={13} strokeWidth={1.75} /> Send route</button>
+                            {!isAssigned && <button type="button" className="b b-sm b-pri" onClick={() => void assignTo(o.id)}><UserCheck size={13} strokeWidth={1.75} /> Assign</button>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+                {payloadVehicles.length > 0 && (
+                  <div className="col g6">
+                    <span className="eyebrow">Vehicles in the AI plan</span>
+                    {payloadVehicles.map((v, idx) => (
+                      <div key={firstString(v.id, v.vehicle_id) || idx} className="ai row g10 wrap" style={{ padding: "8px 12px" }}>
+                        <b className="f1">{firstString(v.code, v.vehicle_code, v.name) || `Vehicle ${idx + 1}`}</b>
+                        {firstString(v.driver, v.assigned_to) && <span className="t2">{firstString(v.driver, v.assigned_to)}</span>}
+                        {percentOrNull(v.fuel ?? v.fuel_level) != null && <span className="tg">Fuel {percentOrNull(v.fuel ?? v.fuel_level)}%</span>}
+                        {firstString(v.eta, v.eta_display) && <span className="tg">ETA {firstString(v.eta, v.eta_display)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!readOnly && responders.length > 0 && responders[0].fromAi && (
+                  <div className="col g8" style={{ borderTop: "1px solid var(--line-1)", paddingTop: 10 }}>
+                    <span className="t3" style={{ fontSize: 12 }}>Your decision on this recommendation is logged permanently against the incident.</span>
+                    <div className="row g8 wrap">
+                      <button type="button" className="b b-sm b-pri" disabled={recordingDecision} onClick={() => recordOperatorDecision("accepted")}><Check size={13} strokeWidth={1.75} /> Accept as is</button>
+                      <button type="button" className="b b-sm b-sec" disabled={recordingDecision} onClick={() => setEditingDecision((c) => !c)}><ClipboardList size={13} strokeWidth={1.75} /> Log a change</button>
+                    </div>
+                    {editingDecision && (
+                      <div className="col g8">
+                        <textarea className="in" rows={3} value={decisionNote} onChange={(e) => setDecisionNote(e.target.value)} placeholder="What are you changing from the AI’s recommendation, and why?" />
+                        <button type="button" className="b b-sm b-pri self-start" disabled={recordingDecision || !decisionNote.trim()} onClick={() => recordOperatorDecision("edited", decisionNote.trim())}><Send size={13} strokeWidth={1.75} /> Save decision</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="pn">
+              <div className="pn-h"><ShieldCheck size={15} strokeWidth={1.75} className="ic" /><h3>Site actions</h3><span className="meta">From the AI plan · every decision is logged</span></div>
+              <div className="pn-b col g8">
+                {siteActions.length === 0 && (
+                  <div className="empty">
+                    No site actions proposed for this incident. Connected devices are managed in <Link to="/app/devices" className="lnk">Devices</Link>.
+                  </div>
+                )}
+                {siteActions.map((a) => {
+                  const state = a.last?.meta?.state as string | undefined;
+                  if (a.blocked) {
+                    return (
+                      <div key={a.id} className="card row g10" style={{ padding: "10px 12px", borderColor: "#4A2427", background: "#160E10" }}>
+                        <span className="tg tg-fail" style={{ fontWeight: 600 }}>BLOCKED</span>
+                        <span className="f1 col">
+                          <b style={{ fontSize: 13, textDecoration: "line-through", color: "var(--tx-2)" }}>{a.label}</b>
+                          {a.detail && <span style={{ fontSize: 12, color: "#FF9A9B" }}>{a.detail}</span>}
+                        </span>
+                      </div>
+                    );
                   }
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
-              >
-                {busy && <Loader2 className="h-3 w-3 animate-spin" />} Confirm
-              </button>
-            </div>
+                  if (a.auto) {
+                    return (
+                      <div key={a.id} className="card row g10" style={{ padding: "10px 12px" }}>
+                        <span className="tg tg-warn" style={{ fontWeight: 600 }}>AUTO</span>
+                        <span className="f1 col">
+                          <b style={{ fontSize: 13 }}>{a.label}</b>
+                          <span className="t3" style={{ fontSize: 12 }}>{state === "reverted" ? `Reverted ${timeAgo(a.last.created_at)}` : a.last ? `${state ?? "Recorded"} · ${timeAgo(a.last.created_at)}` : "Automatic in the plan · no execution recorded yet"}</span>
+                        </span>
+                        {!readOnly && state !== "reverted" && <button type="button" className="b b-sm b-gh" onClick={() => decideSiteAction(a, "reverted")}><RotateCcw size={13} strokeWidth={1.75} /> Revert</button>}
+                      </div>
+                    );
+                  }
+                  const decided = state === "approved" || state === "denied";
+                  return (
+                    <div key={a.id} className={`ai${decided ? " done" : ""} row g10`} style={{ padding: "10px 12px" }}>
+                      <span className={`tg ${decided ? (state === "approved" ? "tg-ok" : "tg-fail") : "tg-ai"}`} style={{ fontWeight: 600 }}>{decided ? state.toUpperCase() : "APPROVAL"}</span>
+                      <span className="f1 col">
+                        <b style={{ fontSize: 13 }}>{a.label}</b>
+                        {a.detail && <span className="t2" style={{ fontSize: 12 }}>{a.detail}</span>}
+                        <span className="t3" style={{ fontSize: 11.5, marginTop: 2 }}>
+                          {decided ? `${a.last.actor_name ?? "Someone"} · ${fmtTime(a.last.created_at)}` : [a.risk && `Risk ${a.risk.toLowerCase()}`, a.approval].filter(Boolean).join(" · ") || "Needs a person to decide"}
+                        </span>
+                      </span>
+                      {a.confidence != null && !decided && <Confidence value={a.confidence} />}
+                      {!readOnly && !decided && (
+                        <>
+                          <button type="button" className="b b-sm b-gh" onClick={() => decideSiteAction(a, "denied")}>Deny</button>
+                          <button type="button" className="b b-sm b-pri" onClick={() => decideSiteAction(a, "approved")}><Check size={13} strokeWidth={1.75} /> Approve</button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+                {open && <IncidentProposals incident={inc} orgId={appAccess.orgId} readOnly={readOnly} actor={appAccess.displayName || appAccess.email || "You"} />}
+              </div>
+            </section>
+
+            {!readOnly && (
+              <section className="pn">
+                <div className="pn-h"><ArrowUpRight size={15} strokeWidth={1.75} className="ic" /><h3>Escalate</h3><span className="meta">Calls from your phone; each one is logged here</span></div>
+                <div className="pn-b">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(220px,100%),1fr))", gap: 8 }}>
+                    <a href="tel:199" className="b b-lg b-red" onClick={() => void quickEscalate("police", "Nigeria Police", "199")}><PhoneCall size={16} strokeWidth={1.75} /> Nigeria Police · 199</a>
+                    <a href="tel:767" className="b b-lg b-sec" onClick={() => void quickEscalate("lasema", "LASAMBUS / LASEMA", "767")}><Siren size={16} strokeWidth={1.75} /> LASAMBUS · 767</a>
+                    <button type="button" className="b b-lg b-sec" onClick={() => setTab("escalations")}><Shield size={16} strokeWidth={1.75} /> Other contact…</button>
+                  </div>
+                </div>
+              </section>
+            )}
+          </div>
+
+          <div className="col g12" style={{ flex: "1 1 300px", minWidth: 0, maxWidth: "100%" }}>
+            <TimelinePanel activity={activityRows} limit={12} onMore={() => setTab("timeline")} />
+            <NotesPanel notes={data.notes as any[]} onAdd={(body, cv) => addNote({ data: { incident_id: id, body, client_visible: cv } }).then(invalidate)} />
           </div>
         </div>
       )}
-    </>
+
+      {tab === "overview" && (
+        <div className="flex flex-wrap items-start" style={{ gap: 12 }}>
+          <div className="col g12" style={{ flex: "2 1 480px", minWidth: 0 }}>
+            <section className="pn">
+              <div className="pn-h"><FileText size={15} strokeWidth={1.75} className="ic" /><h3>What happened</h3></div>
+              <div className="pn-b"><p className="whitespace-pre-wrap" style={{ fontSize: 13.5, lineHeight: 1.6 }}>{inc.description || <span className="t3">No description entered.</span>}</p></div>
+            </section>
+            <section className="pn">
+              <div className="pn-h"><Info size={15} strokeWidth={1.75} className="ic" /><h3>Details</h3></div>
+              <div className="pn-b">
+                <dl className="kv" style={{ margin: 0 }}>
+                  <dt>Type</dt><dd>{typeMeta[inc.type as IncidentType]}</dd>
+                  <dt>Severity</dt><dd><Sev level={inc.severity} label /> <span className="t3">{severityMeta[inc.severity as Severity]?.sublabel}</span></dd>
+                  <dt>Location</dt><dd>{[inc.location, inc.zone, inc.floor].filter(Boolean).join(" · ")}</dd>
+                  <dt>Position</dt><dd className="mono">{incidentPoint ? `${incidentPoint[1].toFixed(5)}, ${incidentPoint[0].toFixed(5)}` : "Not recorded"}</dd>
+                  <dt>Reported</dt><dd>{fmt(inc.reported_at)} · {reporterLabel}</dd>
+                  <dt>First acknowledged</dt><dd>{statusTimes.get("acknowledged") ? `${duration(inc.reported_at, statusTimes.get("acknowledged"))} after reporting` : "Not yet"}</dd>
+                  <dt>Suspects</dt><dd>{[inc.suspect_count, inc.suspect_description].filter(Boolean).join(" · ") || "—"}</dd>
+                  <dt>Victim</dt><dd>{[inc.victim_name, inc.victim_contact].filter(Boolean).join(" · ") || "—"}</dd>
+                  <dt>Witnesses</dt><dd>{inc.witnesses || "—"}</dd>
+                </dl>
+              </div>
+            </section>
+          </div>
+          <div className="col g12" style={{ flex: "1 1 320px", minWidth: 0 }}>
+            <NotesPanel notes={data.notes as any[]} onAdd={(body, cv) => addNote({ data: { incident_id: id, body, client_visible: cv } }).then(invalidate)} />
+          </div>
+        </div>
+      )}
+
+      {tab === "evidence" && (
+        <EvidencePanel
+          organisationId={inc.organisation_id}
+          evidence={evidenceItems}
+          readOnly={readOnly}
+          onAdd={(items) => addEvidence({ data: { incident_id: id, items } }).then(invalidate)}
+          onToggleLegal={(path, legal) => patchEvidence({ data: { incident_id: id, path, legal, note: legal ? "Marked for chain of custody" : "Legal flag cleared" } }).then(invalidate)}
+        />
+      )}
+
+      {tab === "timeline" && <TimelinePanel activity={activityRows} />}
+
+      {tab === "escalations" && (
+        <EscalationPanel
+          escalations={escalationRows}
+          incident={inc}
+          readOnly={readOnly}
+          onEscalate={(t, name, phone, message) => escalate({ data: { incident_id: id, target: t, contact_name: name, contact_phone: phone, message } }).then(invalidate)}
+          onAck={(eid) => ackEsc({ data: { id: eid } }).then(invalidate)}
+        />
+      )}
+
+      {tab === "related" && <LinkedPanel linked={linkedIncidents} suggested={suggestedRows} readOnly={readOnly} onLink={(lid) => linkInc({ data: { incident_id: id, linked_incident_id: lid } }).then(invalidate)} />}
+
+      {pendingStatus && (
+        <StatusDialog
+          from={inc.status}
+          to={pendingStatus}
+          onClose={() => setPendingStatus(null)}
+          onConfirm={(note) =>
+            transition({ data: { id, status: pendingStatus, note } }).then(() => {
+              publishRealtimeEvent(orgRoom(appAccess.orgId), "incident:updated", { incident_id: id, incident_code: inc.code, status: pendingStatus, note });
+              setPendingStatus(null);
+              return invalidate();
+            })
+          }
+        />
+      )}
+    </div>
   );
 }
 
-function Timeline({ activity }: { activity: any[] }) {
-  const iconFor = (kind: string) =>
-    kind === "status_changed"
-      ? CheckCircle2
-      : kind === "assigned"
-        ? User
-        : kind === "dispatch_ping"
-          ? Radio
-          : kind === "dispatch_route"
-            ? MapPinned
-            : kind === "autonomous_action"
-              ? ShieldCheck
-        : kind === "note" || kind === "client_note"
-          ? MessageSquare
-        : kind === "evidence_added"
-          ? Paperclip
-        : kind === "escalation"
-              ? AlertOctagon
-              : kind === "link_added"
-                ? LinkIcon
-                : Clock;
+function EvidenceThumb({ ev }: { ev: any }) {
+  if (ev.kind === "image" && ev.url) {
+    return (
+      <a href={ev.url} target="_blank" rel="noreferrer" className="card overflow-hidden" style={{ height: 84, position: "relative" }}>
+        <img src={ev.url} alt={ev.name} className="h-full w-full object-cover" />
+      </a>
+    );
+  }
+  const Icon = ev.kind === "audio" ? Mic : ev.kind === "video" ? VideoIcon : FileText;
   return (
-    <section className="rounded-lg border border-border bg-card p-5">
-      <h2 className="text-sm font-semibold mb-3">Activity timeline</h2>
+    <a href={ev.url ?? undefined} target="_blank" rel="noreferrer" className="card col g6" style={{ height: 84, padding: 10, justifyContent: "center" }}>
+      <span className="row g6" style={{ fontSize: 12, fontWeight: 600 }}><Icon size={14} strokeWidth={1.75} /> <span className="trunc">{ev.name}</span></span>
+      <span className="mono t3" style={{ fontSize: 11 }}>{ev.kind}{ev.size ? ` · ${Math.round(ev.size / 1024)} KB` : ""}</span>
+    </a>
+  );
+}
+
+function StatusDialog({ from, to, onClose, onConfirm }: { from: IncidentStatus; to: IncidentStatus; onClose: () => void; onConfirm: (note: string) => Promise<unknown> }) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center px-4" style={{ background: "rgba(5,7,10,.72)" }} role="dialog" aria-modal="true" aria-label="Change status">
+      <div className="pn w-full" style={{ maxWidth: 440, borderColor: "var(--line-2)" }}>
+        <div className="pn-h">
+          <div className="col">
+            <span className="eyebrow">Change status</span>
+            <h3 style={{ fontSize: 15 }}>{statusMeta[from]} → {statusMeta[to]}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="ibtn ml-auto" style={{ width: 28, height: 28 }} aria-label="Close"><X size={14} strokeWidth={1.75} /></button>
+        </div>
+        <div className="pn-b col g12">
+          <label className="fl">
+            <span className="lbl">Note (required, kept in the audit trail)</span>
+            <textarea autoFocus rows={3} value={note} onChange={(e) => setNote(e.target.value)} className="in" />
+          </label>
+          {err && <Notice tone="fail">{err}</Notice>}
+          <div className="row g8 justify-end">
+            <button type="button" onClick={onClose} className="b b-gh">Cancel</button>
+            <button
+              type="button"
+              className="b b-pri"
+              disabled={busy || !note.trim()}
+              onClick={async () => {
+                setBusy(true);
+                setErr(null);
+                try {
+                  await onConfirm(note.trim());
+                } catch (e) {
+                  setErr((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Confirm
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function dotColor(kind: string) {
+  if (kind === "ai_recommendation" || kind === "autonomous_action") return "var(--ai)";
+  if (kind === "status_changed") return "var(--ok)";
+  if (kind === "escalation") return "var(--s5)";
+  if (kind === "dispatch_ping" || kind === "dispatch_route" || kind === "assigned" || kind === "operator_decision") return "var(--blue-hi)";
+  if (kind === "override_action") return "var(--warn)";
+  return "var(--tx-3)";
+}
+
+function TimelinePanel({ activity, limit, onMore }: { activity: any[]; limit?: number; onMore?: () => void }) {
+  const rows = limit ? activity.slice(0, limit) : activity;
+  return (
+    <section className="pn">
+      <div className="pn-h">
+        <History size={15} strokeWidth={1.75} className="ic" />
+        <h3>Live timeline</h3>
+        <span className="meta">Append-only</span>
+        <span className="flex-auto" />
+        <span className="row g6 t3" style={{ fontSize: 11.5 }}><span className="pulse" /> live</span>
+      </div>
       {activity.length === 0 ? (
-        <div className="text-xs text-muted-foreground">No activity yet.</div>
+        <div className="empty" style={{ padding: 12 }}>No activity yet.</div>
       ) : (
-        <ol className="space-y-3">
-          {activity.map((a) => {
-            const Icon = iconFor(a.kind);
-            return (
-              <li key={a.id} className="flex gap-3">
-                <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface border border-border">
-                  <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm">{a.message}</div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {a.actor_name || "System"} · {fmt(a.created_at)} · {since(a.created_at)}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
+        <ol className="list" style={{ listStyle: "none", margin: 0, padding: "0 12px" }}>
+          {rows.map((a) => (
+            <li key={a.id} className="row g10" style={{ alignItems: "flex-start", padding: "8px 0" }}>
+              <span className="mono t3" style={{ fontSize: 11, width: 56, flex: "none", paddingTop: 1 }}>{fmtTime(a.created_at)}</span>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor(a.kind), marginTop: 5, flex: "none" }} />
+              <span className="f1" style={{ fontSize: 12.5 }}>
+                <b style={{ fontWeight: 600 }}>{a.actor_name || "System"}</b> <span className="t2">{a.message}</span>
+                {limit === undefined && <div className="t3" style={{ fontSize: 12, marginTop: 2 }}>{fmt(a.created_at)}</div>}
+              </span>
+            </li>
+          ))}
         </ol>
+      )}
+      {onMore && activity.length > rows.length && (
+        <button type="button" className="b b-sm b-gh m-2 self-start" onClick={onMore}>All {activity.length} entries</button>
       )}
     </section>
   );
 }
 
-function NotesPanel({
-  notes,
-  onAdd,
-}: {
-  notes: any[];
-  onAdd: (body: string, cv: boolean) => Promise<unknown>;
-}) {
+function NotesPanel({ notes, onAdd }: { notes: any[]; onAdd: (body: string, cv: boolean) => Promise<unknown> }) {
   const [body, setBody] = useState("");
   const [cv, setCv] = useState(false);
   const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!body.trim()) return;
+    setBusy(true);
+    try {
+      await onAdd(body.trim(), cv);
+      setBody("");
+      setCv(false);
+    } catch (err) {
+      toast.error("Couldn’t post the note", { description: err instanceof Error ? err.message : undefined });
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <section className="rounded-lg border border-border bg-card p-5">
-      <h2 className="text-sm font-semibold mb-3">Notes & communication</h2>
-      <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-        {notes.length === 0 && <div className="text-xs text-muted-foreground">No notes yet.</div>}
-        {notes.map((n) => (
-          <div
-            key={n.id}
-            className={`rounded-md border px-3 py-2 ${n.client_visible ? "border-primary/40 bg-primary/5" : "border-border bg-surface"}`}
-          >
-            <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
-              <span>
-                {n.author_name || "Operator"} · {since(n.created_at)}
-              </span>
-              <span>{n.client_visible ? "Client visible" : "Internal"}</span>
+    <section className="pn">
+      <div className="pn-h"><MessageSquare size={15} strokeWidth={1.75} className="ic" /><h3>Notes</h3><span className="meta">{notes.length}</span></div>
+      <div className="pn-b col g8">
+        <div className="col g8 overflow-y-auto" style={{ maxHeight: 360 }}>
+          {notes.length === 0 && <div className="empty">No notes yet.</div>}
+          {notes.map((n) => (
+            <div key={n.id} className="row g8" style={{ alignItems: "flex-start" }}>
+              <Avatar name={n.author_name || "Operator"} />
+              <div className="f1">
+                <div style={{ fontSize: 12.5 }}>
+                  <b>{n.author_name || "Operator"}</b> <span className="mono t3" style={{ fontSize: 11 }}>{timeAgo(n.created_at)}</span>
+                  {n.client_visible && <span className="tg tg-blue ml-2">Client can see</span>}
+                </div>
+                <div className="t2 whitespace-pre-wrap" style={{ fontSize: 12.5 }}>{n.body}</div>
+              </div>
             </div>
-            <div className="mt-1 text-sm whitespace-pre-wrap">{n.body}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3 space-y-2">
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={2}
-          maxLength={2000}
-          placeholder="Add a note. Use @ to mention…"
-          className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm resize-none"
-        />
-        <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={cv} onChange={(e) => setCv(e.target.checked)} /> Client
-            visible
-          </label>
-          <button
-            disabled={busy || !body.trim()}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await onAdd(body.trim(), cv);
-                setBody("");
-                setCv(false);
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-60"
-          >
-            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}{" "}
-            Post note
-          </button>
+          ))}
         </div>
+        <label className="in" style={{ height: "auto", alignItems: "flex-end", paddingTop: 6, paddingBottom: 6 }}>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
+            }}
+            rows={2}
+            maxLength={2000}
+            placeholder="Add a note"
+            aria-label="New note"
+            className="f1 bg-transparent outline-none resize-none"
+          />
+          <button type="button" className="ibtn" style={{ width: 30, height: 30 }} disabled={busy || !body.trim()} onClick={() => void submit()} aria-label="Post note">
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send size={14} strokeWidth={1.75} />}
+          </button>
+        </label>
+        <label className="row g8 t2" style={{ fontSize: 12 }}>
+          <input type="checkbox" checked={cv} onChange={(e) => setCv(e.target.checked)} /> Visible to the client admin
+        </label>
       </div>
     </section>
   );
@@ -1924,452 +965,213 @@ function NotesPanel({
 function EvidencePanel({
   organisationId,
   evidence,
+  readOnly,
   onAdd,
   onToggleLegal,
 }: {
   organisationId: string;
   evidence: any[];
+  readOnly: boolean;
   onAdd: (items: { path: string; kind: any; size: number; name: string }[]) => Promise<unknown>;
-  onToggleLegal?: (path: string, legal: boolean) => Promise<unknown>;
+  onToggleLegal: (path: string, legal: boolean) => Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [enlarged, setEnlarged] = useState<string | null>(null);
-
   const upload = async (file: File) => {
     setBusy(true);
     const ext = file.name.split(".").pop() || "bin";
     const path = `${organisationId}/added/${crypto.randomUUID()}.${ext}`;
-    const kind: any = file.type.startsWith("image/")
-      ? "image"
-      : file.type.startsWith("video/")
-        ? "video"
-        : file.type.startsWith("audio/")
-          ? "audio"
-          : "document";
-    const { error } = await supabase.storage
-      .from("incident-evidence")
-      .upload(path, file, { contentType: file.type });
-    if (!error) {
-      await onAdd([{ path, kind, size: file.size, name: file.name }]);
-    } else {
-      alert(`Upload failed: ${error.message}`);
-    }
+    const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "document";
+    const { error } = await supabase.storage.from("incident-evidence").upload(path, file, { contentType: file.type });
+    if (error) toast.error("Upload failed", { description: error.message });
+    else await onAdd([{ path, kind, size: file.size, name: file.name }]);
     setBusy(false);
     if (fileRef.current) fileRef.current.value = "";
   };
-
   return (
-    <section className="rounded-lg border border-border bg-card p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold">Evidence ({evidence.length})</h2>
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs hover:bg-surface-2"
-        >
-          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Paperclip className="h-3 w-3" />}{" "}
-          Add evidence
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          hidden
-          onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
-        />
+    <section className="pn">
+      <div className="pn-h">
+        <Paperclip size={15} strokeWidth={1.75} className="ic" />
+        <h3>Evidence</h3>
+        <span className="meta">{evidence.length} file(s) · {evidence.filter((e) => e.legal).length} flagged as legal evidence</span>
+        <span className="flex-auto" />
+        {!readOnly && (
+          <button type="button" className="b b-sm b-sec" disabled={busy} onClick={() => fileRef.current?.click()}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus size={13} strokeWidth={1.75} />} Add evidence
+          </button>
+        )}
+        <input ref={fileRef} type="file" hidden onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
       </div>
-      {evidence.length === 0 ? (
-        <div className="text-xs text-muted-foreground">No evidence attached.</div>
-      ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {evidence.map((ev: any) => (
-            <div key={ev.path} className="rounded-xl border border-border bg-surface overflow-hidden">
-              <div className="border-b border-border/70 bg-card px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{ev.name}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      <span>{ev.kind}</span>
-                      <span>{ev.size ? `${Math.round(ev.size / 1024)} KB` : "—"}</span>
-                      <span>{ev.added_by_name || "System"}</span>
+      <div className="pn-b">
+        {evidence.length === 0 ? (
+          <div className="empty">No evidence attached.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(300px,100%),1fr))", gap: 12 }}>
+            {evidence.map((ev: any) => {
+              const custody = Array.isArray(ev.chain_of_custody) ? ev.chain_of_custody : [{ at: ev.added_at, actor_name: ev.added_by_name, action: "added" }];
+              return (
+                <div key={ev.path} className="card overflow-hidden col">
+                  {ev.kind === "image" && ev.url ? (
+                    <img src={ev.url} alt={ev.name} className="w-full object-cover" style={{ height: 170 }} />
+                  ) : ev.kind === "video" && ev.url ? (
+                    <video src={ev.url} controls className="w-full bg-black" style={{ height: 170 }} />
+                  ) : ev.kind === "audio" && ev.url ? (
+                    <div className="p-3"><audio src={ev.url} controls className="w-full" /></div>
+                  ) : null}
+                  <div className="col g8" style={{ padding: 12 }}>
+                    <div className="row g8">
+                      <b className="f1 trunc">{ev.name}</b>
+                      {ev.legal ? <span className="tg tg-fail">Legal evidence</span> : <span className="tg">Standard</span>}
+                    </div>
+                    <span className="mono t3" style={{ fontSize: 11 }}>{ev.kind}{ev.size ? ` · ${Math.round(ev.size / 1024)} KB` : ""} · {ev.added_by_name || "System"}{ev.added_at ? ` · ${fmt(ev.added_at)}` : ""}</span>
+                    <div className="col g4">
+                      <span className="eyebrow">Chain of custody</span>
+                      {custody.map((c: any, i: number) => (
+                        <span key={i} className="row g8 t2" style={{ fontSize: 12 }}>
+                          <span className="f1 trunc capitalize">{c.action} · {c.actor_name || "System"}</span>
+                          <span className="mono t3" style={{ fontSize: 11 }}>{c.at ? timeAgo(c.at) : "—"}</span>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="row g8 wrap">
+                      {ev.url && <a href={ev.url} target="_blank" rel="noreferrer" className="b b-sm b-sec"><Download size={13} strokeWidth={1.75} /> Download</a>}
+                      {!readOnly && (
+                        <button type="button" className="b b-sm b-gh" onClick={() => void onToggleLegal(ev.path, !ev.legal)}>
+                          <Shield size={13} strokeWidth={1.75} /> {ev.legal ? "Clear legal flag" : "Flag as legal evidence"}
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${ev.legal ? "border-critical/40 bg-critical/10 text-critical" : "border-border bg-surface text-muted-foreground"}`}>
-                    {ev.legal ? "Legal evidence" : "Standard"}
-                  </span>
                 </div>
-              </div>
-
-              {ev.kind === "image" && ev.url ? (
-                <button onClick={() => setEnlarged(ev.url)} className="block w-full">
-                  <img src={ev.url} alt={ev.name} className="w-full h-44 object-cover" />
-                </button>
-              ) : ev.kind === "video" && ev.url ? (
-                <video src={ev.url} controls className="w-full h-44 object-cover bg-black" />
-              ) : ev.kind === "audio" && ev.url ? (
-                <div className="p-3">
-                  <audio src={ev.url} controls className="w-full" />
-                </div>
-              ) : (
-                <a
-                  href={ev.url ?? "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex h-44 flex-col items-center justify-center text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <FileText className="h-6 w-6" />
-                  <span className="mt-1 truncate max-w-full px-2">{ev.name}</span>
-                </a>
-              )}
-
-              <div className="space-y-2 px-3 py-3 text-xs">
-                <div className="grid gap-2 md:grid-cols-2">
-                  <div className="rounded-lg border border-border bg-card px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Uploaded</div>
-                    <div className="mt-1">{ev.added_at ? fmtPrecise(ev.added_at) : "—"}</div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-card px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Chain of custody</div>
-                    <div className="mt-1">{Array.isArray(ev.chain_of_custody) ? `${ev.chain_of_custody.length} event(s)` : "1 event"}</div>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border bg-card px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Custody trail</div>
-                  <div className="mt-2 space-y-2">
-                    {(Array.isArray(ev.chain_of_custody) ? ev.chain_of_custody : [{ at: ev.added_at, actor_name: ev.added_by_name, action: "added" }]).map((entry: any, idx: number) => (
-                      <div key={`${ev.path}-${idx}`} className="flex items-start justify-between gap-3 rounded-md border border-border bg-surface px-2 py-1.5">
-                        <div className="min-w-0">
-                          <div className="truncate text-[11px] font-medium uppercase tracking-wider">{entry.action}</div>
-                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{entry.actor_name || "System"}</div>
-                        </div>
-                        <div className="text-right text-[10px] text-muted-foreground">{entry.at ? since(entry.at) : "—"}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {ev.url && (
-                    <a
-                      href={ev.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] uppercase tracking-wider hover:bg-surface-2"
-                    >
-                      <FileText className="h-3.5 w-3.5" /> Download
-                    </a>
-                  )}
-                  {onToggleLegal && (
-                    <button
-                      onClick={() => onToggleLegal(ev.path, !ev.legal)}
-                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider ${ev.legal ? "border border-border bg-card hover:bg-surface-2" : "bg-primary text-primary-foreground"}`}
-                    >
-                      <Shield className="h-3.5 w-3.5" />
-                      {ev.legal ? "Clear legal flag" : "Flag legal evidence"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {enlarged && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-4"
-          onClick={() => setEnlarged(null)}
-        >
-          <img src={enlarged} alt="" className="max-h-full max-w-full" />
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
 
 function EscalationPanel({
   escalations,
+  incident,
+  readOnly,
   onEscalate,
   onAck,
-  incident,
 }: {
   escalations: any[];
+  incident: any;
+  readOnly: boolean;
   onEscalate: (target: any, name: string, phone: string, message: string) => Promise<unknown>;
   onAck: (id: string) => Promise<unknown>;
-  incident: any;
 }) {
-  const [open, setOpen] = useState(false);
+  const draft = useMemo(
+    () =>
+      `URGENT — ${typeMeta[incident.type as IncidentType]} (Severity ${incident.severity})\nLocation: ${incident.location}, ${incident.zone}\nTime: ${fmt(incident.reported_at)}\nOfficer on scene: ${incident.officer || "Unassigned"}\nDetails: ${incident.description || "—"}\nRef: ${incident.code}`,
+    [incident],
+  );
   const [target, setTarget] = useState<(typeof ESCALATION_TARGETS)[number]["key"]>("police");
   const [customName, setCustomName] = useState("");
   const [customPhone, setCustomPhone] = useState("");
-  const draft = useMemo(() => {
-    return (
-      `URGENT — ${typeMeta[incident.type as IncidentType]} (Severity ${incident.severity})\n` +
-      `Location: ${incident.location}, ${incident.zone}\n` +
-      `Time: ${fmt(incident.reported_at)}\n` +
-      `Officer on scene: ${incident.officer || "Unassigned"}\n` +
-      `Details: ${incident.description || "—"}\n` +
-      `Ref: ${incident.code}`
-    );
-  }, [incident]);
   const [message, setMessage] = useState(draft);
   const [busy, setBusy] = useState(false);
-
+  const acked = escalations.filter((e) => e.acknowledged && e.acknowledged_at);
+  const avgAck = acked.length ? Math.round(acked.reduce((acc, e) => acc + (new Date(e.acknowledged_at).getTime() - new Date(e.created_at).getTime()), 0) / acked.length / 60000) : null;
   return (
-    <section className="rounded-lg border border-border bg-card p-5">
-      <h2 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
-        <ShieldAlert className="h-3.5 w-3.5 text-critical" /> Escalation
-      </h2>
-      {!open ? (
-        <button
-          onClick={() => {
-            setOpen(true);
-            setMessage(draft);
-          }}
-          className="w-full rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical hover:bg-critical/15"
-        >
-          Escalate to authorities
-        </button>
-      ) : (
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-1.5">
-            {ESCALATION_TARGETS.map((t) => (
+    <div className="flex flex-wrap items-start" style={{ gap: 12 }}>
+      {!readOnly && (
+        <section className="pn" style={{ flex: "1 1 380px", minWidth: 0 }}>
+          <div className="pn-h"><ArrowUpRight size={15} strokeWidth={1.75} className="ic" /><h3>New escalation</h3></div>
+          <div className="pn-b col g12">
+            <div className="seg" role="group" aria-label="Contact">
+              {ESCALATION_TARGETS.map((t) => (
+                <button key={t.key} type="button" className={target === t.key ? "on" : undefined} aria-pressed={target === t.key} onClick={() => setTarget(t.key)}>{t.label}</button>
+              ))}
+            </div>
+            {target === "custom" && (
+              <div className="row g8">
+                <input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Contact name" className="in" aria-label="Contact name" />
+                <input value={customPhone} onChange={(e) => setCustomPhone(e.target.value)} placeholder="Phone" className="in" aria-label="Phone" />
+              </div>
+            )}
+            <label className="fl">
+              <span className="lbl">Message</span>
+              <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={7} className="in mono" style={{ fontSize: 12 }} />
+            </label>
+            <div className="row g8">
+              <span className="t3 f1" style={{ fontSize: 12 }}>Logs the escalation on this incident. Call or message the contact yourself.</span>
               <button
-                key={t.key}
-                onClick={() => setTarget(t.key)}
-                className={`rounded-md border px-2 py-1.5 text-[11px] uppercase tracking-wider ${target === t.key ? "border-primary/60 bg-primary/15 text-primary" : "border-border bg-surface text-muted-foreground"}`}
+                type="button"
+                className="b b-red"
+                disabled={busy || !message.trim()}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const t = ESCALATION_TARGETS.find((x) => x.key === target)!;
+                    await onEscalate(target, target === "custom" ? customName : t.label, target === "custom" ? customPhone : t.phone, message.trim());
+                    toast.success("Escalation logged");
+                    setMessage(draft);
+                  } catch (err) {
+                    toast.error("Couldn’t log the escalation", { description: err instanceof Error ? err.message : undefined });
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
               >
-                {t.label}
+                {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Log escalation
               </button>
-            ))}
-          </div>
-          {target === "custom" && (
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                placeholder="Contact name"
-                className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs"
-              />
-              <input
-                value={customPhone}
-                onChange={(e) => setCustomPhone(e.target.value)}
-                placeholder="Phone"
-                className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs"
-              />
             </div>
-          )}
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={6}
-            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs font-mono"
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setOpen(false)}
-              className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs"
-            >
-              Cancel
-            </button>
-            <button
-              disabled={busy || !message.trim()}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  const t = ESCALATION_TARGETS.find((x) => x.key === target)!;
-                  await onEscalate(
-                    target,
-                    target === "custom" ? customName : t.label,
-                    target === "custom" ? customPhone : t.phone,
-                    message.trim(),
-                  );
-                  setOpen(false);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-md bg-critical px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-            >
-              {busy && <Loader2 className="h-3 w-3 animate-spin" />} Send escalation
-            </button>
           </div>
-        </div>
+        </section>
       )}
-
-      {escalations.length > 0 && (
-        <div className="mt-4 space-y-2">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">History</div>
-          {escalations.map((e) => (
-            <div
-              key={e.id}
-              className="rounded-md border border-border bg-surface px-3 py-2 text-xs"
-            >
-              <div className="flex items-center justify-between">
-                <div className="font-medium uppercase tracking-wider text-[10px]">{e.target}</div>
-                <div className="text-[10px] text-muted-foreground">{since(e.created_at)}</div>
-              </div>
-              {e.contact_name && (
-                <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
-                  <Phone className="h-3 w-3" /> {e.contact_name}{" "}
-                  {e.contact_phone && `· ${e.contact_phone}`}
+      <section className="pn" style={{ flex: "1 1 380px", minWidth: 0 }}>
+        <div className="pn-h"><History size={15} strokeWidth={1.75} className="ic" /><h3>History</h3><span className="meta">{escalations.length} · {acked.length} acknowledged{avgAck != null ? ` · avg ${avgAck}m to acknowledge` : ""}</span></div>
+        {escalations.length === 0 ? (
+          <div className="empty" style={{ padding: 12 }}>No escalations yet.</div>
+        ) : (
+          <div className="list">
+            {escalations.map((e) => (
+              <div key={e.id} className="row g10 wrap" style={{ padding: "10px 12px" }}>
+                <div className="f1 col">
+                  <b style={{ fontSize: 13 }} className="capitalize">{e.contact_name || e.target}</b>
+                  <span className="t3 row g6" style={{ fontSize: 12 }}>{e.contact_phone && (<><Phone size={12} strokeWidth={1.75} /> {e.contact_phone} ·</>)} {timeAgo(e.created_at)}</span>
                 </div>
-              )}
-              <div className="mt-1 flex items-center justify-between">
-                <span
-                  className={`text-[10px] uppercase tracking-wider ${e.acknowledged ? "text-resolved" : "text-medium"}`}
-                >
-                  {e.acknowledged ? "Acknowledged" : "Pending response"}
-                </span>
-                {!e.acknowledged && (
-                  <button
-                    onClick={() => onAck(e.id)}
-                    className="text-[10px] uppercase tracking-wider text-primary hover:underline"
-                  >
-                    Mark acknowledged
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function LinkedPanel({
-  linked,
-  suggested,
-  onLink,
-}: {
-  linked: any[];
-  suggested: any[];
-  onLink: (id: string) => Promise<unknown>;
-}) {
-  return (
-    <section className="rounded-lg border border-border bg-card p-5">
-      <h2 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
-        <LinkIcon className="h-3.5 w-3.5" /> Related incidents
-      </h2>
-      {linked.length === 0 ? (
-        <div className="text-xs text-muted-foreground">No linked incidents.</div>
-      ) : (
-        <div className="space-y-1.5">
-          {linked.map((l) => (
-            <Link
-              key={l.id}
-              to="/app/incidents/$id"
-              params={{ id: l.id }}
-              className="block rounded-md border border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-mono">{l.code}</span>
-                <SeverityBadge severity={l.severity as Severity} />
-              </div>
-              <div className="mt-1 text-muted-foreground truncate">
-                {typeMeta[l.type as IncidentType]} · {l.location}
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
-      {suggested.length > 0 && (
-        <div className="mt-4">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-            Suggested (same zone, ±24h)
-          </div>
-          <div className="space-y-1.5">
-            {suggested.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2 text-xs"
-              >
-                <div className="min-w-0">
-                  <div className="font-mono">{s.code}</div>
-                  <div className="text-muted-foreground truncate">
-                    {typeMeta[s.type as IncidentType]} · {since(s.reported_at)}
-                  </div>
-                </div>
-                <button
-                  onClick={() => onLink(s.id)}
-                  className="text-[10px] uppercase tracking-wider text-primary hover:underline"
-                >
-                  Link
-                </button>
+                {e.acknowledged ? <span className="tg tg-ok">Acknowledged</span> : <span className="tg tg-warn">Waiting</span>}
+                {!e.acknowledged && !readOnly && <button type="button" className="b b-sm b-gh" onClick={() => void onAck(e.id)}>Mark acknowledged</button>}
               </div>
             ))}
           </div>
-        </div>
-      )}
-    </section>
+        )}
+      </section>
+    </div>
   );
 }
 
-function RelatedMapPreview({
-  points,
-  base,
-}: {
-  points: { id: string; label: string; lng: number; lat: number; severity: number }[];
-  base: [number, number];
-}) {
-  const candidates = points.length ? points : [{ id: "base", label: "Current incident", lng: base[0], lat: base[1], severity: 5 }];
-  const lngs = candidates.map((p) => p.lng);
-  const lats = candidates.map((p) => p.lat);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const scale = (value: number, min: number, max: number) => {
-    if (max === min) return 50;
-    return 8 + ((value - min) / (max - min)) * 84;
-  };
-
+function LinkedPanel({ linked, suggested, readOnly, onLink }: { linked: any[]; suggested: any[]; readOnly: boolean; onLink: (id: string) => Promise<unknown> }) {
+  const row = (l: any, action?: ReactNode) => (
+    <div key={l.id} className="row g10" style={{ padding: "10px 12px" }}>
+      <Sev level={l.severity} />
+      <Link to="/app/incidents/$id" params={{ id: l.id }} className="f1 col min-w-0 hover:text-tx-1">
+        <span className="trunc" style={{ fontWeight: 600 }}>{l.title || typeMeta[l.type as IncidentType]}</span>
+        <span className="mono t3" style={{ fontSize: 11.5 }}>{l.code} · {l.location} · {timeAgo(l.reported_at)}</span>
+      </Link>
+      {action}
+    </div>
+  );
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-card p-5">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Map preview</div>
-          <h2 className="text-sm font-semibold">Related incident cluster</h2>
-        </div>
-        <MapIcon className="h-4 w-4 text-muted-foreground" />
-      </div>
-      <div className="mt-4 overflow-hidden rounded-xl border border-border bg-surface">
-        <svg viewBox="0 0 100 100" className="h-72 w-full">
-          <defs>
-            <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
-              <path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="0.6" />
-            </pattern>
-          </defs>
-          <rect width="100" height="100" fill="url(#grid)" />
-          {candidates.map((point) => {
-            const x = scale(point.lng, minLng, maxLng);
-            const y = 100 - scale(point.lat, minLat, maxLat);
-            const isBase = point.id === "base";
-            const tone =
-              point.severity >= 5 ? "#ef4444" : point.severity >= 4 ? "#f97316" : point.severity >= 3 ? "#f59e0b" : "#22c55e";
-            return (
-              <g key={point.id}>
-                <circle cx={x} cy={y} r={isBase ? 3.8 : 3.2} fill={tone} opacity={isBase ? 1 : 0.85} />
-                <circle cx={x} cy={y} r={isBase ? 8 : 6} fill={tone} opacity="0.16" />
-                <text x={x + 3} y={y - 3} fontSize="4" fill="rgba(255,255,255,0.82)">
-                  {point.label}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-2">
-        {candidates.map((point) => (
-          <div key={point.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-xs">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono">{point.label}</span>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Severity {point.severity}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="flex flex-wrap items-start" style={{ gap: 12 }}>
+      <section className="pn" style={{ flex: "1 1 380px", minWidth: 0 }}>
+        <div className="pn-h"><LinkIcon size={15} strokeWidth={1.75} className="ic" /><h3>Linked incidents</h3><span className="meta">{linked.length}</span></div>
+        {linked.length === 0 ? <div className="empty" style={{ padding: 12 }}>Nothing linked yet.</div> : <div className="list">{linked.map((l) => row(l))}</div>}
+      </section>
+      <section className="pn" style={{ flex: "1 1 380px", minWidth: 0 }}>
+        <div className="pn-h"><Siren size={15} strokeWidth={1.75} className="ic" /><h3>Same zone, within 24 hours</h3><span className="meta">{suggested.length}</span></div>
+        {suggested.length === 0 ? (
+          <div className="empty" style={{ padding: 12 }}>No other incidents in this zone around that time.</div>
+        ) : (
+          <div className="list">{suggested.map((s) => row(s, !readOnly && <button type="button" className="b b-sm b-sec" onClick={() => void onLink(s.id)}><LinkIcon size={13} strokeWidth={1.75} /> Link</button>))}</div>
+        )}
+      </section>
+    </div>
   );
 }
