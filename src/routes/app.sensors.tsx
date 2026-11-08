@@ -1,692 +1,449 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Video, Loader2, UploadCloud, AlertTriangle, ScanEye, ShieldAlert, Sparkles, RadioTower, FileText, Eye, ListChecks, CircuitBoard, Power, RotateCcw, RotateCw, Gauge, History } from "lucide-react";
+import { Loader2, UploadCloud, Power, RotateCcw, RotateCw, Camera, ScanEye, X, Sparkles } from "lucide-react";
 import { requireSectionAccess } from "@/lib/rbac";
 import { getCameras, ingestFrame, analyzeJudgement, verifyVision, normalizeCameraList, type CCTVFrameResult } from "@/lib/cctv.functions";
-import { listDevices, executeDeviceAction, parseLastCommandResult, formatRelativeTime, type DeviceRecord } from "@/lib/devices.functions";
+import { listDevices, executeDeviceAction, parseLastCommandResult, formatRelativeTime } from "@/lib/devices.functions";
 import { CameraStreamPlayer } from "@/components/dashboard/CameraStreamPlayer";
-import { cn } from "@/lib/utils";
+import { Confidence, Empty, Notice, Panel, Seg, Status } from "@/components/nw";
 
 export const Route = createFileRoute("/app/sensors")({
-  head: () => ({ meta: [{ title: "Sensors · Lemtik SOD" }] }),
+  head: () => ({ meta: [{ title: "Cameras & sensors · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator"]);
     return { appAccess };
   },
-  component: CctvControlRoom,
+  component: CamerasAndSensors,
 });
 
-type PresetTemplate = {
-  label: string;
-  eventType: string;
-  transcript: string;
-  summary: string;
-};
-
-const PRESETS: PresetTemplate[] = [
-  {
-    label: "Suspicious Loitering",
-    eventType: "suspicious_loitering",
-    transcript: "Operator report: repeated pacing near the lobby entrance for over two minutes.",
-    summary: "Multiple stationary passes and no legitimate entry intent detected.",
-  },
-  {
-    label: "Tailgating near elevator",
-    eventType: "tailgating_elevator",
-    transcript: "Walkie call: two persons entered after an authorised card swipe without visible badge confirmation.",
-    summary: "Follow-through movement at a controlled access point with possible social-engineering risk.",
-  },
-  {
-    label: "Perimeter Trespass",
-    eventType: "perimeter_trespass",
-    transcript: "Security radio: subject crossed boundary line near the west fence and ignored verbal challenge.",
-    summary: "Boundary violation with potential escalation across a blind spot.",
-  },
+const EVENT_TYPES = [
+  { value: "suspicious_loitering", label: "Suspicious loitering" },
+  { value: "tailgating_elevator", label: "Tailgating at an access point" },
+  { value: "perimeter_trespass", label: "Perimeter trespass" },
+  { value: "unknown_event", label: "Not sure" },
 ];
 
-type DecisionResult = {
-  threatSummary: string;
-  confidencePct: number;
-  statusLabel: string;
-  requestId: string;
-  explanation: string;
-  recommendations: string[];
-  visionGaps: string[];
-  reidLogs: Array<{
-    status: string;
-    similarity: number;
-    candidates: string[];
-  }>;
-  blindSpotPredictions: string[];
-  decisionLogs: string[];
-};
+type Layout = "2" | "3" | "1";
 
-function CctvControlRoom() {
+function CamerasAndSensors() {
   const { appAccess } = Route.useRouteContext();
   const listCamerasFn = useServerFn(getCameras);
-  const ingestFn = useServerFn(ingestFrame);
-  const analyzeFn = useServerFn(analyzeJudgement);
-  const verifyFn = useServerFn(verifyVision);
+  const listDevicesFn = useServerFn(listDevices);
 
-  const { data: cameras = [], isLoading } = useQuery({
+  const { data: cameras = [], isLoading, isError } = useQuery({
     queryKey: ["cctv-cameras", appAccess.orgId],
     queryFn: async () => normalizeCameraList(await listCamerasFn()),
   });
+  const { data: sensors = [], isLoading: sensorsLoading } = useQuery({
+    queryKey: ["sensor-devices"],
+    queryFn: async () => (await listDevicesFn()).filter((d) => d.type === "sensor" || d.type === "sensor_camera"),
+  });
 
-  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
-  const [selectedPreset, setSelectedPreset] = useState<PresetTemplate>(PRESETS[0]);
-  const [eventType, setEventType] = useState(PRESETS[0].eventType);
-  const [voiceTranscript, setVoiceTranscript] = useState(PRESETS[0].transcript);
-  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
-  const [imageName, setImageName] = useState<string | null>(null);
-  const [dragActive, setDragActive] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<DecisionResult | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [layout, setLayout] = useState<Layout>("3");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [analyserOpen, setAnalyserOpen] = useState(false);
 
-  const selectedCamera = useMemo(
-    () => (Array.isArray(cameras) ? cameras.find((camera) => camera.id === selectedCameraId) ?? cameras[0] ?? null : null),
-    [cameras, selectedCameraId],
+  const online = cameras.filter((c) => c.status === "online").length;
+  const selectedCamera = cameras.find((c) => c.id === selectedId) ?? null;
+  const shown = layout === "1" ? (selectedCamera ? [selectedCamera] : cameras.slice(0, 1)) : cameras;
+  const cols = layout === "1" ? "grid-cols-1" : layout === "2" ? "md:grid-cols-2" : "md:grid-cols-2 xl:grid-cols-3";
+
+  return (
+    <div className="col g16">
+      <div className="row g12 wrap">
+        <div className="col">
+          <h1 className="ph1">Cameras &amp; sensors</h1>
+          <span className="sub">
+            {isLoading
+              ? "Loading cameras…"
+              : `${cameras.length} camera${cameras.length === 1 ? "" : "s"} · ${online} online · ${sensors.length} sensor${sensors.length === 1 ? "" : "s"}`}
+          </span>
+        </div>
+        <span className="flex-auto" />
+        <Seg
+          label="Grid layout"
+          value={layout}
+          onChange={setLayout}
+          options={[
+            { value: "2", label: "2 across" },
+            { value: "3", label: "3 across" },
+            { value: "1", label: "Single" },
+          ]}
+        />
+        <button type="button" className={`b ${analyserOpen ? "b-sec" : "b-ai"}`} onClick={() => setAnalyserOpen((o) => !o)} aria-expanded={analyserOpen}>
+          <ScanEye className="h-4 w-4" /> Analyse a frame
+        </button>
+      </div>
+
+      <div className={`grid gap-4 ${analyserOpen ? "xl:grid-cols-[minmax(0,1fr)_400px]" : ""}`} style={{ alignItems: "start" }}>
+        <div className="col g16" style={{ minWidth: 0 }}>
+          {isError ? (
+            <Notice tone="fail">Couldn't load the camera list from the camera service.</Notice>
+          ) : isLoading ? (
+            <Panel>
+              <Empty>
+                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading cameras…
+              </Empty>
+            </Panel>
+          ) : cameras.length === 0 ? (
+            <Panel>
+              <Empty>No cameras are connected for {appAccess.orgName} yet. Contact Lemtik support to connect a camera feed.</Empty>
+            </Panel>
+          ) : (
+            <div className={`grid gap-3 ${cols}`}>
+              {shown.map((camera) => (
+                <CameraStreamPlayer key={camera.id} camera={camera} selected={selectedId === camera.id} onSelect={() => setSelectedId(camera.id)} tall={layout === "1"} />
+              ))}
+            </div>
+          )}
+
+          <SensorsPanel sensors={sensors} loading={sensorsLoading} />
+        </div>
+
+        {analyserOpen && <FrameAnalyser camera={selectedCamera} onClose={() => setAnalyserOpen(false)} />}
+      </div>
+    </div>
   );
+}
 
-  const setPreset = (preset: PresetTemplate) => {
-    setSelectedPreset(preset);
-    setEventType(preset.eventType);
-    setVoiceTranscript(preset.transcript);
-    setResult(null);
-  };
+function FrameAnalyser({ camera, onClose }: { camera: { id: string; name: string; location: string } | null; onClose: () => void }) {
+  const ingestFn = useServerFn(ingestFrame);
+  const analyzeFn = useServerFn(analyzeJudgement);
+  const verifyFn = useServerFn(verifyVision);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [eventType, setEventType] = useState(EVENT_TYPES[0].value);
+  const [note, setNote] = useState("");
+  const [image, setImage] = useState<{ url: string; name: string } | null>(null);
+  const [drag, setDrag] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<CCTVFrameResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadFile = async (file: File | null) => {
+  const loadFile = (file: File | null) => {
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Choose an image file.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
-      setImageDataUrl(typeof reader.result === "string" ? reader.result : null);
-      setImageName(file.name);
+      if (typeof reader.result === "string") setImage({ url: reader.result, name: file.name });
       setResult(null);
+      setError(null);
     };
     reader.readAsDataURL(file);
   };
 
-  const normalize = (primary: CCTVFrameResult | null, secondary?: CCTVFrameResult | null): DecisionResult => {
-    const source = secondary ?? primary ?? {};
-    const summaries = [source.threat_summary, source.summary, source.explanation, source.visual_explanation, source.qwen_vision_explanation].filter(Boolean) as string[];
-    const reidLogs = source.reid_matching_logs?.length
-      ? source.reid_matching_logs.map((log, index) => ({
-          status: log.status ?? `match-${index + 1}`,
-          similarity: log.similarity ?? 0,
-          candidates: log.candidates ?? [],
-        }))
-      : source.matches?.length
-        ? source.matches.map((match, index) => ({
-            status: String(match.status ?? `match-${index + 1}`),
-            similarity: Number(match.similarity ?? 0),
-            candidates: Array.isArray(match.candidates) ? match.candidates.map((candidate) => String(candidate)) : [],
-          }))
-        : [];
-    return {
-      threatSummary: summaries[0] ?? "",
-      confidencePct: Math.round(Math.max(0, Math.min(1, source.confidence ?? 0)) * 100),
-      statusLabel: String(source.request_id ?? source.id ?? "pending"),
-      requestId: String(source.request_id ?? source.id ?? `cctv-${Date.now()}`),
-      explanation: summaries.slice(1).join(" ").trim(),
-      recommendations: source.recommended_actions ?? [],
-      visionGaps: source.vision_gaps ?? [],
-      reidLogs,
-      blindSpotPredictions: source.blind_spot_predictions ?? (source.blind_spot_prediction ? [source.blind_spot_prediction] : []),
-      decisionLogs: source.decision_logs ?? [],
-    };
-  };
-
-  const runDiagnostics = async () => {
+  const run = async () => {
     const payload = {
-      camera_id: selectedCamera?.id,
-      frame_data: imageDataUrl ?? undefined,
-      image_data_url: imageDataUrl ?? undefined,
-      voice_transcript: voiceTranscript,
+      camera_id: camera?.id,
+      frame_data: image?.url,
+      image_data_url: image?.url,
+      voice_transcript: note.trim() || undefined,
       event_type: eventType,
-      template_name: selectedPreset.label,
       verify_vision: true,
-      metadata: {
-        camera_name: selectedCamera?.name ?? null,
-        camera_location: selectedCamera?.location ?? null,
-      },
+      metadata: { camera_name: camera?.name ?? null, camera_location: camera?.location ?? null },
     };
-
     setRunning(true);
+    setError(null);
+    setResult(null);
     try {
-      let primary: CCTVFrameResult | null = null;
-      let secondary: CCTVFrameResult | null = null;
-
-      if (imageDataUrl) {
-        primary = (await ingestFn({ data: payload })) as CCTVFrameResult | null;
-        secondary = (await verifyFn({ data: { ...payload, frame_data: imageDataUrl } })) as CCTVFrameResult | null;
+      if (image) {
+        const ingested = (await ingestFn({ data: payload })) as CCTVFrameResult;
+        let verified: CCTVFrameResult | null = null;
+        try {
+          verified = (await verifyFn({ data: { ...payload, frame_data: image.url } })) as CCTVFrameResult;
+        } catch {
+          /* verification is a second opinion; the ingest result still stands */
+        }
+        setResult(mergeResults(ingested, verified));
       } else {
-        primary = (await analyzeFn({ data: payload })) as CCTVFrameResult | null;
+        setResult((await analyzeFn({ data: payload })) as CCTVFrameResult);
       }
-
-      setResult(normalize(primary, secondary));
-    } catch (error) {
-      setResult({
-        threatSummary: error instanceof Error ? error.message : "Unable to run CCTV diagnostics.",
-        confidencePct: 0,
-        statusLabel: "error",
-        requestId: `error-${Date.now()}`,
-        explanation: "The analysis request failed before a gateway result could be rendered.",
-        recommendations: ["Retry the frame upload", "Check the gateway route configuration"],
-        visionGaps: ["No gateway response"],
-        reidLogs: [{ status: "Request failed", similarity: 0, candidates: ["N/A"] }],
-        blindSpotPredictions: ["Unable to estimate blind-spot reappearance"],
-        decisionLogs: ["Request rejected"],
-      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The analysis didn't run.");
     } finally {
       setRunning(false);
     }
   };
 
-  const confidence = result ? result.confidencePct : 0;
-
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Sensors</div>
-          <h1 className="mt-1 text-2xl font-semibold">Cameras &amp; Sensors</h1>
-          <p className="text-sm text-muted-foreground">
-            Registered cameras, live streams, AI frame analysis, and non-visual data sensors for {appAccess.orgName}.
-          </p>
-        </div>
-        <div className="rounded-2xl border border-border bg-card px-4 py-3">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">AI request</div>
-          <div className="mt-1 text-sm font-medium">{result?.requestId ?? "Awaiting diagnostics"}</div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <section className="rounded-3xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Camera Grid Panel</div>
-              <h2 className="mt-1 text-lg font-semibold">Active camera streams</h2>
-            </div>
-            <span className="rounded-full border border-border bg-surface px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              {cameras.length} cameras
+    <aside className="col g12 side">
+      <Panel
+        title="Analyse a frame"
+        actions={
+          <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Close analyser" onClick={onClose}>
+            <X size={14} />
+          </button>
+        }
+      >
+        <div className="col g12">
+          <div className="t2" style={{ fontSize: 12.5 }}>
+            {camera ? (
+              <>
+                Camera: <b>{camera.name}</b> · {camera.location}
+              </>
+            ) : (
+              "No camera selected. Click a camera tile to attach it, or analyse a frame on its own."
+            )}
+          </div>
+          <div
+            className="card col g8"
+            style={{ padding: 12, borderStyle: "dashed", borderColor: drag ? "var(--blue-ln)" : undefined, alignItems: "center", textAlign: "center" }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDrag(true);
+            }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDrag(false);
+              loadFile(e.dataTransfer.files?.[0] ?? null);
+            }}
+          >
+            {image ? (
+              <img src={image.url} alt={`Frame ${image.name}`} style={{ maxHeight: 180, width: "100%", objectFit: "cover", borderRadius: 8 }} />
+            ) : (
+              <UploadCloud className="h-6 w-6 t3" />
+            )}
+            <span className="t3" style={{ fontSize: 12 }}>
+              {image ? image.name : "Drop a still frame here"}
             </span>
-          </div>
-
-          {isLoading ? (
-            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-5 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading camera registry…
-            </div>
-          ) : cameras.length === 0 ? (
-            <div className="mt-4 rounded-md border border-dashed border-border bg-surface p-8 text-center text-sm text-muted-foreground">
-              No cameras registered for this organisation yet. Contact ops to connect a camera feed.
-            </div>
-          ) : (
-            <div className="mt-4 grid gap-4">
-              <div className="grid gap-4 xl:grid-cols-2">
-                {cameras.map((camera) => (
-                  <div
-                    key={camera.id}
-                    className={cn(
-                      "rounded-2xl border p-3 transition",
-                      selectedCamera?.id === camera.id ? "border-primary/50 bg-primary/5" : "border-border bg-surface/70",
-                    )}
-                    onClick={() => setSelectedCameraId(camera.id)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <Video className="h-4 w-4 text-cyan-400" />
-                          <div className="text-sm font-semibold">{camera.name}</div>
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">{camera.location}</div>
-                      </div>
-                      <span
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em]",
-                          camera.status === "online"
-                            ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
-                            : camera.status === "degraded"
-                              ? "border-amber-300/30 bg-amber-300/10 text-amber-100"
-                              : "border-rose-300/30 bg-rose-300/10 text-rose-100",
-                        )}
-                      >
-                        {camera.status}
-                      </span>
-                    </div>
-                    <div className="mt-3">
-                      <CameraStreamPlayer camera={camera} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-
-        <aside className="space-y-4">
-          <section className="rounded-3xl border border-border bg-card p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">AI Frame Analyser</div>
-                <h2 className="mt-1 text-lg font-semibold">Run live diagnostics</h2>
-              </div>
-              <ScanEye className="h-4 w-4 text-muted-foreground" />
-            </div>
-
-            <div
-              className={cn(
-                "mt-4 rounded-3xl border border-dashed p-4 transition",
-                dragActive ? "border-primary bg-primary/5" : "border-border bg-surface/60",
-              )}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragActive(true);
-              }}
-              onDragLeave={() => setDragActive(false)}
-              onDrop={async (e) => {
-                e.preventDefault();
-                setDragActive(false);
-                const file = e.dataTransfer.files?.[0] ?? null;
-                await loadFile(file);
-              }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-primary/10 text-primary">
-                  <UploadCloud className="h-5 w-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">Drop a frame or choose a template</div>
-                  <div className="text-xs text-muted-foreground">Image uploads are converted to a base64 data URL before diagnostics run.</div>
-                </div>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  await loadFile(file);
-                }}
-              />
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-2 text-xs hover:bg-surface-2"
-                >
-                  <UploadCloud className="h-3.5 w-3.5" /> Select image
+            <div className="row g8">
+              <button type="button" className="b b-sm b-sec" onClick={() => fileRef.current?.click()}>
+                <Camera className="h-3.5 w-3.5" /> {image ? "Replace" : "Choose image"}
+              </button>
+              {image && (
+                <button type="button" className="b b-sm b-gh" onClick={() => setImage(null)}>
+                  Remove
                 </button>
-                {imageDataUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImageDataUrl(null);
-                      setImageName(null);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-2 text-xs hover:bg-surface-2"
-                  >
-                    Clear frame
-                  </button>
-                )}
-              </div>
-              {imageName && (
-                <div className="mt-3 text-xs text-muted-foreground">
-                  Loaded frame: <span className="font-medium text-foreground">{imageName}</span>
-                </div>
-              )}
-              {imageDataUrl && (
-                <img
-                  src={imageDataUrl}
-                  alt="Uploaded frame preview"
-                  className="mt-3 max-h-44 w-full rounded-2xl border border-border object-cover"
-                />
               )}
             </div>
-
-            <div className="mt-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Security templates</div>
-              <div className="mt-2 grid gap-2">
-                {PRESETS.map((preset) => (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() => setPreset(preset)}
-                    className={cn(
-                      "rounded-2xl border p-3 text-left transition",
-                      selectedPreset.label === preset.label ? "border-primary bg-primary/5" : "border-border bg-surface hover:bg-surface-2",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-medium">{preset.label}</div>
-                      <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">{preset.summary}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3">
-              <label className="block">
-                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Event type</div>
-                <select
-                  value={eventType}
-                  onChange={(e) => setEventType(e.target.value)}
-                  className="w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {PRESETS.map((preset) => (
-                    <option key={preset.eventType} value={preset.eventType}>{preset.label}</option>
-                  ))}
-                  <option value="unknown_event">Unknown event</option>
-                </select>
-              </label>
-
-              <label className="block">
-                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Voice transcript</div>
-                <textarea
-                  value={voiceTranscript}
-                  onChange={(e) => setVoiceTranscript(e.target.value)}
-                  rows={4}
-                  placeholder="Simulated walkie-talkie transcription"
-                  className="w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                />
-              </label>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => void runDiagnostics()}
-              disabled={running}
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <RadioTower className="h-4 w-4" />}
-              Run AI Diagnostics
-            </button>
-          </section>
-
-          <section className="rounded-3xl border border-border bg-card p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Decision & Logs</div>
-                <h2 className="mt-1 text-lg font-semibold">AI judgement output</h2>
-              </div>
-              <div className="grid h-16 w-16 place-items-center rounded-full border border-border bg-surface">
-                <div
-                  className="grid h-12 w-12 place-items-center rounded-full text-[11px] font-semibold text-foreground"
-                  style={{
-                    background: `conic-gradient(var(--primary) ${confidence}%, rgba(255,255,255,0.08) 0)`,
-                  }}
-                >
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-card">{confidence}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-50">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-amber-100/75">Visual Threat Summary</div>
-                <div className="mt-2 leading-relaxed">{result?.threatSummary ?? "Run diagnostics to view the visual threat summary."}</div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Qwen Vision Explanation</div>
-                <div className="mt-2 rounded-2xl border border-border bg-surface p-4 text-sm text-muted-foreground">
-                  {result?.explanation ?? "The explanation log will appear here after the gateway responds."}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Re-ID Matching Logs</div>
-                <div className="mt-2 space-y-2">
-                  {result?.reidLogs?.map((log, index) => (
-                    <div key={`${log.status}-${index}`} className="rounded-2xl border border-border bg-surface p-3 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-foreground">{log.status}</span>
-                        <span className="text-muted-foreground">{Math.round(log.similarity * 100)}%</span>
-                      </div>
-                      <div className="mt-1 text-muted-foreground">
-                        Candidates: {log.candidates.join(", ")}
-                      </div>
-                    </div>
-                  )) ?? null}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Blind-Spot Predictor</div>
-                <div className="mt-2 space-y-2">
-                  {result?.blindSpotPredictions?.map((item) => (
-                    <div key={item} className="rounded-2xl border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                      {item}
-                    </div>
-                  )) ?? null}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Vision Gaps</div>
-                <ul className="mt-2 space-y-2">
-                  {result?.visionGaps?.map((gap) => (
-                    <li key={gap} className="flex items-start gap-2 rounded-2xl border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 text-amber-300" />
-                      <span>{gap}</span>
-                    </li>
-                  )) ?? null}
-                </ul>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Decision Logs</div>
-                <div className="mt-2 space-y-2">
-                  {result?.decisionLogs?.map((log) => (
-                    <div key={log} className="flex items-center gap-2 rounded-2xl border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                      <ListChecks className="h-3.5 w-3.5 text-primary" />
-                      {log}
-                    </div>
-                  )) ?? null}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Recommended Actions</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {result?.recommendations?.map((item) => (
-                    <span key={item} className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted-foreground">
-                      {item}
-                    </span>
-                  )) ?? null}
-                </div>
-              </div>
-            </div>
-          </section>
-        </aside>
-      </div>
-
-      <section className="rounded-3xl border border-border bg-card p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Operational Notes</div>
-            <h2 className="mt-1 text-lg font-semibold">Event routing and diagnostics context</h2>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => loadFile(e.target.files?.[0] ?? null)} />
           </div>
-          <CircuitBoard className="h-4 w-4 text-muted-foreground" />
+          <label className="fl">
+            <span className="lbl">What are you checking for?</span>
+            <select className="in" value={eventType} onChange={(e) => setEventType(e.target.value)}>
+              {EVENT_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="fl">
+            <span className="lbl">Operator note (optional)</span>
+            <textarea className="in" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What you heard on the radio or saw on screen" style={{ height: "auto", paddingTop: 8 }} />
+          </label>
+          <button type="button" className="b b-ai" onClick={() => void run()} disabled={running} style={{ justifyContent: "center" }}>
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {running ? "Analysing…" : image ? "Analyse frame" : "Analyse note only"}
+          </button>
+          {error && <Notice tone="fail">{error}</Notice>}
         </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
-          <InfoCard
-            icon={Video}
-            title="Selected camera"
-            body={selectedCamera ? `${selectedCamera.name} · ${selectedCamera.location}` : "Choose a camera card to focus diagnostics."}
-          />
-          <InfoCard
-            icon={Eye}
-            title="Frame mode"
-            body={imageDataUrl ? "Uploaded frame is queued for verify_vision." : "No frame attached, so the judgement analyser will be used."}
-          />
-          <InfoCard
-            icon={AlertTriangle}
-            title="Template"
-            body={`${selectedPreset.label} · ${eventType}`}
-          />
-        </div>
-      </section>
+      </Panel>
 
-      <DataSensorsPanel />
-    </div>
+      {result && <AnalysisResult result={result} />}
+    </aside>
   );
 }
 
-function DataSensorsPanel() {
-  const listDevicesFn = useServerFn(listDevices);
-  const executeActionFn = useServerFn(executeDeviceAction);
-  const qc = useQueryClient();
-  const [busyDevice, setBusyDevice] = useState<string | null>(null);
-
-  const { data: devices = [], isLoading } = useQuery({
-    queryKey: ["sensor-devices"],
-    queryFn: async () => (await listDevicesFn()).filter((d) => d.type === "sensor" || d.type === "sensor_camera"),
-  });
-
-  const runAction = useMutation({
-    mutationFn: async (vars: { device_id: string; action_key: string; parameters?: Record<string, unknown> }) =>
-      executeActionFn({ data: vars }),
-    onMutate: (vars) => setBusyDevice(`${vars.device_id}:${vars.action_key}`),
-    onSuccess: (result: any) => {
-      if (result?.status === "success") {
-        toast.success("Command sent — this action never needed human approval (low-tier policy).");
-      } else {
-        toast.warning(result?.error ?? "Action did not complete", { description: result?.reason });
-      }
-      qc.invalidateQueries({ queryKey: ["sensor-devices"] });
-    },
-    onError: (err: unknown) => {
-      toast.error("Command failed", { description: err instanceof Error ? err.message : "Unknown error." });
-    },
-    onSettled: () => setBusyDevice(null),
-  });
-
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Data Sensors</div>
-          <h2 className="mt-1 text-lg font-semibold">Non-visual sensors &amp; camera view controls</h2>
-          <p className="text-sm text-muted-foreground">
-            On/off and camera pan controls here never touch the physical world, so they run under Policy Automation without an approval — configured on the{" "}
-            <a href="/app/org" className="text-primary underline underline-offset-2">Autonomy &amp; Devices</a> tab.
-          </p>
-        </div>
-        <RadioTower className="h-4 w-4 text-muted-foreground" />
+function AnalysisResult({ result }: { result: CCTVFrameResult }) {
+  const pct = result.confidence == null ? null : Math.round(Math.max(0, Math.min(1, result.confidence)) * 100);
+  const section = (label: string, items: string[] | undefined) =>
+    items && items.length > 0 ? (
+      <div className="col g6">
+        <span className="eyebrow">{label}</span>
+        <ul className="col g4" style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
+          {items.map((x, i) => (
+            <li key={`${x}-${i}`}>{x}</li>
+          ))}
+        </ul>
       </div>
-
-      {isLoading ? (
-        <div className="mt-4 text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading sensors…</div>
-      ) : devices.length === 0 ? (
-        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-          No sensor devices registered yet. Add one from the <a href="/app/devices" className="text-primary underline underline-offset-2">Devices</a> page (type: <code>sensor</code> or <code>sensor_camera</code>).
-        </div>
-      ) : (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {devices.map((device) => {
-            const lastCommand = parseLastCommandResult(device.last_command_result);
-            return (
-            <div key={device.id} className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-medium">{device.name}</div>
-                  <div className="text-xs text-muted-foreground">{device.type} · {device.zone ?? device.area ?? "unassigned"}</div>
-                </div>
-                <span className={cn("rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide", device.status === "online" ? "bg-resolved/15 text-resolved" : "bg-muted text-muted-foreground")}>
-                  {device.status ?? "unknown"}
-                </span>
+    ) : null;
+  return (
+    <div className="ai col g12" style={{ padding: 14 }}>
+      <div className="row g8">
+        <span className="ai-h">
+          <Sparkles size={13} /> Model analysis
+        </span>
+        <span className="flex-auto" />
+        {pct != null && <Confidence value={pct} />}
+      </div>
+      {result.threat_summary ? <b style={{ fontSize: 14, lineHeight: 1.45 }}>{result.threat_summary}</b> : <span className="t3">The model returned no summary.</span>}
+      {result.visual_explanation && (
+        <p className="t2" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55 }}>
+          {result.visual_explanation}
+        </p>
+      )}
+      {section("Suggested next steps", result.recommended_actions)}
+      {result.reid_matching_logs && result.reid_matching_logs.length > 0 && (
+        <div className="col g6">
+          <span className="eyebrow">Possible matches</span>
+          {result.reid_matching_logs.map((m, i) => (
+            <div key={i} className="card col g4" style={{ padding: "8px 10px", fontSize: 12 }}>
+              <div className="row g8">
+                <b>{m.status}</b>
+                <span className="flex-auto" />
+                {m.similarity != null && <span className="mono t2">{Math.round(m.similarity * 100)}% similar</span>}
               </div>
-              {lastCommand && (
-                <div className="mt-2 flex items-center gap-1.5 text-xs">
-                  <History className="h-3 w-3 text-muted-foreground" />
-                  <span className={lastCommand.execution_result === "success" ? "text-resolved" : lastCommand.execution_result === "failed" ? "text-critical" : "text-muted-foreground"}>
-                    {lastCommand.action_key ?? "action"}
-                    {lastCommand.parameters && Object.keys(lastCommand.parameters).length > 0 ? ` (${Object.entries(lastCommand.parameters).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}
-                    {" · "}{lastCommand.execution_result ?? "unknown"}
-                  </span>
-                  <span className="text-muted-foreground">{formatRelativeTime(device.last_command_at)}</span>
-                </div>
-              )}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {device.type === "sensor_camera" ? (
-                  <>
-                    <SensorActionButton
-                      icon={RotateCcw}
-                      label="Pan left"
-                      busy={busyDevice === `${device.id}:ptz_move`}
-                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "ptz_move", parameters: { direction: "left", degrees: 15 } })}
-                    />
-                    <SensorActionButton
-                      icon={RotateCw}
-                      label="Pan right"
-                      busy={busyDevice === `${device.id}:ptz_move`}
-                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "ptz_move", parameters: { direction: "right", degrees: 15 } })}
-                    />
-                    <SensorActionButton
-                      icon={Gauge}
-                      label="Snapshot"
-                      busy={busyDevice === `${device.id}:snapshot`}
-                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "snapshot" })}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <SensorActionButton
-                      icon={Power}
-                      label="Power on"
-                      busy={busyDevice === `${device.id}:power_on`}
-                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "power_on" })}
-                    />
-                    <SensorActionButton
-                      icon={Power}
-                      label="Power off"
-                      busy={busyDevice === `${device.id}:power_off`}
-                      onClick={() => runAction.mutate({ device_id: device.id, action_key: "power_off" })}
-                    />
-                  </>
-                )}
-              </div>
+              {m.candidates && m.candidates.length > 0 && <span className="t3">{m.candidates.join(" · ")}</span>}
             </div>
-            );
-          })}
+          ))}
         </div>
       )}
-    </section>
-  );
-}
-
-function SensorActionButton({ icon: Icon, label, busy, onClick }: { icon: typeof Power; label: string; busy: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
-      {label}
-    </button>
-  );
-}
-
-function InfoCard({ icon: Icon, title, body }: { icon: typeof Video; title: string; body: string }) {
-  return (
-    <div className="rounded-2xl border border-border bg-surface p-4">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Icon className="h-4 w-4 text-primary" />
-        {title}
-      </div>
-      <div className="mt-2 text-sm text-muted-foreground">{body}</div>
+      {section("Blind spots", result.blind_spot_predictions)}
+      {section("What the model couldn't see", result.vision_gaps)}
+      {section("Log", result.decision_logs)}
+      <span className="t3 mono" style={{ fontSize: 11 }}>
+        {result.match_status ? `Tracking: ${result.match_status} · ` : ""}
+        {result.request_id ? `Request ${result.request_id}` : "No request id returned"}
+      </span>
+      <span className="t3" style={{ fontSize: 11.5 }}>
+        A suggestion only. Confirm on camera or with an officer before acting.
+      </span>
     </div>
+  );
+}
+
+function mergeResults(primary: CCTVFrameResult, second: CCTVFrameResult | null): CCTVFrameResult {
+  if (!second) return primary;
+  const pick = <K extends keyof CCTVFrameResult>(k: K) => (second[k] != null && (!Array.isArray(second[k]) || (second[k] as unknown[]).length) ? second[k] : primary[k]);
+  return {
+    ...primary,
+    threat_summary: pick("threat_summary"),
+    confidence: pick("confidence"),
+    visual_explanation: pick("visual_explanation"),
+    recommended_actions: pick("recommended_actions"),
+    vision_gaps: pick("vision_gaps"),
+    reid_matching_logs: [...(primary.reid_matching_logs ?? []), ...(second.reid_matching_logs ?? [])],
+    blind_spot_predictions: pick("blind_spot_predictions"),
+  };
+}
+
+function SensorsPanel({ sensors, loading }: { sensors: Awaited<ReturnType<typeof listDevices>>; loading: boolean }) {
+  const executeActionFn = useServerFn(executeDeviceAction);
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const runAction = useMutation({
+    mutationFn: async (vars: { device_id: string; action_key: string; parameters?: Record<string, unknown> }) => executeActionFn({ data: vars }),
+    onMutate: (vars) => setBusy(`${vars.device_id}:${vars.action_key}:${JSON.stringify(vars.parameters ?? {})}`),
+    onSuccess: (result: any) => {
+      if (result?.status === "success") toast.success("Command sent");
+      else toast.warning(result?.error ?? "The command didn't complete", { description: result?.reason });
+      qc.invalidateQueries({ queryKey: ["sensor-devices"] });
+    },
+    onError: (err: unknown) => toast.error("Command failed", { description: err instanceof Error ? err.message : undefined }),
+    onSettled: () => setBusy(null),
+  });
+
+  const act = (device_id: string, action_key: string, parameters?: Record<string, unknown>) => runAction.mutate({ device_id, action_key, parameters });
+  const isBusy = (id: string, key: string, params?: Record<string, unknown>) => busy === `${id}:${key}:${JSON.stringify(params ?? {})}`;
+
+  const rows = useMemo(() => sensors, [sensors]);
+
+  return (
+    <Panel
+      title="Sensors"
+      meta={`${rows.length}`}
+      actions={
+        <Link to="/app/devices" className="b b-sm b-gh">
+          Manage devices
+        </Link>
+      }
+      bodyClassName=""
+    >
+      {loading ? (
+        <Empty>
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading sensors…
+        </Empty>
+      ) : rows.length === 0 ? (
+        <Empty>
+          No sensors registered. Add one on the{" "}
+          <Link to="/app/devices" className="lnk">
+            Devices
+          </Link>{" "}
+          page with type <code>sensor</code> or <code>sensor_camera</code>.
+        </Empty>
+      ) : (
+        <div className="scroll">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Sensor</th>
+                <th>Zone</th>
+                <th>Status</th>
+                <th>Last command</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((d) => {
+                const last = parseLastCommandResult(d.last_command_result);
+                const ptzL = { direction: "left", degrees: 15 };
+                const ptzR = { direction: "right", degrees: 15 };
+                return (
+                  <tr key={d.id}>
+                    <td>
+                      <div className="col">
+                        <b>{d.name}</b>
+                        <span className="t3 mono" style={{ fontSize: 11 }}>
+                          {d.type}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="t2">{d.zone ?? d.area ?? "—"}</td>
+                    <td>
+                      <Status tone={d.status === "online" ? "ok" : d.status === "offline" ? "fail" : "neutral"}>{d.status ?? "unknown"}</Status>
+                    </td>
+                    <td className="t2" style={{ fontSize: 12 }}>
+                      {last ? (
+                        <>
+                          {last.action_key ?? "action"} · <span style={{ color: last.execution_result === "failed" ? "var(--fail)" : undefined }}>{last.execution_result ?? "unknown"}</span>{" "}
+                          <span className="t3">{formatRelativeTime(d.last_command_at)}</span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>
+                      <span className="row g6" style={{ justifyContent: "flex-end" }}>
+                        {d.type === "sensor_camera" ? (
+                          <>
+                            <button type="button" className="b b-sm b-gh" disabled={isBusy(d.id, "ptz_move", ptzL)} onClick={() => act(d.id, "ptz_move", ptzL)}>
+                              <RotateCcw className="h-3.5 w-3.5" /> Pan left
+                            </button>
+                            <button type="button" className="b b-sm b-gh" disabled={isBusy(d.id, "ptz_move", ptzR)} onClick={() => act(d.id, "ptz_move", ptzR)}>
+                              <RotateCw className="h-3.5 w-3.5" /> Pan right
+                            </button>
+                            <button type="button" className="b b-sm b-sec" disabled={isBusy(d.id, "snapshot")} onClick={() => act(d.id, "snapshot")}>
+                              <Camera className="h-3.5 w-3.5" /> Snapshot
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" className="b b-sm b-gh" disabled={isBusy(d.id, "power_on")} onClick={() => act(d.id, "power_on")}>
+                              <Power className="h-3.5 w-3.5" /> On
+                            </button>
+                            <button type="button" className="b b-sm b-gh" disabled={isBusy(d.id, "power_off")} onClick={() => act(d.id, "power_off")}>
+                              <Power className="h-3.5 w-3.5" /> Off
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   );
 }

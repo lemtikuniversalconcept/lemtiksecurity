@@ -90,106 +90,77 @@ function firstNonEmptyStringArray(...values: unknown[]): string[] {
   return [];
 }
 
-function normalizeDecisionResult(source: AnyRecord, fallbackRequestPrefix: string): CCTVFrameResult {
-  const analysis = (source.analysis ?? source.vision_result?.analysis ?? source.vision_event?.analysis ?? {}) as AnyRecord;
-  const confidence = analysis.confidence ?? source.confidence ?? source.reid_confidence ?? source.score ?? 0.74;
-
-  const visualExplanation =
-    analysis.visual_explanation ??
-    analysis.explanation ??
-    source.visual_explanation ??
-    source.explanation ??
-    "Visual verification logged.";
-
-  const qwenExplanation =
-    analysis.qwen_vision_explanation ??
-    analysis.visual_explanation ??
-    analysis.explanation ??
-    source.qwen_vision_explanation ??
-    visualExplanation;
-
-  const threatSummary =
-    analysis.threat_summary ??
-    analysis.summary ??
-    source.threat_summary ??
-    source.summary ??
-    "Frame ingested successfully.";
-
-  const recommendedActions = firstNonEmptyStringArray(
-    analysis.recommended_follow_up_actions,
-    analysis.recommended_actions,
-    source.recommended_actions,
-  );
-
+/**
+ * Maps any of the gateway's analysis shapes (frame ingest, judgement, vision verify) onto one
+ * result. Only fields the gateway actually returned are filled; nothing is defaulted to a
+ * plausible-looking value.
+ */
+function normalizeDecisionResult(source: AnyRecord): CCTVFrameResult {
+  const vision = (source.vision_result?.vision_event ?? source.vision_result ?? source.vision_event ?? {}) as AnyRecord;
+  const analysis = (source.analysis ?? vision.analysis ?? {}) as AnyRecord;
   const telemetry = (source.telemetry_result?.telemetry ?? source.telemetry ?? {}) as AnyRecord;
   const continuity = (source.tracking_continuity ?? source.telemetry_result?.tracking_continuity ?? {}) as AnyRecord;
   const blindSpot = (continuity.blind_spot_prediction ?? analysis.blind_spot_prediction ?? {}) as AnyRecord;
 
+  const rawConfidence = analysis.confidence ?? vision.confidence ?? source.confidence ?? telemetry.reid_confidence ?? source.score;
+  const confidence = rawConfidence == null || !Number.isFinite(Number(rawConfidence)) ? null : Number(rawConfidence);
+
   const blindSpotPredictions: string[] = [];
   if (blindSpot.entered_blind_spot) {
-    blindSpotPredictions.push(`Target entered blind spot from camera ${blindSpot.source_camera_id ?? "unknown"}`);
+    blindSpotPredictions.push(`Target entered a blind spot from camera ${blindSpot.source_camera_id ?? "unknown"}`);
   }
   if (Array.isArray(blindSpot.estimated_reappearance)) {
     for (const r of blindSpot.estimated_reappearance) {
       if (!isRecord(r)) continue;
-      blindSpotPredictions.push(
-        `Reappearance predicted on camera ${r.camera_id ?? "unknown"} (${r.zone ?? "unknown"}) in ~${r.estimated_transition_seconds ?? 0}s (probability: ${Math.round(Number(r.transition_probability ?? 0) * 100)}%)`,
-      );
+      const prob = r.transition_probability == null ? "" : ` (probability ${Math.round(Number(r.transition_probability) * 100)}%)`;
+      const secs = r.estimated_transition_seconds == null ? "" : ` in ~${r.estimated_transition_seconds}s`;
+      blindSpotPredictions.push(`May reappear on camera ${r.camera_id ?? "unknown"}${r.zone ? ` (${r.zone})` : ""}${secs}${prob}`);
     }
   }
-  if (blindSpotPredictions.length === 0) {
-    blindSpotPredictions.push("No blind spot transitions estimated.");
-  }
 
-  const reidLogs: Array<{ status: string; similarity: number; candidates: string[] }> = [];
+  const reidLogs: NonNullable<CCTVFrameResult["reid_matching_logs"]> = [];
   if (Array.isArray(continuity.candidates)) {
     for (const cand of continuity.candidates) {
       if (!isRecord(cand)) continue;
+      const sim = cand.similarity ?? cand.match_confidence;
       reidLogs.push({
-        status: `Candidate match ${cand.target_id === telemetry.target_id ? "(Current Best)" : ""}`.trim(),
-        similarity: Number(cand.similarity ?? cand.match_confidence ?? 0),
+        status: cand.target_id === telemetry.target_id ? "Best match" : "Candidate",
+        similarity: sim == null ? undefined : Number(sim),
         candidates: [
-          `Target: ${cand.target_id ?? "unknown"}`,
-          `Camera: ${cand.last_camera_id ?? "unknown"}`,
-          `Zone: ${cand.last_zone ?? "unknown"}`,
-          `Clothing: ${cand.visual_descriptors?.clothing ?? "unknown"}`,
-          `Dominant Colors: ${asStringArray(cand.visual_descriptors?.dominant_colors).join(", ") || "none"}`,
-        ],
+          cand.target_id ? `Target ${cand.target_id}` : null,
+          cand.last_camera_id ? `Camera ${cand.last_camera_id}` : null,
+          cand.last_zone ? `Zone ${cand.last_zone}` : null,
+          cand.visual_descriptors?.clothing ? `Clothing: ${cand.visual_descriptors.clothing}` : null,
+          asStringArray(cand.visual_descriptors?.dominant_colors).length ? `Colours: ${asStringArray(cand.visual_descriptors?.dominant_colors).join(", ")}` : null,
+        ].filter((x): x is string => !!x),
+      });
+    }
+  }
+  if (Array.isArray(source.matches)) {
+    for (const m of source.matches) {
+      if (!isRecord(m)) continue;
+      reidLogs.push({
+        status: String(m.status ?? "Candidate"),
+        similarity: m.similarity == null ? undefined : Number(m.similarity),
+        candidates: Array.isArray(m.candidates) ? m.candidates.map(String) : [],
       });
     }
   }
 
-  if (reidLogs.length === 0) {
-    reidLogs.push({
-      status: continuity.match_status || "No candidate matches",
-      similarity: Number(continuity.similarity ?? 0),
-      candidates: [telemetry.target_id ? `Target ID: ${telemetry.target_id}` : "Unknown target"],
-    });
-  }
-
-  const decisionLogs = [
-    `Telemetry state: ${continuity.match_status || source.match_status || "ingested"}`,
-    `Confidence score: ${continuity.confidence ?? analysis.confidence ?? 0.0}`,
-    `Target status: ${source.telemetry_result?.target?.status || telemetry.target?.status || "active"}`,
-    `Blind spot confidence: ${blindSpot.confidence ?? analysis.blind_spot_confidence ?? 0.0}`,
-  ];
-
+  const requestId = source.request_id ?? vision.request_id ?? telemetry.request_id ?? null;
   return {
-    id: source.frame_hash || source.id || telemetry.id,
-    request_id: source.request_id || telemetry.request_id || `${fallbackRequestPrefix}-${Date.now()}`,
-    threat_summary: threatSummary,
-    confidence: Number(confidence ?? 0.74),
-    visual_explanation: visualExplanation,
-    qwen_vision_explanation: qwenExplanation,
-    blind_spot_prediction: blindSpotPredictions[0],
+    id: source.frame_hash || source.id || vision.id || telemetry.id,
+    request_id: requestId ? String(requestId) : undefined,
+    threat_summary: analysis.threat_summary ?? analysis.summary ?? source.threat_summary ?? source.summary ?? undefined,
+    confidence: confidence ?? undefined,
+    visual_explanation:
+      analysis.qwen_vision_explanation ?? analysis.visual_explanation ?? analysis.explanation ?? source.qwen_vision_explanation ?? source.visual_explanation ?? source.explanation ?? undefined,
     blind_spot_predictions: blindSpotPredictions,
     reid_matching_logs: reidLogs,
-    decision_logs: decisionLogs,
-    recommended_actions: recommendedActions.length > 0 ? recommendedActions : ["Review adjacent camera coverage"],
-    summary: analysis.summary ?? source.summary,
-    explanation: analysis.explanation ?? source.explanation,
-    matches: Array.isArray(source.matches) ? source.matches : undefined,
-    vision_gaps: asStringArray(analysis.gaps).length > 0 ? asStringArray(analysis.gaps) : ["No vision gaps logged."],
+    decision_logs: asStringArray(source.decision_logs),
+    match_status: continuity.match_status ?? source.match_status ?? undefined,
+    recommended_actions: firstNonEmptyStringArray(analysis.recommended_follow_up_actions, analysis.recommended_actions, source.recommended_actions),
+    vision_gaps: asStringArray(analysis.gaps ?? source.vision_gaps),
   };
 }
 
@@ -197,24 +168,18 @@ export type CCTVFrameResult = {
   id?: string;
   request_id?: string;
   threat_summary?: string;
+  /** 0–1, as the gateway returned it. Absent when the gateway gave none. */
   confidence?: number;
   visual_explanation?: string;
-  qwen_vision_explanation?: string;
-  blind_spot_prediction?: string;
   blind_spot_predictions?: string[];
-  reid_matching_logs?: Array<{
-    status?: string;
-    similarity?: number;
-    candidates?: string[];
-    note?: string;
-  }>;
+  reid_matching_logs?: Array<{ status?: string; similarity?: number; candidates?: string[] }>;
   decision_logs?: string[];
+  match_status?: string;
   recommended_actions?: string[];
-  summary?: string;
-  explanation?: string;
-  matches?: Array<Record<string, unknown>>;
   vision_gaps?: string[];
 };
+
+const NO_RESPONSE = "The analysis service didn't return a result. Nothing was analysed. Check the gateway and try again.";
 
 export const getCameras = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -241,82 +206,8 @@ export const ingestFrame = createServerFn({ method: "POST" })
       },
     });
     const dataResult = unwrapGatewayData<AnyRecord>(result);
-    if (dataResult) {
-      const visionResult = dataResult.vision_result?.vision_event ?? dataResult.vision_result;
-      const analysis = visionResult?.analysis ?? {};
-      const telemetry = dataResult.telemetry_result?.telemetry ?? {};
-      const continuity = dataResult.tracking_continuity ?? dataResult.telemetry_result?.tracking_continuity ?? {};
-      const blindSpot = continuity.blind_spot_prediction ?? {};
-
-      const blindSpotPredictions: string[] = [];
-      if (blindSpot.entered_blind_spot) {
-        blindSpotPredictions.push(`Target entered blind spot from camera ${blindSpot.source_camera_id}`);
-      }
-      if (Array.isArray(blindSpot.estimated_reappearance)) {
-        for (const r of blindSpot.estimated_reappearance) {
-          if (!isRecord(r)) continue;
-          blindSpotPredictions.push(
-            `Reappearance predicted on camera ${r.camera_id} (${r.zone}) in ~${r.estimated_transition_seconds}s (probability: ${Math.round(Number(r.transition_probability ?? 0) * 100)}%)`,
-          );
-        }
-      }
-      if (blindSpotPredictions.length === 0) {
-        blindSpotPredictions.push("No blind spot transitions estimated.");
-      }
-
-      const reidLogs: Array<{ status: string; similarity: number; candidates: string[] }> = [];
-      if (Array.isArray(continuity.candidates)) {
-        for (const cand of continuity.candidates) {
-          if (!isRecord(cand)) continue;
-          reidLogs.push({
-            status: `Candidate match ${cand.target_id === telemetry.target_id ? "(Current Best)" : ""}`.trim(),
-            similarity: Number(cand.similarity ?? cand.match_confidence ?? 0.0),
-            candidates: [
-              `Target: ${cand.target_id}`,
-              `Camera: ${cand.last_camera_id}`,
-              `Zone: ${cand.last_zone}`,
-              `Clothing: ${cand.visual_descriptors?.clothing ?? "unknown"}`,
-              `Dominant Colors: ${(asStringArray(cand.visual_descriptors?.dominant_colors).join(", ") || "none")}`,
-            ],
-          });
-        }
-      }
-      if (reidLogs.length === 0) {
-        reidLogs.push({
-          status: continuity.match_status || "No candidate matches",
-          similarity: Number(continuity.similarity ?? 0.0),
-          candidates: [telemetry.target_id ? `Target ID: ${telemetry.target_id}` : "Unknown target"],
-        });
-      }
-
-      return {
-        id: data.frame_hash || visionResult?.id || telemetry.id,
-        request_id: visionResult?.request_id || telemetry.request_id || `frame-${Date.now()}`,
-        threat_summary: analysis.threat_summary || "Frame ingested successfully.",
-        confidence: analysis.confidence ?? visionResult?.confidence ?? telemetry.reid_confidence ?? 0.74,
-        visual_explanation: analysis.visual_explanation || "Visual verification logged.",
-        qwen_vision_explanation: analysis.visual_explanation || "No additional explanation.",
-        blind_spot_predictions: blindSpotPredictions,
-        reid_matching_logs: reidLogs,
-        decision_logs: [
-          `Telemetry state: ${continuity.match_status || "ingested"}`,
-          `Confidence score: ${continuity.confidence ?? 0.0}`,
-          `Target status: ${dataResult.telemetry_result?.target?.status || "active"}`,
-          `Blind spot confidence: ${blindSpot.confidence ?? 0.0}`,
-        ],
-        recommended_actions: analysis.recommended_follow_up_actions || analysis.recommended_actions || ["Review adjacent camera coverage"],
-        vision_gaps: analysis.gaps || ["No vision gaps logged."],
-      };
-    }
-
-    return {
-      request_id: `frame-${Date.now()}`,
-      threat_summary: "Frame ingested for diagnostics.",
-      confidence: 0.74,
-      visual_explanation: "No gateway response was returned, so the dashboard is showing a local fallback summary.",
-      decision_logs: ["Frame accepted", "Awaiting downstream response"],
-      recommended_actions: ["Review camera angle", "Verify perimeter coverage"],
-    };
+    if (!dataResult) throw new Error(NO_RESPONSE);
+    return normalizeDecisionResult(dataResult);
   });
 
 export const analyzeJudgement = createServerFn({ method: "POST" })
@@ -332,17 +223,8 @@ export const analyzeJudgement = createServerFn({ method: "POST" })
       },
     });
     const dataResult = unwrapGatewayData<AnyRecord>(result);
-    if (dataResult) {
-      return normalizeDecisionResult(dataResult, "judgement");
-    }
-    return {
-      request_id: `judgement-${Date.now()}`,
-      threat_summary: "Judgement analysis completed locally.",
-      confidence: 0.68,
-      qwen_vision_explanation: "The gateway returned no analysis payload, so the control room is showing a fallback explanation.",
-      decision_logs: ["Command interpreted", "Risk mapped to selected event type"],
-      recommended_actions: ["Escalate to operator review"],
-    };
+    if (!dataResult) throw new Error(NO_RESPONSE);
+    return normalizeDecisionResult(dataResult);
   });
 
 export const verifyVision = createServerFn({ method: "POST" })
@@ -359,15 +241,6 @@ export const verifyVision = createServerFn({ method: "POST" })
       },
     });
     const dataResult = unwrapGatewayData<AnyRecord>(result);
-    if (dataResult) {
-      return normalizeDecisionResult(dataResult, "vision");
-    }
-    return {
-      request_id: `vision-${Date.now()}`,
-      threat_summary: "Vision verification completed locally.",
-      confidence: 0.71,
-      visual_explanation: "The gateway returned no response; the page is retaining the uploaded frame and event context.",
-      vision_gaps: ["No remote candidate list returned"],
-      recommended_actions: ["Confirm camera coverage", "Review blind spot transition"],
-    };
+    if (!dataResult) throw new Error(NO_RESPONSE);
+    return normalizeDecisionResult(dataResult);
   });
