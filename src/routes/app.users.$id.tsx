@@ -4,31 +4,31 @@ import { useServerFn } from "@tanstack/react-start";
 import { getMemberDetail, getMemberActivity } from "@/lib/users.functions";
 import { listLocations } from "@/lib/orgs.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import { ArrowLeft, ShieldCheck, MapPin, Loader2, Activity, ClipboardList, Radar, FileText, Sparkles, Clock3, ShieldAlert } from "lucide-react";
+import { ChevronLeft, Loader2 } from "lucide-react";
+import { Avatar, Empty, Kpi, Notice, Panel, Sev, Status, Tag, timeAgo, type Tone } from "@/components/nw";
 
 export const Route = createFileRoute("/app/users/$id")({
   head: () => ({ meta: [{ title: "Profile · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
-    requireSectionAccess(context.appAccess, [
-      "security_manager",
-      "client_admin",
-    ]);
+    requireSectionAccess(context.appAccess, ["security_manager", "client_admin"]);
   },
   component: MemberPage,
 });
 
-function timeAgo(iso?: string | null) {
-  if (!iso) return "—";
-  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
-}
-
-function roleLabel(r: string) {
-  return r.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
+const ROLE_LABEL: Record<string, string> = {
+  officer: "Officer",
+  supervisor: "Supervisor",
+  manager: "Security manager",
+  client_admin: "Client admin",
+  security_forensic_analyst: "Forensic analyst",
+  lemtik_admin: "Lemtik admin",
+};
+const DUTY: Record<string, { tone: Tone; label: string }> = {
+  "on-duty": { tone: "ok", label: "On duty" },
+  break: { tone: "warn", label: "On break" },
+  "off-duty": { tone: "off", label: "Off duty" },
+};
+const CHECKIN_TONE: Record<string, "ok" | "warn" | "fail"> = { on_time: "ok", late: "warn", out_of_zone: "fail" };
 
 function MemberPage() {
   const { id } = Route.useParams();
@@ -36,258 +36,149 @@ function MemberPage() {
   const activity = useServerFn(getMemberActivity);
   const locList = useServerFn(listLocations);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["member", id], queryFn: () => detail({ data: { user_id: id } }),
-  });
-  const { data: act } = useQuery({
-    queryKey: ["member-activity", id], queryFn: () => activity({ data: { user_id: id } }),
-  });
-  const { data: locations = [] } = useQuery({
-    queryKey: ["member-locations", id], queryFn: () => locList(),
-  });
+  const { data, isLoading, error } = useQuery({ queryKey: ["member", id], queryFn: () => detail({ data: { user_id: id } }) });
+  const { data: act } = useQuery({ queryKey: ["member-activity", id], queryFn: () => activity({ data: { user_id: id } }) });
+  const { data: locations = [] } = useQuery({ queryKey: ["org-locations"], queryFn: () => locList() });
 
-  const profileStats = (() => {
-    const incidents = act?.incidents ?? [];
-    const checkins = act?.checkins ?? [];
-    const audit = act?.audit ?? [];
-    const notes = act?.notes ?? [];
-    const recent24 = [...incidents, ...checkins, ...audit, ...notes].filter((row: any) => {
-      const stamp = row.reported_at || row.created_at;
-      return stamp && Date.now() - new Date(stamp).getTime() <= 24 * 3600_000;
-    }).length;
-    const highSeverity = incidents.filter((i: any) => i.severity >= 4).length;
-    const lateCheckins = checkins.filter((c: any) => c.status !== "on_time").length;
-    const activityScore = Math.min(100, 40 + incidents.length * 5 + checkins.length * 3 + notes.length * 4 - lateCheckins * 4);
-    return { incidents, checkins, audit, notes, recent24, highSeverity, lateCheckins, activityScore };
-  })();
-
-  if (isLoading) return <div className="p-10 text-center text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin inline" /> Loading…</div>;
-  if (error) return <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">{(error as Error).message}</div>;
+  if (isLoading) {
+    return (
+      <Panel>
+        <Empty>
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
+        </Empty>
+      </Panel>
+    );
+  }
+  if (error) return <Notice tone="fail">{(error as Error).message}</Notice>;
 
   const p = data?.profile;
-  const name = p?.display_name || "Operator";
-  const initials = name.split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase();
-  const assignedLocations = (p?.assigned_location_ids ?? [])
-    .map((locationId) => locations.find((location: any) => location.id === locationId))
-    .filter(Boolean);
+  const name = p?.display_name || data?.email || "Unnamed";
+  const duty = DUTY[p?.status ?? "off-duty"] ?? DUTY["off-duty"];
+  const assigned = (p?.assigned_location_ids ?? []).map((lid: string) => (locations as any[]).find((l) => l.id === lid)).filter(Boolean);
+  const checkins = act?.checkins ?? [];
+  const late = checkins.filter((c: any) => c.status && c.status !== "on_time").length;
 
   return (
-    <div className="space-y-5">
-      <Link to="/app/users" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-3 w-3" /> Back to team
+    <div className="col g16">
+      <Link to="/app/users" className="row g4 t3 lnk" style={{ fontSize: 12.5 }}>
+        <ChevronLeft className="h-3.5 w-3.5" /> Team
       </Link>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Metric label="Activity score" value={`${profileStats.activityScore}%`} icon={Sparkles} tone={profileStats.activityScore > 70 ? "resolved" : "critical"} />
-        <Metric label="24h events" value={profileStats.recent24.toString()} icon={Clock3} />
-        <Metric label="High severity" value={profileStats.highSeverity.toString()} icon={ShieldAlert} tone={profileStats.highSeverity > 0 ? "critical" : "resolved"} />
-        <Metric label="Late check-ins" value={profileStats.lateCheckins.toString()} icon={Radar} tone={profileStats.lateCheckins > 0 ? "critical" : "resolved"} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.95fr] gap-4">
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Activity rhythm</div>
-              <h2 className="text-sm font-semibold">Recent operational volume</h2>
+      <section className="pn">
+        <div className="row g16 wrap" style={{ padding: 18 }}>
+          <span style={{ width: 56, height: 56, borderRadius: 28, overflow: "hidden", display: "grid", placeItems: "center" }}>
+            {p?.photo_url ? <img src={p.photo_url} alt="" className="h-full w-full object-cover" /> : <Avatar name={name} size="lg" />}
+          </span>
+          <div className="col g4 f1" style={{ minWidth: 0 }}>
+            <div className="row g8 wrap">
+              <h1 className="ph1" style={{ margin: 0 }}>
+                {name}
+              </h1>
+              {p?.is_active === false ? <Tag tone="fail">Deactivated</Tag> : <Status tone={duty.tone}>{duty.label}</Status>}
             </div>
-            <span className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              last 24h
+            <span className="t2">
+              {ROLE_LABEL[data?.membership?.role ?? ""] ?? data?.membership?.role ?? "Member"}
+              {data?.email ? ` · ${data.email}` : ""}
+              {p?.last_seen_at ? ` · last seen ${timeAgo(p.last_seen_at)}` : ""}
             </span>
           </div>
-          <div className="mt-4 h-28 rounded-lg border border-border bg-surface p-3">
-            <div className="flex h-full items-end gap-2">
-              {[
-                { label: "Inc", value: profileStats.incidents.length, tone: "bg-primary/80" },
-                { label: "Chk", value: profileStats.checkins.length, tone: "bg-resolved/80" },
-                { label: "Aud", value: profileStats.audit.length, tone: "bg-muted-foreground/70" },
-                { label: "Not", value: profileStats.notes.length, tone: "bg-primary/80" },
-              ].map((item) => (
-                <div key={item.label} className="flex-1 flex flex-col items-center justify-end gap-1">
-                  <div
-                    className={`w-full rounded-t ${item.tone}`}
-                    style={{ height: `${Math.max(10, item.value * 12)}%` }}
-                    title={`${item.label}: ${item.value}`}
-                  />
-                  <div className="text-[10px] text-center text-muted-foreground">{item.label}</div>
+          <dl className="kv" style={{ minWidth: 260 }}>
+            <dt>Phone</dt>
+            <dd className="mono">{p?.phone || "—"}</dd>
+            <dt>Employee ID</dt>
+            <dd className="mono">{p?.employee_id || "—"}</dd>
+            <dt>Zone</dt>
+            <dd>{p?.zone || "—"}</dd>
+            <dt>Joined</dt>
+            <dd>{data?.membership?.created_at ? new Date(data.membership.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}</dd>
+          </dl>
+        </div>
+        <div className="hr" />
+        <div className="row g8 wrap" style={{ padding: "10px 18px" }}>
+          <span className="t3" style={{ fontSize: 12 }}>
+            Locations:
+          </span>
+          {assigned.length === 0 ? (
+            <span className="t3" style={{ fontSize: 12 }}>
+              None assigned
+            </span>
+          ) : (
+            assigned.map((l: any) => (
+              <span key={l.id} className="tg">
+                {l.name}
+              </span>
+            ))
+          )}
+        </div>
+      </section>
+
+      <div className="kpis">
+        <Kpi label="Incidents reported" value={act?.counts.incidents ?? "—"} />
+        <Kpi label="Patrol check-ins" value={act?.counts.checkins ?? "—"} delta={checkins.length ? `${late} late or out of zone (recent)` : undefined} />
+        <Kpi label="Notes written" value={act?.counts.notes ?? "—"} />
+        <Kpi label="Audit events" value={act?.audit.length ?? "—"} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Recent incidents reported" bodyClassName="">
+          {(act?.incidents ?? []).length === 0 ? (
+            <Empty>None yet.</Empty>
+          ) : (
+            <div className="list">
+              {act!.incidents.slice(0, 10).map((i: any) => (
+                <Link key={i.id} to="/app/incidents/$id" params={{ id: i.id }} className="row g10" style={{ padding: "9px 14px" }}>
+                  {i.severity != null && <Sev level={i.severity} />}
+                  <span className="mono">{i.code}</span>
+                  <span className="t3 trunc f1">{i.location}</span>
+                  <span className="t3" style={{ fontSize: 12 }}>
+                    {String(i.status).replace(/_/g, " ")} · {timeAgo(i.reported_at)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Recent patrol check-ins" bodyClassName="">
+          {checkins.length === 0 ? (
+            <Empty>None yet.</Empty>
+          ) : (
+            <div className="list">
+              {checkins.slice(0, 10).map((c: any) => (
+                <div key={c.id} className="row g10" style={{ padding: "9px 14px" }}>
+                  <Link to="/app/patrols/$id" params={{ id: c.patrol_id }} className="lnk mono f1 trunc" style={{ fontSize: 12 }}>
+                    Route {String(c.patrol_id).slice(0, 8)}
+                  </Link>
+                  <span className="t3" style={{ fontSize: 12 }}>
+                    {timeAgo(c.created_at)}
+                  </span>
+                  {c.status && <Tag tone={CHECKIN_TONE[c.status]}>{String(c.status).replace(/_/g, " ")}</Tag>}
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Live profile notes</div>
-            <h3 className="text-sm font-semibold">Supervisor view</h3>
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {profileStats.incidents.length} incident{profileStats.incidents.length === 1 ? "" : "s"} filed by this user.
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {profileStats.checkins.length} patrol check-in{profileStats.checkins.length === 1 ? "" : "s"} attributed to this user.
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {profileStats.audit.length} audit event{profileStats.audit.length === 1 ? "" : "s"} tracked in the paper trail.
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-5 flex items-start gap-4">
-        <div className="grid h-14 w-14 place-items-center rounded-full bg-primary/15 border border-primary/40 text-sm font-bold text-primary overflow-hidden">
-          {p?.photo_url ? <img src={p.photo_url} alt={name} className="h-full w-full object-cover" /> : initials}
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{name}</h1>
-            {p?.is_active === false && (
-              <span className="rounded-md border border-critical/30 bg-critical/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-critical">Deactivated</span>
-            )}
-          </div>
-          <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> {roleLabel(data?.membership?.role ?? "officer")}</span>
-            {data?.email && <span className="inline-flex items-center gap-1"><FileText className="h-3 w-3" /> {data.email}</span>}
-            {p?.zone && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> {p.zone}</span>}
-            <span>Last seen {timeAgo(p?.last_seen_at)}</span>
-          </div>
-          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <Field label="Phone" value={p?.phone || "—"} />
-            <Field label="Employee ID" value={p?.employee_id || "—"} />
-            <Field label="Joined" value={data?.membership?.created_at ? new Date(data.membership.created_at).toLocaleDateString("en-GB") : "—"} />
-            <Field label="Locations" value={String(assignedLocations.length)} />
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-5">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Assigned locations</div>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          {assignedLocations.length === 0 ? (
-            <span className="text-muted-foreground">No assigned locations.</span>
-          ) : assignedLocations.map((location: any) => (
-            <span key={location.id} className="rounded-md border border-border bg-surface px-2.5 py-1">
-              {location.name}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat icon={ClipboardList} label="Incidents reported" value={act?.counts.incidents ?? 0} />
-        <Stat icon={Radar} label="Patrol check-ins" value={act?.counts.checkins ?? 0} />
-        <Stat icon={FileText} label="Notes authored" value={act?.counts.notes ?? 0} />
-        <Stat icon={Activity} label="Audit events" value={act?.audit.length ?? 0} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Panel title="Recent incidents reported">
-          {(act?.incidents ?? []).length === 0 ? <Empty /> : (
-            <ul className="divide-y divide-border">
-              {act!.incidents.slice(0, 10).map((i) => (
-                <li key={i.id} className="px-4 py-2.5 text-xs flex items-center justify-between gap-3">
-                  <div className="min-w-0 truncate">
-                    <div className="font-mono">{i.code}</div>
-                    <div className="text-muted-foreground truncate">{i.location}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{i.status}</div>
-                    <div className="text-[10px] text-muted-foreground">{timeAgo(i.reported_at)}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-
-        <Panel title="Recent patrol check-ins">
-          {(act?.checkins ?? []).length === 0 ? <Empty /> : (
-            <ul className="divide-y divide-border">
-              {act!.checkins.slice(0, 10).map((c) => (
-                <li key={c.id} className="px-4 py-2.5 text-xs flex items-center justify-between">
-                  <div className="text-muted-foreground font-mono">{c.patrol_id.slice(0, 8)} · WP {c.waypoint_id?.slice(0, 6) ?? "—"}</div>
-                  <div className="text-right">
-                    <div className={`text-[10px] uppercase tracking-wider ${c.status === "on_time" ? "text-resolved" : c.status === "late" ? "text-high" : "text-critical"}`}>{c.status}</div>
-                    <div className="text-[10px] text-muted-foreground">{timeAgo(c.created_at)}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-
-        <Panel title="Activity log" wide>
-          {(act?.audit ?? []).length === 0 ? <Empty /> : (
-            <ul className="divide-y divide-border">
-              {act!.audit.slice(0, 30).map((a) => (
-                <li key={a.id} className="px-4 py-2.5 text-xs flex items-center justify-between">
-                  <div>
-                    <span className="font-medium">{a.action}</span>
-                    <span className="text-muted-foreground"> · {a.entity}</span>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">{timeAgo(a.created_at)}</span>
-                </li>
-              ))}
-            </ul>
           )}
         </Panel>
       </div>
+
+      <Panel title="Activity log" meta={act?.audit.length ? `${Math.min(30, act.audit.length)} most recent` : undefined} bodyClassName="">
+        {(act?.audit ?? []).length === 0 ? (
+          <Empty>No recorded activity.</Empty>
+        ) : (
+          <div className="list">
+            {act!.audit.slice(0, 30).map((a: any) => (
+              <div key={a.id} className="row g10" style={{ padding: "8px 14px", fontSize: 12.5 }}>
+                <span className="mono f1 trunc">
+                  {a.action}
+                  <span className="t3"> · {a.entity}</span>
+                </span>
+                <span className="t3 mono" style={{ fontSize: 11 }}>
+                  {new Date(a.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
     </div>
   );
-}
-
-function Metric({ label, value, icon: Icon, tone = "muted" }: {
-  label: string;
-  value: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: "muted" | "critical" | "resolved";
-}) {
-  const toneClass = tone === "critical"
-    ? "text-critical bg-critical/10 border-critical/30"
-    : tone === "resolved"
-      ? "text-resolved bg-resolved/10 border-resolved/30"
-      : "text-muted-foreground bg-surface border-border";
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={`grid h-7 w-7 place-items-center rounded-md border ${toneClass}`}>
-          <Icon className="h-3.5 w-3.5" />
-        </div>
-      </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-surface p-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-foreground truncate">{value}</div>
-    </div>
-  );
-}
-
-function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-      </div>
-      <div className="mt-2 text-2xl font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function Panel({ title, children, wide }: { title: string; children: React.ReactNode; wide?: boolean }) {
-  return (
-    <div className={`rounded-lg border border-border bg-card ${wide ? "lg:col-span-2" : ""}`}>
-      <div className="px-4 py-3 border-b border-border text-sm font-medium">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Empty() {
-  return <div className="px-4 py-8 text-center text-xs text-muted-foreground">No activity yet.</div>;
 }
