@@ -3,7 +3,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Cpu, Loader2, Plus, Wifi, WifiOff, PlugZap, History } from "lucide-react";
+import { Loader2, Plus, PlugZap, X } from "lucide-react";
+import { Empty, PageHeader, Panel, Status } from "@/components/nw";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
   listDevices,
@@ -15,7 +16,6 @@ import {
   type DeviceRecord,
   type ConnectionType,
 } from "@/lib/devices.functions";
-import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/devices")({
   head: () => ({ meta: [{ title: "Devices · Lemtik SOD" }] }),
@@ -122,6 +122,7 @@ function DevicesPage() {
     onSuccess: () => {
       toast.success("Device registered");
       setForm(emptyForm);
+      setShowForm(false);
       qc.invalidateQueries({ queryKey: ["autonomous-devices"] });
     },
     onError: (err: unknown) => {
@@ -145,179 +146,215 @@ function DevicesPage() {
     }
   };
 
+  const [showForm, setShowForm] = useState(false);
+  const set = (patch: Partial<FormState>) => setForm((p) => ({ ...p, ...patch }));
+
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div className="flex items-center gap-3">
-        <Cpu className="h-5 w-5 text-primary" />
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Smart Infrastructure</div>
-          <h1 className="text-2xl font-semibold">Devices</h1>
-          <p className="text-sm text-muted-foreground">
-            Register any REST, MQTT, or hardware-bridged device — gates, doors, elevators, locks, cameras, sensors — and it's immediately
-            gated by the Autonomous Controller's Safety Constraints Engine. Approval requirements and the low-tier allowlist are set on{" "}
-            <a href="/app/org" className="text-primary underline underline-offset-2">Organisation → Autonomy &amp; Devices</a>.
-          </p>
-        </div>
-      </div>
-
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Register a device</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <TextField label="Name" value={form.name} onChange={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="Lobby PTZ Camera" />
-          <div className="space-y-1.5">
-            <label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</label>
-            <input
-              list="device-types"
-              value={form.type}
-              onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <datalist id="device-types">
-              {KNOWN_DEVICE_TYPES.map((t) => <option key={t} value={t} />)}
-            </datalist>
-          </div>
-          <SelectField
-            label="Connection type"
-            value={form.connection_type}
-            onChange={(v) => setForm((p) => ({ ...p, connection_type: v as ConnectionType }))}
-            options={[["REST_API", "REST API"], ["MQTT", "MQTT"], ["HARDWARE_BRIDGE", "Hardware Bridge"]]}
-          />
-          <TextField label="Zone / area" value={form.zone} onChange={(v) => setForm((p) => ({ ...p, zone: v }))} placeholder="Lobby" />
-          <TextField label="Floor" value={form.floor} onChange={(v) => setForm((p) => ({ ...p, floor: v }))} placeholder="3" />
-          <TextField label="Latitude" value={form.lat} onChange={(v) => setForm((p) => ({ ...p, lat: v }))} placeholder="6.4281" />
-          <TextField label="Longitude" value={form.lng} onChange={(v) => setForm((p) => ({ ...p, lng: v }))} placeholder="3.4219" />
-          <p className="sm:col-span-2 -mt-1 text-xs text-muted-foreground">
-            Zone, floor, and coordinates let the master agent tell whether this device sits on an incident's path during an emergency — leave any of them blank if unknown.
-          </p>
-
-          {form.connection_type === "REST_API" && (
-            <>
-              <TextField label="Base URL" value={form.base_url} onChange={(v) => setForm((p) => ({ ...p, base_url: v }))} placeholder="https://camera.example.com/api" className="sm:col-span-2" />
-              <SelectField label="Auth type" value={form.auth_type} onChange={(v) => setForm((p) => ({ ...p, auth_type: v as FormState["auth_type"] }))} options={[["api_key", "API key"], ["bearer_token", "Bearer token"]]} />
-              <TextField label={form.auth_type === "bearer_token" ? "Bearer token" : "API key"} value={form.token} onChange={(v) => setForm((p) => ({ ...p, token: v }))} />
-            </>
-          )}
-          {form.connection_type === "MQTT" && (
-            <>
-              <TextField label="Broker URL" value={form.broker_url} onChange={(v) => setForm((p) => ({ ...p, broker_url: v }))} placeholder="mqtt://broker.example.com:1883" className="sm:col-span-2" />
-              <TextField label="Username" value={form.mqtt_username} onChange={(v) => setForm((p) => ({ ...p, mqtt_username: v }))} />
-              <TextField label="Password" value={form.mqtt_password} onChange={(v) => setForm((p) => ({ ...p, mqtt_password: v }))} />
-            </>
-          )}
-          {form.connection_type === "HARDWARE_BRIDGE" && (
-            <>
-              <TextField label="Gateway WebSocket URL" value={form.gateway_websocket_url} onChange={(v) => setForm((p) => ({ ...p, gateway_websocket_url: v }))} placeholder="ws://gateway.local:9000/bridge" className="sm:col-span-2" />
-              <TextField label="Bridge key" value={form.bridge_key} onChange={(v) => setForm((p) => ({ ...p, bridge_key: v }))} />
-            </>
-          )}
-
-          <TextField
-            label="Supported actions (comma separated)"
-            value={form.supported_actions}
-            onChange={(v) => setForm((p) => ({ ...p, supported_actions: v }))}
-            className="sm:col-span-2"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => registerMut.mutate()}
-          disabled={!form.name || registerMut.isPending}
-          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-        >
-          {registerMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          Register device
+    <div className="col g16">
+      <PageHeader
+        title="Devices"
+        sub={
+          isLoading
+            ? "Loading devices…"
+            : `${devices.length} registered · gates, doors, locks, cameras and sensors the system can act on, within the limits set in Organisation settings`
+        }
+      >
+        <button type="button" className="b b-pri" onClick={() => setShowForm((o) => !o)} aria-expanded={showForm}>
+          <Plus className="h-4 w-4" /> Register device
         </button>
-      </section>
+      </PageHeader>
 
-      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Registered devices</h2>
+      {showForm && (
+        <Panel
+          title="Register a device"
+          actions={
+            <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Close form" onClick={() => setShowForm(false)}>
+              <X size={14} />
+            </button>
+          }
+        >
+          <div className="col g12">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <TextField label="Name" value={form.name} onChange={(v) => set({ name: v })} placeholder="Lobby PTZ camera" />
+              <label className="fl">
+                <span className="lbl">Type</span>
+                <input list="device-types" className="in mono" value={form.type} onChange={(e) => set({ type: e.target.value })} />
+                <datalist id="device-types">
+                  {KNOWN_DEVICE_TYPES.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+              </label>
+              <label className="fl">
+                <span className="lbl">Connection</span>
+                <select className="in" value={form.connection_type} onChange={(e) => set({ connection_type: e.target.value as ConnectionType })}>
+                  <option value="REST_API">REST API</option>
+                  <option value="MQTT">MQTT</option>
+                  <option value="HARDWARE_BRIDGE">Hardware bridge</option>
+                </select>
+              </label>
+              <TextField label="Zone / area" value={form.zone} onChange={(v) => set({ zone: v })} placeholder="Lobby" />
+              <TextField label="Floor" value={form.floor} onChange={(v) => set({ floor: v })} placeholder="3" mono />
+              <div className="grid grid-cols-2 gap-3">
+                <TextField label="Latitude" value={form.lat} onChange={(v) => set({ lat: v })} mono />
+                <TextField label="Longitude" value={form.lng} onChange={(v) => set({ lng: v })} mono />
+              </div>
+            </div>
+            <p className="t3" style={{ fontSize: 12, margin: 0 }}>
+              Zone, floor and coordinates let the system tell whether a device is on an incident's path. Leave any of them blank if you don't know.
+            </p>
+
+            <div className="hr" />
+            <span className="eyebrow">Connection details</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {form.connection_type === "REST_API" && (
+                <>
+                  <TextField label="Base URL" value={form.base_url} onChange={(v) => set({ base_url: v })} placeholder="https://camera.example.com/api" className="sm:col-span-2" mono />
+                  <label className="fl">
+                    <span className="lbl">Auth</span>
+                    <select className="in" value={form.auth_type} onChange={(e) => set({ auth_type: e.target.value as FormState["auth_type"] })}>
+                      <option value="api_key">API key</option>
+                      <option value="bearer_token">Bearer token</option>
+                    </select>
+                  </label>
+                  <TextField label={form.auth_type === "bearer_token" ? "Bearer token" : "API key"} value={form.token} onChange={(v) => set({ token: v })} secret />
+                </>
+              )}
+              {form.connection_type === "MQTT" && (
+                <>
+                  <TextField label="Broker URL" value={form.broker_url} onChange={(v) => set({ broker_url: v })} placeholder="mqtt://broker.example.com:1883" className="sm:col-span-2" mono />
+                  <TextField label="Username" value={form.mqtt_username} onChange={(v) => set({ mqtt_username: v })} />
+                  <TextField label="Password" value={form.mqtt_password} onChange={(v) => set({ mqtt_password: v })} secret />
+                </>
+              )}
+              {form.connection_type === "HARDWARE_BRIDGE" && (
+                <>
+                  <TextField label="Gateway WebSocket URL" value={form.gateway_websocket_url} onChange={(v) => set({ gateway_websocket_url: v })} placeholder="ws://gateway.local:9000/bridge" className="sm:col-span-2" mono />
+                  <TextField label="Bridge key" value={form.bridge_key} onChange={(v) => set({ bridge_key: v })} secret />
+                </>
+              )}
+              <TextField label="Supported actions (comma separated)" value={form.supported_actions} onChange={(v) => set({ supported_actions: v })} className="sm:col-span-2" mono />
+            </div>
+            <div className="row g8" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="b b-gh" onClick={() => setShowForm(false)}>
+                Cancel
+              </button>
+              <button type="button" className="b b-pri" onClick={() => registerMut.mutate()} disabled={!form.name.trim() || registerMut.isPending}>
+                {registerMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Register device
+              </button>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      <Panel title="Registered devices" meta={`${devices.length}`} bodyClassName="">
         {isLoading ? (
-          <div className="text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading…</div>
+          <Empty>
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading devices…
+          </Empty>
         ) : devices.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">No devices registered yet.</div>
+          <Empty>No devices registered yet.</Empty>
         ) : (
-          <div className="space-y-2">
-            {devices.map((device: DeviceRecord) => {
-              const check = checkResults[device.id];
-              const lastCommand = parseLastCommandResult(device.last_command_result);
-              return (
-                <div key={device.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface px-4 py-3">
-                  <div>
-                    <div className="text-sm font-medium">{device.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {device.type} · {device.connection_type} · {(device.supported_actions ?? []).join(", ") || "no actions"}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {[
-                        device.zone ? `Zone: ${device.zone}` : null,
-                        typeof device.floor === "number" ? `Floor ${device.floor}` : null,
-                        typeof device.lat === "number" && typeof device.lng === "number" ? `${device.lat.toFixed(4)}, ${device.lng.toFixed(4)}` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ") || "No location set — won't be matched to an incident's path"}
-                    </div>
-                    {lastCommand && (
-                      <div className="mt-1 flex items-center gap-1.5 text-xs">
-                        <History className="h-3 w-3 text-muted-foreground" />
-                        <span className={lastCommand.execution_result === "success" ? "text-resolved" : lastCommand.execution_result === "failed" ? "text-critical" : "text-muted-foreground"}>
-                          {lastCommand.action_key ?? "action"}
-                          {lastCommand.parameters && Object.keys(lastCommand.parameters).length > 0 ? ` (${Object.entries(lastCommand.parameters).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}
-                          {" · "}{lastCommand.execution_result ?? "unknown"}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {formatRelativeTime(device.last_command_at)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {check && (
-                      <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide", check.reachable ? "bg-resolved/15 text-resolved" : "bg-critical/15 text-critical")} title={check.error}>
-                        {check.reachable ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                        {check.reachable ? "Reachable" : "Unreachable"}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => runCheck(device.id)}
-                      disabled={checking === device.id}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium hover:border-primary/50 disabled:opacity-60"
-                    >
-                      {checking === device.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-                      Test connectivity
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="scroll">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Connection</th>
+                  <th>Location</th>
+                  <th>Status</th>
+                  <th>Last command</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {devices.map((device: DeviceRecord) => {
+                  const check = checkResults[device.id];
+                  const last = parseLastCommandResult(device.last_command_result);
+                  const where = [
+                    device.zone ? device.zone : null,
+                    typeof device.floor === "number" ? `Floor ${device.floor}` : null,
+                    typeof device.lat === "number" && typeof device.lng === "number" ? `${device.lat.toFixed(4)}, ${device.lng.toFixed(4)}` : null,
+                  ].filter(Boolean);
+                  return (
+                    <tr key={device.id}>
+                      <td>
+                        <div className="col">
+                          <b>{device.name}</b>
+                          <span className="mono t3" style={{ fontSize: 11 }}>
+                            {device.type}
+                            {(device.supported_actions ?? []).length ? ` · ${(device.supported_actions ?? []).join(", ")}` : ""}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="t2">{CONNECTION_LABEL[device.connection_type] ?? device.connection_type}</td>
+                      <td className="t2">{where.length ? where.join(" · ") : <span title="Without a location the device can't be matched to an incident's path">Not set</span>}</td>
+                      <td>
+                        {check ? (
+                          <span title={check.error}>
+                            <Status tone={check.reachable ? "ok" : "fail"}>{check.reachable ? "Reachable" : "Unreachable"}</Status>
+                          </span>
+                        ) : (
+                          <Status tone={device.status === "online" ? "ok" : device.status === "offline" ? "fail" : "neutral"}>{device.status ?? "Not tested"}</Status>
+                        )}
+                      </td>
+                      <td className="t2" style={{ fontSize: 12 }}>
+                        {last ? (
+                          <>
+                            {last.action_key ?? "action"} · <span style={{ color: last.execution_result === "failed" ? "var(--fail)" : undefined }}>{last.execution_result ?? "unknown"}</span>{" "}
+                            <span className="t3">{formatRelativeTime(device.last_command_at)}</span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td>
+                        <button type="button" className="b b-sm b-gh" onClick={() => runCheck(device.id)} disabled={checking === device.id}>
+                          {checking === device.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />} Test
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </section>
+      </Panel>
     </div>
   );
 }
 
-function TextField({ label, value, onChange, placeholder, className = "" }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
+const CONNECTION_LABEL: Record<string, string> = { REST_API: "REST API", MQTT: "MQTT", HARDWARE_BRIDGE: "Hardware bridge" };
+
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  className = "",
+  mono = false,
+  secret = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+  mono?: boolean;
+  secret?: boolean;
+}) {
   return (
-    <div className={`space-y-1.5 ${className}`}>
-      <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</label>
+    <label className={`fl ${className}`}>
+      <span className="lbl">{label}</span>
       <input
+        className={`in${mono ? " mono" : ""}`}
+        type={secret ? "password" : "text"}
+        autoComplete={secret ? "new-password" : "off"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
       />
-    </div>
-  );
-}
-
-function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm">
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </div>
+    </label>
   );
 }
