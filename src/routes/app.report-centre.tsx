@@ -1,155 +1,35 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState, type ComponentType } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { listIncidents } from "@/lib/incidents.functions";
 import { listPatrols } from "@/lib/patrols.functions";
-import { generateReportSummary, sendReportDelivery } from "@/lib/reports.functions";
-import { getActiveOrg, getSettings } from "@/lib/orgs.functions";
+import { listSecurityReports, recordSecurityReport, sendReportDelivery, type SecurityReportRow } from "@/lib/reports.functions";
+import { getActiveOrg } from "@/lib/orgs.functions";
 import { requireSectionAccess } from "@/lib/rbac";
 import { type IncidentType, typeMeta } from "@/lib/mockData";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  CalendarDays,
-  CheckCircle2,
-  Copy,
-  Download,
-  FileSpreadsheet,
-  FileText,
-  Link2,
-  Lock,
-  Mail,
-  MessageCircle,
-  Presentation,
-  RefreshCw,
-  Sparkles,
-  Clock3,
-  History,
-  Users,
-  ClipboardList,
-  FileBarChart2,
-  Search,
-  FileType2,
-} from "lucide-react";
-import { toast } from "sonner";
+import { Loader2, Mail, Printer } from "lucide-react";
+import { Empty, Notice, Panel } from "@/components/nw";
 
-type IncidentRow = {
-  id: string;
-  code: string;
-  type: IncidentType;
-  severity: number;
-  status: string;
-  location: string;
-  zone: string;
-  officer: string | null;
-  reported_at: string;
-};
+type IncidentRow = { id: string; code: string; title?: string | null; type: IncidentType; severity: number; status: string; location: string; zone: string; officer: string | null; reported_at: string; description?: string | null };
+type PatrolRow = { id: string; code: string; name: string; officer: string | null; status: string; waypoints: number; checked_in: number; archived_at?: string | null };
+type OrgRow = { id: string; name: string; billing_contact_email?: string | null };
+type Kind = "daily" | "weekly" | "monthly" | "incident";
 
-type PatrolRow = {
-  id: string;
-  code: string;
-  name: string;
-  officer: string | null;
-  status: "on_route" | "delayed" | "complete" | "missed";
-  waypoints: number;
-  checked_in: number;
-  shift: string;
-};
-
-type OrgRow = {
-  id: string;
-  name: string;
-  subscription_tier?: string | null;
-  subscription_status?: string | null;
-  billing_contact_email?: string | null;
-  billing_contact_phone?: string | null;
-};
-
-type SettingsRow = {
-  report_delivery_schedule?: string | null;
-  whatsapp_alert_numbers?: string[] | null;
-  alert_escalation_contacts?: Array<{ name: string; phone: string; level: number }> | null;
-};
-
-type ReportTypeId = "daily" | "weekly" | "monthly" | "incident" | "custom";
-
-type ReportTemplate = {
-  id: ReportTypeId;
-  title: string;
-  cadence: string;
-  window: string;
-  description: string;
-  delivery: string[];
-  actions: string[];
-  enterpriseOnly?: boolean;
-};
-
-type ReportHistoryRow = {
-  id: string;
-  title: string;
-  type: string;
-  period: string;
-  generatedAt: string;
-  channels: string[];
-  recipients: number;
-  pages: number;
-  size: string;
-  shareable: boolean;
-  summary: string;
-};
-
-const REPORT_TEMPLATES: ReportTemplate[] = [
-  {
-    id: "daily",
-    title: "Daily Incident Log",
-    cadence: "Auto-generated at 6am every day",
-    window: "Previous 24 hours",
-    description: "Operational log of incidents, status changes, and response times for the last day.",
-    delivery: ["PDF", "Email"],
-    actions: ["Download PDF", "Auto-email configured recipients"],
-  },
-  {
-    id: "weekly",
-    title: "Weekly Security Summary",
-    cadence: "Auto-generated every Monday 8am",
-    window: "Previous 7 days",
-    description: "Weekly incident summary, patrol compliance, OSINT overview, and recommendations.",
-    delivery: ["PDF", "Email", "WhatsApp"],
-    actions: ["Download PDF", "Share link", "Deliver via Resend + WhatsApp"],
-  },
-  {
-    id: "monthly",
-    title: "Monthly Threat Analysis",
-    cadence: "Auto-generated on the 1st of each month",
-    window: "Previous 30 days",
-    description: "Executive-ready trend analysis with zone risk evolution, forecasts, and response performance.",
-    delivery: ["PDF", "Email"],
-    actions: ["Download PDF", "Email delivery"],
-  },
-  {
-    id: "incident",
-    title: "Incident-Specific Report",
-    cadence: "On demand per incident",
-    window: "Single incident",
-    description: "Full detail, evidence summary, and chain of custody for legal and insurance workflows.",
-    delivery: ["PDF"],
-    actions: ["Download PDF", "Open incident"],
-  },
-  {
-    id: "custom",
-    title: "Custom Report Builder",
-    cadence: "Enterprise tier only",
-    window: "Selected range",
-    description: "Choose sections, date range, and commentary for board packs or specialised exports.",
-    delivery: ["PDF", "PowerPoint"],
-    actions: ["Generate PDF", "Generate PowerPoint"],
-    enterpriseOnly: true,
-  },
+const DAY = 86_400_000;
+const KINDS: { id: Kind; title: string; sub: string }[] = [
+  { id: "daily", title: "Daily incident log", sub: "The last 24 hours" },
+  { id: "weekly", title: "Weekly security summary", sub: "The last 7 days" },
+  { id: "monthly", title: "Monthly threat analysis", sub: "The last 30 days" },
+  { id: "incident", title: "Incident report", sub: "One incident, for legal and insurance" },
 ];
+const SEV_NAME: Record<number, string> = { 5: "Critical", 4: "High", 3: "Medium", 2: "Low", 1: "Minor" };
+const fmtDate = (t: number | string) => new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const fmtDateTime = (t: number | string) => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export const Route = createFileRoute("/app/report-centre")({
-  head: () => ({ meta: [{ title: "Report Centre · Lemtik SOD" }] }),
+  head: () => ({ meta: [{ title: "Report centre · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
@@ -160,691 +40,334 @@ export const Route = createFileRoute("/app/report-centre")({
 
 function ReportCentre() {
   const { appAccess } = Route.useRouteContext();
+  const qc = useQueryClient();
   const listInc = useServerFn(listIncidents);
   const listPat = useServerFn(listPatrols);
   const loadOrg = useServerFn(getActiveOrg);
-  const loadSettings = useServerFn(getSettings);
+  const listReports = useServerFn(listSecurityReports);
+  const recordReport = useServerFn(recordSecurityReport);
   const sendReport = useServerFn(sendReportDelivery);
-  const summaryFn = useServerFn(generateReportSummary);
 
-  const { data: incidents = [], isLoading: loadingIncidents } = useQuery({
-    queryKey: ["report-centre-incidents", appAccess.orgId],
-    queryFn: () => listInc() as Promise<IncidentRow[]>,
-  });
-  const { data: patrols = [], isLoading: loadingPatrols } = useQuery({
-    queryKey: ["report-centre-patrols", appAccess.orgId],
-    queryFn: () => listPat() as Promise<PatrolRow[]>,
-  });
-  const { data: org } = useQuery({
-    queryKey: ["report-centre-org", appAccess.orgId],
-    queryFn: () => loadOrg() as Promise<OrgRow | null>,
-  });
-  const { data: settings } = useQuery({
-    queryKey: ["report-centre-settings", appAccess.orgId],
-    queryFn: () => loadSettings() as Promise<SettingsRow | null>,
+  const { data: incidents = [], isLoading } = useQuery({ queryKey: ["report-centre-incidents", appAccess.orgId], queryFn: () => listInc() as Promise<IncidentRow[]> });
+  const { data: patrols = [] } = useQuery({ queryKey: ["report-centre-patrols", appAccess.orgId], queryFn: () => listPat() as Promise<PatrolRow[]> });
+  const { data: org } = useQuery({ queryKey: ["report-centre-org", appAccess.orgId], queryFn: () => loadOrg() as Promise<OrgRow | null> });
+  const { data: history = [], isLoading: historyLoading, isError: historyError } = useQuery({
+    queryKey: ["security-reports", appAccess.orgId],
+    queryFn: () => listReports(),
+    retry: false,
   });
 
-  const [selectedTemplate, setSelectedTemplate] = useState<ReportTypeId>("weekly");
-  const [historyFilter, setHistoryFilter] = useState("");
-  const [customSections, setCustomSections] = useState<string[]>(["incidents", "patrols", "osint"]);
-  const [customCommentary, setCustomCommentary] = useState("");
-  const [customStart, setCustomStart] = useState(toInputDate(new Date(Date.now() - 30 * 86_400_000)));
-  const [customEnd, setCustomEnd] = useState(toInputDate(new Date()));
+  const [kind, setKind] = useState<Kind>("weekly");
+  const [incidentId, setIncidentId] = useState<string>("");
+  const [sending, setSending] = useState(false);
+  const [generatedAt] = useState(() => Date.now());
 
-  const loading = loadingIncidents || loadingPatrols;
-  const currentOrg = org ?? {
-    id: appAccess.orgId,
-    name: appAccess.orgName,
-    subscription_tier: null,
-    subscription_status: null,
-    billing_contact_email: null,
-    billing_contact_phone: null,
+  const orgName = org?.name ?? appAccess.orgName;
+  const email = org?.billing_contact_email ?? null;
+  const all = incidents as IncidentRow[];
+  const sortedIncidents = useMemo(() => [...all].sort((a, b) => Date.parse(b.reported_at) - Date.parse(a.reported_at)), [all]);
+  const selectedIncident = sortedIncidents.find((i) => i.id === incidentId) ?? null;
+
+  const windowFor = (k: Kind) => {
+    const days = k === "daily" ? 1 : k === "weekly" ? 7 : 30;
+    return { start: generatedAt - days * DAY, end: generatedAt };
   };
-  const tier = String(currentOrg.subscription_tier ?? "").toLowerCase();
-  const isEnterprise = tier === "enterprise";
-  const contactEmails = [currentOrg.billing_contact_email].filter(Boolean) as string[];
-  const whatsappNumbers = settings?.whatsapp_alert_numbers ?? [];
-  const escalationContacts = settings?.alert_escalation_contacts ?? [];
-  const recipientCount = contactEmails.length + whatsappNumbers.length + escalationContacts.length;
+  const win = windowFor(kind);
+  const inWindow = useMemo(() => all.filter((i) => Date.parse(i.reported_at) >= win.start && Date.parse(i.reported_at) <= win.end), [all, win.start, win.end]);
+  const meta = KINDS.find((k) => k.id === kind)!;
+  const periodLabel = kind === "incident" ? (selectedIncident ? selectedIncident.code : "No incident chosen") : `${fmtDate(win.start)} – ${fmtDate(win.end)}`;
 
-  const model = useMemo(
-    () => buildReportCentreModel(incidents, patrols, currentOrg, settings ?? null, appAccess.orgName),
-    [appAccess.orgName, incidents, patrols, currentOrg, settings],
-  );
-
-  const selectedTemplateData = REPORT_TEMPLATES.find((item) => item.id === selectedTemplate) ?? REPORT_TEMPLATES[0];
-  const filteredHistory = useMemo(() => {
-    const q = historyFilter.trim().toLowerCase();
-    if (!q) return model.history;
-    return model.history.filter((row) => [row.title, row.type, row.period, row.summary, row.size, ...row.channels].some((value) => value.toLowerCase().includes(q)));
-  }, [historyFilter, model.history]);
-
-  const copyShareLink = async (label: string) => {
-    const token = buildShareToken(label, currentOrg.id);
-    const url = `${window.location.origin}/app/report-centre/share/${token}`;
-    await navigator.clipboard.writeText(url);
-    toast.success("Share link copied");
-  };
-
-  const downloadPdf = (label: string) => {
-    toast.success(`${label} PDF prepared`);
-    window.print();
-  };
-
-  const exportPowerPoint = () => {
-    toast.success("PowerPoint export queued");
-  };
-
-  const sendSelectedReportEmail = async () => {
-    const recipients = [currentOrg.billing_contact_email].filter(Boolean) as string[];
-    if (!recipients.length) {
-      toast.error("No email recipients configured for this organisation.");
-      return;
+  const summaryText = useMemo(() => {
+    if (kind === "incident") {
+      if (!selectedIncident) return "";
+      return `${selectedIncident.code}: ${typeMeta[selectedIncident.type] ?? selectedIncident.type} at ${selectedIncident.location} (${selectedIncident.zone}), severity ${selectedIncident.severity}, status ${selectedIncident.status}.`;
     }
+    const high = inWindow.filter((i) => i.severity >= 4).length;
+    const resolved = inWindow.filter((i) => i.status === "resolved" || i.status === "closed").length;
+    return `${inWindow.length} incident${inWindow.length === 1 ? "" : "s"} reported ${periodLabel}: ${high} high or critical, ${resolved} resolved.`;
+  }, [kind, selectedIncident, inWindow, periodLabel]);
 
-    const shareUrl =
-      selectedTemplate === "weekly"
-        ? `${window.location.origin}/app/report-centre/share/${buildShareToken(selectedTemplateData.title, currentOrg.id)}`
-        : null;
+  const canSend = !!email && (kind !== "incident" || !!selectedIncident);
 
-    const summary = await summaryFn({
-      data: {
-        template_id: selectedTemplateData.id,
-        template_title: selectedTemplateData.title,
-        org_id: currentOrg.id,
-        stats: {
-          incidents_last_24h: model.last24hCount,
-          incidents_last_7d: model.last7dCount,
-          incidents_last_30d: model.last30dCount,
-          patrol_compliance: model.weeklyCompliance,
-          risk_index: model.monthlyRisk,
-          generated_this_month: model.thisMonthGenerated,
-          recipients: recipientCount,
-        },
-        sections: selectedTemplate === "custom" ? customSections : undefined,
-        range_label: selectedTemplateData.window,
-        commentary: customCommentary || undefined,
-      },
-    }) as string;
-
-    const { error: saveError } = await supabase.from("security_reports" as any).insert({
-      organisation_id: currentOrg.id,
-      org_id: currentOrg.id,
-      title: selectedTemplateData.title,
-      report_name: selectedTemplateData.title,
-      report_type: selectedTemplateData.id,
-      period_label: selectedTemplateData.window,
-      summary,
-      channels: selectedTemplateData.delivery,
-      recipient_emails: recipients,
-      recipient_count: recipients.length,
-      share_url: shareUrl,
-      generated_at: new Date().toISOString(),
-      source: "c4isod-dashboard",
-      created_by: appAccess.userId,
-    } as any);
-
-    if (saveError) {
-      toast.warning(`Report saved in memory, but database insert failed: ${saveError.message}`);
+  const emailReport = async () => {
+    if (!email) return;
+    setSending(true);
+    try {
+      const result = (await sendReport({ data: { report_name: `${meta.title} · ${periodLabel}`, summary: summaryText, recipient_emails: [email], report_url: null, unsubscribe_url: null } })) as {
+        warning?: string;
+        skipped?: boolean;
+      };
+      if (result?.warning || result?.skipped) {
+        toast.error(`Not sent: ${result.warning ?? "email delivery isn't configured."}`);
+        return;
+      }
+      try {
+        await recordReport({ data: { title: meta.title, report_type: kind, period_label: periodLabel, summary: summaryText, channels: ["Email"], recipient_emails: [email] } });
+        qc.invalidateQueries({ queryKey: ["security-reports", appAccess.orgId] });
+      } catch (e) {
+        toast.warning(`Sent, but not added to history: ${(e as Error).message}`);
+        return;
+      }
+      toast.success(`Sent to ${email}`);
+    } catch (e) {
+      toast.error((e as Error)?.message || "The email didn't send.");
+    } finally {
+      setSending(false);
     }
-
-    const result = await sendReport({
-      report_name: selectedTemplateData.title,
-      summary,
-      recipient_emails: recipients,
-      report_url: shareUrl,
-      unsubscribe_url: null,
-    }) as { ok?: boolean; warning?: string; skipped?: boolean };
-
-    if (result?.warning) {
-      toast.success(`Email queued with warning: ${result.warning}`);
-      return;
-    }
-
-    toast.success("Report email sent");
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Report Centre</div>
-          <h1 className="mt-1 text-2xl font-semibold">Generated reports and delivery</h1>
-          <p className="text-sm text-muted-foreground">
-            {currentOrg.name} · {appAccess.roleLabel} · {settings?.report_delivery_schedule ?? "No report schedule configured yet"}
-          </p>
+    <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]" style={{ alignItems: "start" }}>
+      {/* Only the report sheet prints. */}
+      <style>{`@media print { body * { visibility: hidden !important; } #report-sheet, #report-sheet * { visibility: visible !important; } #report-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; box-shadow: none !important; } }`}</style>
+
+      <div className="col g12">
+        <div className="col">
+          <h1 className="ph1">Report centre</h1>
+          <span className="sub">Build a report from your live records, print it or email it.</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Metric label="Recipients" value={recipientCount} />
-          <Metric label="Reports this month" value={model.thisMonthGenerated} />
-          <Metric label="Active tier" value={currentOrg.subscription_tier ?? "basic"} />
-        </div>
-      </div>
 
-      {loading && (
-        <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
-          Loading report data…
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Report Types Available</div>
-              <h2 className="mt-1 text-lg font-semibold">Operational report templates</h2>
-            </div>
-            <FileBarChart2 className="h-4 w-4 text-muted-foreground" />
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            {REPORT_TEMPLATES.map((template) => {
-              const locked = template.enterpriseOnly && !isEnterprise;
-              const selected = selectedTemplate === template.id;
-              return (
-                <button
-                  key={template.id}
-                  type="button"
-                  onClick={() => setSelectedTemplate(template.id)}
-                  className={`rounded-xl border p-4 text-left transition ${
-                    selected ? "border-primary bg-primary/5" : "border-border bg-surface hover:bg-surface-2"
-                  } ${locked ? "opacity-75" : ""}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">{template.title}</span>
-                        {locked ? <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">Enterprise</span> : null}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">{template.description}</div>
-                    </div>
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      {locked ? <Lock className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    <InfoPill icon={Clock3} label="Cadence" value={template.cadence} />
-                    <InfoPill icon={CalendarDays} label="Window" value={template.window} />
-                    <InfoPill icon={FileText} label="Delivery" value={template.delivery.join(" · ")} />
-                    <InfoPill icon={ClipboardList} label="Actions" value={template.actions.join(" · ")} />
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        downloadPdf(template.title);
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                    >
-                      <Download className="h-3.5 w-3.5" /> Download PDF
-                    </button>
-                    {template.id === "weekly" && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          copyShareLink(template.title);
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-                      >
-                        <Link2 className="h-3.5 w-3.5" /> Share link
-                      </button>
-                    )}
-                    {template.id === "incident" && (
-                      <Link
-                        to="/app/incidents"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-                      >
-                        <ClipboardList className="h-3.5 w-3.5" /> Open incident list
-                      </Link>
-                    )}
-                    {locked && (
-                      <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
-                        <Lock className="h-3.5 w-3.5" /> Custom builder locked to enterprise tier
-                      </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Report Preview</div>
-              <h2 className="mt-1 text-lg font-semibold">{selectedTemplateData.title}</h2>
-            </div>
-            <Sparkles className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="mt-4 space-y-3">
-            <Metric label="Scope" value={selectedTemplateData.window} />
-            <Metric label="Cadence" value={selectedTemplateData.cadence} />
-            <Metric label="Recipients" value={recipientCount} />
-            <Metric label="Schedule" value={settings?.report_delivery_schedule ?? "Unscheduled"} />
-            <Metric label="WhatsApp numbers" value={whatsappNumbers.length} />
-            <Metric label="Email contacts" value={contactEmails.length || "None"} />
-            <Metric label="Resolved items" value={model.issueCount} />
-          </div>
-
-          <div className="mt-5 rounded-xl border border-border bg-surface p-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Latest signal</div>
-            <div className="mt-2 text-sm font-medium">
-              {selectedTemplate === "daily" && `${model.last24hCount} incidents in the last 24 hours`}
-              {selectedTemplate === "weekly" && `${model.last7dCount} incidents, ${model.weeklyCompliance}% patrol compliance`}
-              {selectedTemplate === "monthly" && `${model.last30dCount} incidents, ${model.monthlyRisk}% zone risk index`}
-              {selectedTemplate === "incident" && `${model.criticalIncidents.length} critical incidents available for case-ready export`}
-              {selectedTemplate === "custom" && `${customSections.length} sections selected for a custom export`}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {selectedTemplate === "weekly" && (
-                <button
-                  type="button"
-                  onClick={() => copyShareLink(selectedTemplateData.title)}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-                >
-                  <Copy className="h-3.5 w-3.5" /> Copy share link
-                </button>
-              )}
+        <Panel title="Report types" bodyClassName="">
+          <div className="list">
+            {KINDS.map((k) => (
               <button
+                key={k.id}
                 type="button"
-                onClick={() => downloadPdf(selectedTemplateData.title)}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                className="row g10 w-full text-left"
+                aria-pressed={kind === k.id}
+                onClick={() => setKind(k.id)}
+                style={{ padding: "10px 14px", background: kind === k.id ? "var(--ink-2)" : undefined, borderLeft: `2px solid ${kind === k.id ? "var(--blue-hi)" : "transparent"}` }}
               >
-                <Download className="h-3.5 w-3.5" /> Download PDF
+                <span className="f1 col">
+                  <b>{k.title}</b>
+                  <span className="t3">{k.sub}</span>
+                </span>
               </button>
-              <button
-                type="button"
-                onClick={() => void sendSelectedReportEmail()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-              >
-                <Mail className="h-3.5 w-3.5" /> Resend email
-              </button>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
-        <section className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Custom Builder</div>
-              <h2 className="mt-1 text-lg font-semibold">Enterprise report configuration</h2>
-            </div>
-            <FileType2 className="h-4 w-4 text-muted-foreground" />
-          </div>
-
-          {!isEnterprise ? (
-            <div className="mt-4 rounded-xl border border-dashed border-border bg-surface px-4 py-6 text-sm text-muted-foreground">
-              Custom report builder is available for enterprise tier organisations only.
-            </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <DateField label="Start date" value={customStart} onChange={setCustomStart} />
-                <DateField label="End date" value={customEnd} onChange={setCustomEnd} />
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Sections</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {["incidents", "patrols", "osint", "inventory", "compliance", "recommendations"].map((section) => {
-                    const active = customSections.includes(section);
-                    return (
-                      <button
-                        key={section}
-                        type="button"
-                        onClick={() => setCustomSections((current) => current.includes(section) ? current.filter((item) => item !== section) : [...current, section])}
-                        className={`rounded-full border px-3 py-1.5 text-xs ${active ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:text-foreground"}`}
-                      >
-                        {section}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <label className="block">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Commentary</div>
-                <textarea
-                  value={customCommentary}
-                  onChange={(e) => setCustomCommentary(e.target.value)}
-                  rows={4}
-                  className="mt-2 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="Add board notes, executive commentary, or legal context."
-                />
-              </label>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => toast.success("Custom PDF generation queued")}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                >
-                  <Download className="h-3.5 w-3.5" /> Download PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={exportPowerPoint}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-surface-2"
-                >
-                  <Presentation className="h-3.5 w-3.5" /> Export PowerPoint
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Report History</div>
-              <h2 className="mt-1 text-lg font-semibold">Last 12 months of generated reports</h2>
-            </div>
-            <History className="h-4 w-4 text-muted-foreground" />
-          </div>
-
-          <div className="mt-4 flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={historyFilter}
-                onChange={(e) => setHistoryFilter(e.target.value)}
-                placeholder="Search history"
-                className="w-full rounded-md border border-border bg-surface py-2 pl-7 pr-3 text-xs outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => toast.success("History refreshed")}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-surface-2"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {filteredHistory.map((row) => (
-              <article key={row.id} className="rounded-xl border border-border bg-surface p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold">{row.title}</span>
-                      {row.shareable ? <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">Shareable</span> : null}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">{row.summary}</div>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    <div>{row.period}</div>
-                    <div>{new Date(row.generatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}</div>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <InfoPill icon={FileText} label="Type" value={row.type} />
-                  <InfoPill icon={FileSpreadsheet} label="Format" value={`${row.pages} pages · ${row.size}`} />
-                  <InfoPill icon={MessageCircle} label="Channels" value={row.channels.join(" · ")} />
-                  <InfoPill icon={Users} label="Recipients" value={row.recipients} />
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => downloadPdf(row.title)}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    <Download className="h-3.5 w-3.5" /> Download
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toast.success("Delivery request resent")}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-                  >
-                    <Mail className="h-3.5 w-3.5" /> Resend email delivery
-                  </button>
-                  {row.shareable && (
-                    <button
-                      type="button"
-                      onClick={() => copyShareLink(row.title)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-                    >
-                      <Link2 className="h-3.5 w-3.5" /> Share link
-                    </button>
-                  )}
-                </div>
-              </article>
             ))}
           </div>
-        </section>
+        </Panel>
+
+        <Panel title="History" meta={historyError ? undefined : `${history.length}`} bodyClassName="">
+          {historyLoading ? (
+            <Empty>Loading…</Empty>
+          ) : historyError ? (
+            <Empty>Report history isn't available for this organisation yet.</Empty>
+          ) : history.length === 0 ? (
+            <Empty>No reports have been sent yet.</Empty>
+          ) : (
+            <div className="list scroll" style={{ maxHeight: 360 }}>
+              {(history as SecurityReportRow[]).map((r) => (
+                <div key={r.id} className="row g10" style={{ padding: "9px 14px" }} title={r.summary ?? undefined}>
+                  <span className="f1 col" style={{ minWidth: 0 }}>
+                    <span className="trunc">{r.title}</span>
+                    <span className="t3 trunc" style={{ fontSize: 12 }}>
+                      {r.period_label ?? ""}
+                      {r.recipient_count ? ` · ${r.recipient_count} recipient${r.recipient_count === 1 ? "" : "s"}` : ""}
+                    </span>
+                  </span>
+                  <span className="t3 mono" style={{ fontSize: 11 }}>
+                    {new Date(r.generated_at).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="col g12" style={{ minWidth: 0 }}>
+        <div className="row g8 wrap">
+          <span className="mono t3">Preview</span>
+          <span className="tg">{periodLabel}</span>
+          <span className="flex-auto" />
+          {kind === "incident" && (
+            <select className="in" style={{ width: 280 }} value={incidentId} onChange={(e) => setIncidentId(e.target.value)} aria-label="Incident">
+              <option value="">Choose an incident</option>
+              {sortedIncidents.slice(0, 200).map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.code} · {typeMeta[i.type] ?? i.type} · {fmtDate(i.reported_at)}
+                </option>
+              ))}
+            </select>
+          )}
+          <button type="button" className="b b-sec" onClick={() => window.print()} disabled={kind === "incident" && !selectedIncident}>
+            <Printer className="h-4 w-4" /> Print or save PDF
+          </button>
+          <button type="button" className="b b-pri" onClick={emailReport} disabled={!canSend || sending} title={email ? `Send to ${email}` : "Add a billing contact email in Organisation settings to email reports"}>
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Email report
+          </button>
+        </div>
+        {!email && <Notice tone="warn">There's no contact email for this organisation, so reports can't be emailed yet. Add one in Organisation settings.</Notice>}
+
+        <div id="report-sheet" className="paper" style={{ borderRadius: 10, padding: "36px 40px", boxShadow: "0 1px 0 rgba(255,255,255,.04), 0 12px 32px rgba(0,0,0,.35)" }}>
+          {isLoading ? (
+            <span className="t3">Loading records…</span>
+          ) : kind === "incident" ? (
+            selectedIncident ? (
+              <IncidentSheet incident={selectedIncident} orgName={orgName} generatedAt={generatedAt} />
+            ) : (
+              <span className="t3">Choose an incident above to build its report.</span>
+            )
+          ) : (
+            <PeriodSheet title={meta.title} orgName={orgName} period={periodLabel} generatedAt={generatedAt} incidents={inWindow} patrols={(patrols as PatrolRow[]).filter((p) => !p.archived_at)} />
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function buildReportCentreModel(incidents: IncidentRow[], patrols: PatrolRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {
-  const now = Date.now();
-  const last24h = incidents.filter((incident) => now - new Date(incident.reported_at).getTime() <= 24 * 3600_000);
-  const last7d = incidents.filter((incident) => now - new Date(incident.reported_at).getTime() <= 7 * 24 * 3600_000);
-  const last30d = incidents.filter((incident) => now - new Date(incident.reported_at).getTime() <= 30 * 24 * 3600_000);
-  const criticalIncidents = [...incidents].filter((incident) => Number(incident.severity) >= 4).sort((a, b) => new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime());
-  const patrolCompliance = Math.round(average(patrols.map((patrol) => clamp((patrol.checked_in / Math.max(1, patrol.waypoints)) * 100, 0, 100))));
-  const monthlyRisk = Math.round(average(last30d.map((incident) => Number(incident.severity) * 18 + (incident.status === "escalated" ? 20 : 0))));
-  const history = buildHistoryRows(incidents, patrols, org, settings, orgName);
-  const thisMonthGenerated = history.filter((row) => isSameMonth(new Date(row.generatedAt), new Date())).length;
-
-  return {
-    last24hCount: last24h.length,
-    last7dCount: last7d.length,
-    last30dCount: last30d.length,
-    weeklyCompliance: patrolCompliance,
-    monthlyRisk,
-    criticalIncidents,
-    thisMonthGenerated,
-    history,
-  };
-}
-
-function buildHistoryRows(incidents: IncidentRow[], patrols: PatrolRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {
-  const rows: ReportHistoryRow[] = [];
-  const now = new Date();
-
-  rows.push(...buildDailyLogs(incidents, patrols, org, settings, orgName));
-  rows.push(...buildWeeklySummaries(incidents, patrols, org, settings, orgName));
-  rows.push(...buildMonthlyReports(incidents, patrols, org, settings, orgName));
-  rows.push(...buildIncidentReports(incidents, org, settings, orgName));
-
-  return rows.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()).slice(0, 12);
-}
-
-function buildDailyLogs(incidents: IncidentRow[], patrols: PatrolRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {
-  return Array.from({ length: 7 }, (_, idx) => {
-    const end = new Date();
-    end.setHours(6, 0, 0, 0);
-    end.setDate(end.getDate() - idx);
-    const start = new Date(end.getTime() - 24 * 3600_000);
-    const bucket = incidents.filter((incident) => new Date(incident.reported_at) >= start && new Date(incident.reported_at) < end);
-    const patrolBucket = patrols.filter((patrol) => patrol.status !== "complete");
-    return {
-      id: `daily-${toKey(start)}`,
-      title: "Daily Incident Log",
-      type: "Daily Incident Log",
-      period: `${start.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} - ${end.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`,
-      generatedAt: end.toISOString(),
-      channels: reportChannels(settings, org),
-      recipients: recipientCount(settings, org),
-      pages: Math.max(2, Math.ceil((bucket.length + patrolBucket.length) / 6)),
-      size: `${Math.max(180, bucket.length * 12 + patrolBucket.length * 6)} KB`,
-      shareable: false,
-      summary: `${bucket.length} incidents in the previous 24 hours for ${orgName}.`,
-    } satisfies ReportHistoryRow;
-  });
-}
-
-function buildWeeklySummaries(incidents: IncidentRow[], patrols: PatrolRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {
-  return Array.from({ length: 4 }, (_, idx) => {
-    const start = weekStart(idx);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
-    const bucket = incidents.filter((incident) => {
-      const ts = new Date(incident.reported_at).getTime();
-      return ts >= start.getTime() && ts < end.getTime();
-    });
-    const patrolCompliance = Math.round(average(patrols.map((patrol) => clamp((patrol.checked_in / Math.max(1, patrol.waypoints)) * 100, 0, 100))));
-    return {
-      id: `weekly-${toKey(start)}`,
-      title: "Weekly Security Summary",
-      type: "Weekly Security Summary",
-      period: `${start.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} - ${new Date(end.getTime() - 1).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`,
-      generatedAt: new Date(start.getTime() + 8 * 3600_000).toISOString(),
-      channels: [...reportChannels(settings, org), "WhatsApp"],
-      recipients: recipientCount(settings, org) + 1,
-      pages: Math.max(4, Math.ceil((bucket.length + 10) / 5)),
-      size: `${Math.max(240, bucket.length * 18 + 60)} KB`,
-      shareable: true,
-      summary: `${bucket.length} incidents, ${patrolCompliance}% patrol compliance, and weekly recommendations for ${orgName}.`,
-    } satisfies ReportHistoryRow;
-  });
-}
-
-function buildMonthlyReports(incidents: IncidentRow[], patrols: PatrolRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {
-  return Array.from({ length: 3 }, (_, idx) => {
-    const start = new Date();
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - idx);
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + 1);
-    const bucket = incidents.filter((incident) => {
-      const ts = new Date(incident.reported_at).getTime();
-      return ts >= start.getTime() && ts < end.getTime();
-    });
-    const priorStart = new Date(start);
-    priorStart.setMonth(priorStart.getMonth() - 1);
-    const priorBucket = incidents.filter((incident) => {
-      const ts = new Date(incident.reported_at).getTime();
-      return ts >= priorStart.getTime() && ts < start.getTime();
-    });
-    const trend = bucket.length - priorBucket.length;
-    const avgRisk = Math.round(average(bucket.map((incident) => Number(incident.severity) * 20)));
-    return {
-      id: `monthly-${toKey(start)}`,
-      title: "Monthly Threat Analysis",
-      type: "Monthly Threat Analysis",
-      period: start.toLocaleDateString("en-GB", { month: "long", year: "numeric" }),
-      generatedAt: new Date(end.getTime() - 2 * 3600_000).toISOString(),
-      channels: reportChannels(settings, org),
-      recipients: recipientCount(settings, org),
-      pages: Math.max(6, Math.ceil((bucket.length + patrols.length) / 4)),
-      size: `${Math.max(320, bucket.length * 20 + 90)} KB`,
-      shareable: false,
-      summary: `${bucket.length} incidents for the month, ${trend >= 0 ? "+" : ""}${trend} vs prior month, zone risk index ${avgRisk}.`,
-    } satisfies ReportHistoryRow;
-  });
-}
-
-function buildIncidentReports(incidents: IncidentRow[], org: OrgRow, settings: SettingsRow | null, orgName: string) {
-  return [...incidents]
-    .filter((incident) => Number(incident.severity) >= 4 || incident.status === "escalated")
-    .slice(0, 5)
-    .map((incident, idx) => {
-      const generated = new Date(new Date(incident.reported_at).getTime() + (45 + idx * 10) * 60000);
-      return {
-        id: `incident-${incident.id}`,
-        title: "Incident-Specific Report",
-        type: `Incident ${incident.code}`,
-        period: `${typeMeta[incident.type]} · ${incident.zone}`,
-        generatedAt: generated.toISOString(),
-        channels: ["PDF", "Email"],
-        recipients: recipientCount(settings, org),
-        pages: Math.max(8, Math.ceil((Number(incident.severity) * 2 + idx + 8) / 2)),
-        size: `${Math.max(260, Number(incident.severity) * 30 + idx * 12)} KB`,
-        shareable: false,
-        summary: `${typeMeta[incident.type]} at ${incident.location} in ${orgName} ready for legal and insurance review.`,
-      } satisfies ReportHistoryRow;
-    });
-}
-
-function reportChannels(settings: SettingsRow | null, org: OrgRow) {
-  const channels = ["PDF"];
-  if (org.billing_contact_email) channels.push("Email");
-  if ((settings?.whatsapp_alert_numbers ?? []).length > 0) channels.push("WhatsApp");
-  return channels;
-}
-
-function recipientCount(settings: SettingsRow | null, org: OrgRow) {
-  return [org.billing_contact_email, org.billing_contact_phone, ...(settings?.whatsapp_alert_numbers ?? []), ...(settings?.alert_escalation_contacts ?? []).map((item) => item.phone)]
-    .filter(Boolean)
-    .length;
-}
-
-function Metric({ label, value }: { label: string; value: number | string }) {
+function SheetHeader({ title, orgName, period, generatedAt }: { title: string; orgName: string; period: string; generatedAt: number }) {
   return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
+    <div className="col g4" style={{ borderBottom: "1px solid var(--paper-2)", paddingBottom: 14, marginBottom: 18 }}>
+      <span className="t3 mono" style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase" }}>
+        Lemtik Security · {orgName}
+      </span>
+      <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{title}</h2>
+      <span className="t2" style={{ fontSize: 13 }}>
+        {period} · generated {fmtDateTime(generatedAt)}
+      </span>
     </div>
   );
 }
 
-function InfoPill({ icon: Icon, label, value }: { icon: ComponentType<{ className?: string }>; label: string; value: number | string }) {
+function PeriodSheet({ title, orgName, period, generatedAt, incidents, patrols }: { title: string; orgName: string; period: string; generatedAt: number; incidents: IncidentRow[]; patrols: PatrolRow[] }) {
+  const bySev = [5, 4, 3, 2, 1].map((s) => [s, incidents.filter((i) => Math.max(1, Math.min(5, Number(i.severity))) === s).length] as const);
+  const byType = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of incidents) m.set(typeMeta[i.type] ?? i.type, (m.get(typeMeta[i.type] ?? i.type) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [incidents]);
+  const byZone = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of incidents) m.set(i.zone || "No zone", (m.get(i.zone || "No zone") ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  }, [incidents]);
+  const high = incidents.filter((i) => i.severity >= 4).sort((a, b) => Date.parse(b.reported_at) - Date.parse(a.reported_at));
+  const resolved = incidents.filter((i) => i.status === "resolved" || i.status === "closed").length;
+
   return (
-    <div className="rounded-md border border-border bg-background px-3 py-2">
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-        <Icon className="h-3.5 w-3.5" />
+    <div className="col g16" style={{ fontSize: 13 }}>
+      <SheetHeader title={title} orgName={orgName} period={period} generatedAt={generatedAt} />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Fig label="Incidents" value={incidents.length} />
+        <Fig label="High or critical" value={high.length} />
+        <Fig label="Resolved" value={resolved} />
+        <Fig label="Active patrol routes" value={patrols.length} />
+      </div>
+      {incidents.length === 0 ? (
+        <p className="t2" style={{ margin: 0 }}>
+          No incidents were reported in this period.
+        </p>
+      ) : (
+        <>
+          <SheetSection title="By severity">
+            <SheetTable head={["Severity", "Incidents"]} rows={bySev.filter(([, n]) => n).map(([s, n]) => [SEV_NAME[s], String(n)])} />
+          </SheetSection>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <SheetSection title="By type">
+              <SheetTable head={["Type", "Incidents"]} rows={byType.map(([t, n]) => [t, String(n)])} />
+            </SheetSection>
+            <SheetSection title="Busiest zones">
+              <SheetTable head={["Zone", "Incidents"]} rows={byZone.map(([z, n]) => [z, String(n)])} />
+            </SheetSection>
+          </div>
+          {high.length > 0 && (
+            <SheetSection title="High and critical incidents">
+              <SheetTable head={["Code", "Type", "Where", "Reported", "Status"]} rows={high.slice(0, 25).map((i) => [i.code, typeMeta[i.type] ?? i.type, `${i.location} · ${i.zone}`, fmtDateTime(i.reported_at), i.status])} />
+            </SheetSection>
+          )}
+        </>
+      )}
+      {patrols.length > 0 && (
+        <SheetSection title="Patrol routes (current round)">
+          <SheetTable head={["Route", "Officer", "Waypoints checked", "Status"]} rows={patrols.map((p) => [`${p.code} · ${p.name}`, p.officer ?? "—", `${p.checked_in}/${p.waypoints}`, p.status.replace(/_/g, " ")])} />
+        </SheetSection>
+      )}
+      <span className="t3" style={{ fontSize: 11 }}>
+        Figures come from the incident and patrol records in Lemtik at the time this report was generated.
+      </span>
+    </div>
+  );
+}
+
+function IncidentSheet({ incident, orgName, generatedAt }: { incident: IncidentRow; orgName: string; generatedAt: number }) {
+  return (
+    <div className="col g16" style={{ fontSize: 13 }}>
+      <SheetHeader title={`Incident report · ${incident.code}`} orgName={orgName} period={fmtDateTime(incident.reported_at)} generatedAt={generatedAt} />
+      <SheetTable
+        head={["Field", "Value"]}
+        rows={[
+          ["Type", typeMeta[incident.type] ?? incident.type],
+          ["Severity", `${incident.severity} · ${SEV_NAME[Math.max(1, Math.min(5, Number(incident.severity)))]}`],
+          ["Status", incident.status],
+          ["Location", incident.location],
+          ["Zone", incident.zone],
+          ["Reported", fmtDateTime(incident.reported_at)],
+          ["Assigned officer", incident.officer ?? "—"],
+        ]}
+      />
+      {incident.description && (
+        <SheetSection title="Description">
+          <p style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{incident.description}</p>
+        </SheetSection>
+      )}
+      <span className="t3" style={{ fontSize: 12 }}>
+        Timeline, evidence and chain of custody are on the{" "}
+        <Link to="/app/incidents/$id" params={{ id: incident.id }} className="lnk">
+          incident page
+        </Link>
+        .
+      </span>
+    </div>
+  );
+}
+
+function Fig({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="col">
+      <span className="t3" style={{ fontSize: 11.5 }}>
         {label}
-      </div>
-      <div className="mt-1 text-xs font-medium text-foreground line-clamp-2">{value}</div>
+      </span>
+      <b style={{ fontSize: 24, fontVariantNumeric: "tabular-nums" }}>{value}</b>
     </div>
   );
 }
 
-function DateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function SheetSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <label className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 w-full bg-transparent outline-none" />
-    </label>
+    <section className="col g8">
+      <h3 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{title}</h3>
+      {children}
+    </section>
   );
 }
 
-function buildShareToken(label: string, orgId: string) {
-  return `${slugify(label)}-${slugify(orgId)}-${Math.floor(Date.now() / 60000)}`;
-}
-
-function slugify(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-}
-
-function toInputDate(date: Date) {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
-}
-
-function toKey(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-}
-
-function average(values: number[]) {
-  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function isSameMonth(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-
-function weekStart(weeksAgo: number) {
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
-  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-  date.setDate(date.getDate() - weeksAgo * 7);
-  return date;
+function SheetTable({ head, rows }: { head: string[]; rows: string[][] }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+        <thead>
+          <tr>
+            {head.map((h) => (
+              <th key={h} className="t3" style={{ textAlign: "left", fontWeight: 600, padding: "6px 8px 6px 0", borderBottom: "1px solid var(--paper-2)" }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {r.map((c, j) => (
+                <td key={j} style={{ padding: "6px 8px 6px 0", borderBottom: "1px solid var(--paper-2)", fontVariantNumeric: "tabular-nums" }}>
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }

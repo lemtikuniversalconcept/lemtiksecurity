@@ -88,3 +88,63 @@ export const generateReportSummary = createServerFn({ method: "POST" })
     ].filter(Boolean);
     return parts.join(" ");
   });
+
+export type SecurityReportRow = {
+  id: string;
+  title: string;
+  report_type: string | null;
+  period_label: string | null;
+  summary: string | null;
+  channels: string[] | null;
+  recipient_count: number | null;
+  generated_at: string;
+};
+
+// Reports that were actually generated and recorded. If the table isn't there the caller gets
+// an error rather than an invented history.
+export const listSecurityReports = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    const { data, error } = await context.supabase
+      .from("security_reports" as any)
+      .select("id, title, report_type, period_label, summary, channels, recipient_count, generated_at")
+      .eq("organisation_id", orgId)
+      .order("generated_at", { ascending: false })
+      .limit(50);
+    if (error) throwSafeError("reports.list", error, "Report history isn't available.");
+    return (data ?? []) as unknown as SecurityReportRow[];
+  });
+
+export const recordSecurityReport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      title: z.string().min(1).max(160),
+      report_type: z.string().min(1).max(40),
+      period_label: z.string().max(120),
+      summary: z.string().max(1200),
+      channels: z.array(z.string().max(40)).max(5),
+      recipient_emails: z.array(z.string().email()).max(10),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const orgId = await getActiveOrgId(context.supabase, context.userId);
+    const { error } = await context.supabase.from("security_reports" as any).insert({
+      organisation_id: orgId,
+      org_id: orgId,
+      title: data.title,
+      report_name: data.title,
+      report_type: data.report_type,
+      period_label: data.period_label,
+      summary: data.summary,
+      channels: data.channels,
+      recipient_emails: data.recipient_emails,
+      recipient_count: data.recipient_emails.length,
+      generated_at: new Date().toISOString(),
+      source: "c4isod-dashboard",
+      created_by: context.userId,
+    } as any);
+    if (error) throwSafeError("reports.record", error, "The report couldn't be saved to history.");
+    return { ok: true };
+  });
