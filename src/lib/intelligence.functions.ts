@@ -11,6 +11,8 @@ export type BriefEntry = {
   summary: string;
   highlights: string[];
   score: number;
+  /** The risk rating word osint printed in the brief (Red / Orange / Green), when present. */
+  rating: string | null;
   windowLabel: string;
 };
 
@@ -31,8 +33,8 @@ function parseBriefMarkdown(payload: OsintBriefResponse, orgId: string): BriefEn
   const generatedAt = generatedMatch ? new Date(generatedMatch[1].trim()).toISOString() : new Date().toISOString();
 
   const riskMatch = markdown.match(/Week's risk rating:\s*(\w+)/);
-  const riskRating = riskMatch ? riskMatch[1].trim() : "Green";
-  const score = { Red: 90, Orange: 60, Green: 25 }[riskRating] ?? 40;
+  const riskRating = riskMatch ? riskMatch[1].trim() : null;
+  const score = riskRating ? ({ Red: 90, Orange: 60, Green: 25 } as Record<string, number>)[riskRating] ?? 40 : 0;
 
   const verifyMatch = markdown.match(/Severity 3\+ items still requiring independent verification:\s*(\d+)/);
   const highCritMatch = markdown.match(/High\/Critical items:\s*(\d+)/);
@@ -53,10 +55,11 @@ function parseBriefMarkdown(payload: OsintBriefResponse, orgId: string): BriefEn
   return {
     id: `brief-${orgId}-${generatedAt}`,
     generatedAt,
-    title: `Weekly Intelligence Brief — ${riskRating} risk`,
+    title: riskRating ? `Weekly intelligence brief · ${riskRating} risk` : "Weekly intelligence brief",
     summary,
-    highlights: highlights.length ? highlights : ["No logged incidents in this period."],
+    highlights,
     score,
+    rating: riskRating,
     windowLabel: `Last ${days} days`,
   };
 }
@@ -147,15 +150,8 @@ export const generateBrief = createServerFn({ method: "POST" })
       },
     });
     if (result?.markdown) return parseBriefMarkdown(result, orgId);
-    return {
-      id: `brief-${Date.now()}`,
-      generatedAt: new Date().toISOString(),
-      title: data.title,
-      summary: data.summary ?? "",
-      highlights: data.highlights ?? [],
-      score: data.score ?? 0,
-      windowLabel: data.windowLabel ?? "Current window",
-    };
+    // Never echo the caller's own draft back as if the service had written it.
+    throw new Error("The intelligence service didn't return a brief.");
   });
 
 export const getBriefings = getBriefs;

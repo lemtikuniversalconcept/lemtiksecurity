@@ -1,607 +1,508 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import { getMapboxToken } from "@/lib/config.functions";
-import { getBriefings, generateBriefing, listOsintIntelligence, type OsintIntelligenceItem } from "@/lib/intelligence.functions";
+import { getBriefings, generateBriefing, listOsintIntelligence, type BriefEntry, type OsintIntelligenceItem } from "@/lib/intelligence.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import { Download, FileText, Filter, Loader2, MapPinned, Radar, Search, ShieldAlert, Sparkles, ExternalLink, ChevronRight, X, BrainCircuit, AlertTriangle } from "lucide-react";
+import { Download, ExternalLink, FileText, Loader2, Search, X } from "lucide-react";
+import { Confidence, Empty, Notice, Panel, Seg, Sev, Tag, timeAgo } from "@/components/nw";
 
-const LAGOS: [number, number] = [3.4219, 6.4281];
-
-type IntelligenceCategory = "physical" | "cyber" | "political" | "macro";
-type SeverityFilter = "all" | "4plus" | "3plus" | "2plus";
-type VerifiedFilter = "all" | "verified" | "unverified";
+type Category = "physical" | "cyber" | "political" | "macro";
+type Verification = "yes" | "partial" | "no";
+type SevFilter = "all" | "4" | "2";
+type VerifiedFilter = "any" | Verification;
 type RangeFilter = "24h" | "7d" | "30d" | "90d";
 type ViewMode = "feed" | "map";
 
-type IntelligenceItem = {
-  id: string;
-  title: string;
-  summary: string;
-  category: IntelligenceCategory;
-  severity: number;
-  confidence: number;
-  verified: boolean;
-  sourceName: string;
-  sourceUrl: string;
-  zone: string;
-  location: string;
-  reportedAt: string;
-  matchedKeywords: string[];
-  analystNotes: string;
-  locationRelevance: number;
-  relatedIncidentIds: string[];
-  coordX: number;
-  coordY: number;
-  statusLabel: string;
-};
+const CATEGORIES: { value: Category; label: string }[] = [
+  { value: "physical", label: "Physical" },
+  { value: "cyber", label: "Cyber" },
+  { value: "political", label: "Political" },
+  { value: "macro", label: "Macro" },
+];
+const RANGE_DAYS: Record<RangeFilter, number> = { "24h": 1, "7d": 7, "30d": 30, "90d": 90 };
+const VERIFY_LABEL: Record<Verification, string> = { yes: "Verified", partial: "Partly verified", no: "Unverified" };
+const VERIFY_TONE: Record<Verification, "ok" | "warn" | undefined> = { yes: "ok", partial: "warn", no: undefined };
 
-type BriefEntry = {
+/** One OSINT signal, carrying only what the intelligence service actually returned. */
+type Signal = {
   id: string;
-  generatedAt: string;
   title: string;
   summary: string;
-  highlights: string[];
-  score: number;
-  windowLabel: string;
+  category: Category;
+  severity: number;
+  confidence: number | null;
+  verification: Verification;
+  sourceName: string | null;
+  sourceUrl: string | null;
+  area: string | null;
+  locationNote: string | null;
+  reportedAt: string | null;
+  keywords: string[];
+  notes: string | null;
+  status: string | null;
+  coord: [number, number] | null;
 };
 
 export const Route = createFileRoute("/app/intelligence")({
-  head: () => ({ meta: [{ title: "Intelligence Feed · Lemtik SOD" }] }),
+  head: () => ({ meta: [{ title: "Intelligence · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
     requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },
-  component: IntelligenceFeedPage,
+  component: IntelligencePage,
 });
 
-function IntelligenceFeedPage() {
+function IntelligencePage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { appAccess } = Route.useRouteContext();
   const canManage = appAccess.specRole === "security_manager";
   const list = useServerFn(listOsintIntelligence);
   const tokenFn = useServerFn(getMapboxToken);
   const loadBriefs = useServerFn(getBriefings);
   const createBrief = useServerFn(generateBriefing);
-  const { data: intelligenceItems = [], isLoading, isError: feedError } = useQuery({
-    queryKey: ["intelligence-feed", appAccess.orgId],
-    queryFn: () => list({ data: { org_id: appAccess.orgId } }) as Promise<OsintIntelligenceItem[]>,
+
+  const [mode, setMode] = useState<ViewMode>("feed");
+  const [sevFilter, setSevFilter] = useState<SevFilter>("all");
+  const [categories, setCategories] = useState<Set<Category>>(() => new Set(CATEGORIES.map((c) => c.value)));
+  const [range, setRange] = useState<RangeFilter>("7d");
+  const [verified, setVerified] = useState<VerifiedFilter>("any");
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [flags, setFlags] = useState<Record<string, "relevant" | "dismissed">>({});
+  const [generating, setGenerating] = useState(false);
+
+  const days = RANGE_DAYS[range];
+  const { data: raw = [], isLoading, isError: feedError } = useQuery({
+    queryKey: ["intelligence-feed", appAccess.orgId, days],
+    queryFn: () => list({ data: { org_id: appAccess.orgId, days } }) as Promise<OsintIntelligenceItem[]>,
     retry: 1,
   });
-  const { data: tokenData } = useQuery({
-    queryKey: ["mapbox_token"],
-    queryFn: () => tokenFn(),
-    staleTime: Infinity,
-  });
-  // isError distinguishes "osint is genuinely unreachable" from "osint reached, zero items" -
-  // the two used to look identical (both rendered as a silent local zero-data placeholder brief
-  // with no indication anything had failed). See the /briefs route in relationship_api: it no
-  // longer masks a real osint outage behind a fake status:200 success.
-  const { data: serverBriefs = [], isError: briefsError, refetch: refetchBriefs } = useQuery({
+  const { data: tokenData } = useQuery({ queryKey: ["mapbox-token"], queryFn: () => tokenFn(), staleTime: Infinity });
+  // isError separates "the intelligence service is unreachable" from "it answered with nothing".
+  const { data: briefs = [], isError: briefsError, isLoading: briefsLoading } = useQuery({
     queryKey: ["intelligence-briefs", appAccess.orgId],
     queryFn: () => loadBriefs({ data: { org_id: appAccess.orgId } }) as Promise<BriefEntry[]>,
     retry: 1,
   });
+  const brief = briefs[0] ?? null;
 
-  const [mode, setMode] = useState<ViewMode>("feed");
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
-  const [categoryFilter, setCategoryFilter] = useState<IntelligenceCategory | "all">("all");
-  const [rangeFilter, setRangeFilter] = useState<RangeFilter>("7d");
-  const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
-  const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [feedFlags, setFeedFlags] = useState<Record<string, "relevant" | "dismissed">>({});
-  const [briefHistory, setBriefHistory] = useState<BriefEntry[]>([]);
-  const [generatingBrief, setGeneratingBrief] = useState(false);
-  const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markerRefs = useRef<mapboxgl.Marker[]>([]);
+  const signals = useMemo(() => (raw as OsintIntelligenceItem[]).map(toSignal), [raw]);
 
-  const liveItems = useMemo(() => {
-    return intelligenceItems.map((item, index) => deriveOsintIntelligenceItem(item, index));
-  }, [intelligenceItems]);
-
-  const filteredItems = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const minSeverity = severityFilter === "4plus" ? 4 : severityFilter === "3plus" ? 3 : severityFilter === "2plus" ? 2 : 1;
-    const rangeMs = rangeMsFor(rangeFilter);
-    return liveItems
-      .filter((item) => item.severity >= minSeverity)
-      .filter((item) => categoryFilter === "all" || item.category === categoryFilter)
-      .filter((item) => verifiedFilter === "all" || (verifiedFilter === "verified" ? item.verified : !item.verified))
-      .filter((item) => {
-        const age = Date.now() - new Date(item.reportedAt).getTime();
-        return age <= rangeMs;
-      })
-      .filter((item) => {
-        if (!q) return true;
-        return [
-          item.title,
-          item.summary,
-          item.zone,
-          item.location,
-          item.sourceName,
-          item.matchedKeywords.join(" "),
-        ].join(" ").toLowerCase().includes(q);
-      })
-      .filter((item) => feedFlags[item.id] !== "dismissed")
-      .sort((a, b) => new Date(b.reportedAt).getTime() - new Date(a.reportedAt).getTime());
-  }, [categoryFilter, feedFlags, liveItems, rangeFilter, search, severityFilter, verifiedFilter]);
+    const minSev = sevFilter === "all" ? 1 : Number(sevFilter);
+    const cutoff = Date.now() - days * 24 * 3600_000;
+    return signals
+      .filter((s) => s.severity >= minSev)
+      .filter((s) => categories.has(s.category))
+      .filter((s) => verified === "any" || s.verification === verified)
+      .filter((s) => !s.reportedAt || new Date(s.reportedAt).getTime() >= cutoff)
+      .filter((s) => !q || [s.title, s.summary, s.area, s.locationNote, s.sourceName, s.keywords.join(" ")].join(" ").toLowerCase().includes(q))
+      .filter((s) => flags[s.id] !== "dismissed")
+      .sort((a, b) => (b.reportedAt ? Date.parse(b.reportedAt) : 0) - (a.reportedAt ? Date.parse(a.reportedAt) : 0));
+  }, [signals, search, sevFilter, categories, verified, days, flags]);
 
-  const selectedItem = useMemo(
-    () => filteredItems.find((item) => item.id === selectedId) ?? filteredItems[0] ?? null,
-    [filteredItems, selectedId],
-  );
+  const selected = filtered.find((s) => s.id === selectedId) ?? null;
+  const placed = filtered.filter((s) => s.coord);
+  const highSev = filtered.filter((s) => s.severity >= 4).length;
+  const relevantCount = Object.values(flags).filter((f) => f === "relevant").length;
 
-  useEffect(() => {
-    if (!selectedId && filteredItems[0]) setSelectedId(filteredItems[0].id);
-    if (selectedId && !filteredItems.some((item) => item.id === selectedId)) {
-      setSelectedId(filteredItems[0]?.id ?? null);
-    }
-  }, [filteredItems, selectedId]);
-
-  const zoneScores = useMemo(() => {
-    const counts = new Map<string, number>();
-    const severityTotals = new Map<string, number>();
-    filteredItems.forEach((item) => {
-      counts.set(item.zone, (counts.get(item.zone) ?? 0) + 1);
-      severityTotals.set(item.zone, (severityTotals.get(item.zone) ?? 0) + item.severity);
-    });
-    return [...counts.entries()]
-      .map(([zone, incidentCount]) => {
-        const severity = severityTotals.get(zone) ?? 0;
-        const score = Math.min(100, Math.round(35 + incidentCount * 8 + severity * 6));
-        return { zone, score, incidents: incidentCount, trend: incidentCount > 3 ? "rising" : "stable" };
-      })
-      .sort((a, b) => b.score - a.score);
-  }, [filteredItems]);
-
-  const currentAreaRisk = zoneScores[0] ?? { zone: "Lagos", score: 0, trend: "stable", incidents: filteredItems.length };
-  const currentBrief = useMemo(() => buildBrief(filteredItems, currentAreaRisk.zone, rangeFilter), [filteredItems, currentAreaRisk.zone, rangeFilter]);
-
-  useEffect(() => {
-    // Only fall back to the locally-computed brief when osint genuinely returned zero briefs -
-    // never when the fetch itself failed. Silently substituting local content for a real osint
-    // outage is exactly the bug this replaces: it rendered indistinguishably from real content,
-    // so a manager had no way to tell "nothing happening" from "we couldn't reach the service."
-    if (briefsError) return;
-    setBriefHistory((serverBriefs.length ? serverBriefs : [currentBrief]).slice(0, 12));
-  }, [briefsError, currentBrief, serverBriefs]);
-
-  useEffect(() => {
-    if (!tokenData?.token || !mapEl.current || mapRef.current) return;
-    mapboxgl.accessToken = tokenData.token;
-    const m = new mapboxgl.Map({
-      container: mapEl.current,
-      style: "mapbox://styles/mapbox/dark-v11",
-      center: LAGOS,
-      zoom: 10.8,
-      attributionControl: false,
-    });
-    m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
-    m.on("load", () => requestAnimationFrame(() => m.resize()));
-    mapRef.current = m;
-    const ro = new ResizeObserver(() => { try { m.resize(); } catch {} });
-    if (mapEl.current) ro.observe(mapEl.current);
-    return () => { ro.disconnect(); markerRefs.current.forEach((mk) => mk.remove()); markerRefs.current = []; m.remove(); mapRef.current = null; };
-  }, [tokenData?.token]);
-
-  useEffect(() => {
-    const m = mapRef.current;
-    if (!m) return;
-    markerRefs.current.forEach((mk) => mk.remove());
-    markerRefs.current = [];
-    filteredItems.forEach((item) => {
-      if (item.coordX == null || item.coordY == null) return;
-      const el = document.createElement("button");
-      el.type = "button";
-      el.title = item.title;
-      el.className = "group relative grid place-items-center";
-      el.innerHTML = `
-        <span style="
-          width: 18px;
-          height: 18px;
-          transform: rotate(45deg);
-          border-radius: 3px;
-          background: ${severityColor(item.severity)};
-          box-shadow: 0 0 0 2px hsl(220 14% 9%);
-          display: inline-block;
-        "></span>
-      `;
-      el.onclick = (e) => {
-        e.preventDefault();
-        setSelectedId(item.id);
-        setMode("map");
-      };
-      markerRefs.current.push(new mapboxgl.Marker({ element: el, anchor: "center" }).setLngLat([item.coordX, item.coordY]).addTo(m));
-    });
-  }, [filteredItems, mode]);
-
-  const generateBrief = async () => {
-    setGeneratingBrief(true);
+  const generate = async () => {
+    setGenerating(true);
     try {
-      const next = (await createBrief({
+      await createBrief({
         data: {
-          title: currentBrief.title,
-          summary: currentBrief.summary,
-          highlights: currentBrief.highlights,
-          score: currentBrief.score,
-          windowLabel: currentBrief.windowLabel,
-          items: filteredItems,
-          context: {
-            zone: currentAreaRisk.zone,
-            range: rangeFilter,
-            areaRiskScore: currentAreaRisk.score,
-          },
+          title: "Weekly intelligence brief",
+          windowLabel: `Last ${days} days`,
+          items: filtered.map((s) => ({ id: s.id, severity: s.severity, category: s.category, summary: s.summary })),
+          context: { range },
           org_id: appAccess.orgId,
         },
-      })) as BriefEntry;
-      setBriefHistory((prev) => [next, ...prev.filter((item) => item.id !== next.id)].slice(0, 12));
-      await refetchBriefs();
-    } catch (error) {
-      // Previously unhandled: a failed call here silently did nothing visible, leaving whatever
-      // (possibly fake) brief was already showing unchanged with no indication the click failed.
-      toast.error("Could not generate a new brief — the intelligence service is unreachable. Try again shortly.");
+      });
+      await qc.invalidateQueries({ queryKey: ["intelligence-briefs", appAccess.orgId] });
+      toast.success("New brief generated");
+    } catch (e) {
+      toast.error((e as Error)?.message || "Couldn't generate a brief. The intelligence service may be unreachable.");
     } finally {
-      setGeneratingBrief(false);
+      setGenerating(false);
     }
   };
 
-  const markRelevant = (id: string) => setFeedFlags((prev) => ({ ...prev, [id]: "relevant" }));
-  const dismissItem = (id: string) => setFeedFlags((prev) => ({ ...prev, [id]: "dismissed" }));
-  const escalateToIncident = (item: IntelligenceItem) => {
+  const escalate = (s: Signal) => {
     try {
-      sessionStorage.setItem("lemtik_incident_draft", JSON.stringify({
-        title: item.title,
-        description: `${item.summary}\n\nSource: ${item.sourceName}\nKeywords: ${item.matchedKeywords.join(", ")}`,
-        location: item.location,
-        zone: item.zone,
-        severity: Math.max(3, item.severity),
-        type: item.category === "cyber" ? "cyber_incident" : item.category === "political" ? "civil_unrest" : "suspicious",
-      }));
+      sessionStorage.setItem(
+        "lemtik_incident_draft",
+        JSON.stringify({
+          title: s.title,
+          description: `${s.summary}${s.sourceName ? `\n\nSource: ${s.sourceName}` : ""}${s.sourceUrl ? `\n${s.sourceUrl}` : ""}`,
+          location: s.locationNote ?? s.area ?? "",
+          zone: s.area ?? "",
+          severity: Math.max(3, s.severity),
+          type: s.category === "cyber" ? "cyber_incident" : s.category === "political" ? "civil_unrest" : "suspicious",
+        }),
+      );
     } catch {
-      // ignore storage failures
+      /* storage unavailable: the wizard opens empty */
     }
     navigate({ to: "/app/incidents" });
   };
 
-  const downloadPdf = () => window.print();
-
-  const mapView = mode === "map";
+  const toggleCategory = (c: Category) =>
+    setCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Intelligence Feed</div>
-          <div className="mt-1 flex items-center gap-2">
-            <h1 className="text-2xl font-semibold">OSINT intelligence feed</h1>
-            <span className="inline-flex items-center gap-1 rounded-md border border-critical/30 bg-critical/10 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-critical">
-              <ShieldAlert className="h-3 w-3" /> Area risk {currentAreaRisk.score}%
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground">Public signals, analyst context, and brief history for live operations.</p>
+    <div className="col g16">
+      <div className="row g12 wrap">
+        <div className="col">
+          <h1 className="ph1">Intelligence</h1>
+          <span className="sub">Open-source signals collected for your organisation, before they become alerts.</span>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canManage && (
-            <button
-              onClick={generateBrief}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Generate Weekly Brief
-            </button>
-          )}
-          <button
-            onClick={downloadPdf}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2"
-          >
-            <Download className="h-3.5 w-3.5" /> Download PDF
+        <span className="flex-auto" />
+        <Seg label="View" value={mode} onChange={setMode} options={[{ value: "feed", label: "Feed" }, { value: "map", label: "Map" }]} />
+        {canManage && (
+          <button type="button" className="b b-pri" onClick={generate} disabled={generating}>
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Generate weekly brief
           </button>
-        </div>
+        )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
-        <div className="inline-flex rounded-md border border-border bg-surface p-1">
-          {(["feed", "map"] as ViewMode[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setMode(v)}
-              className={`rounded px-3 py-1.5 text-xs font-medium capitalize ${mode === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {v === "feed" ? "Feed" : "Map"}
+      <section className="pn">
+        <div className="row g16 wrap" style={{ padding: "14px 16px", alignItems: "center" }}>
+        <Stat label={`Signals · ${range}`} value={isLoading ? "—" : filtered.length} />
+        <Stat label="Severity 4+" value={isLoading ? "—" : highSev} />
+        <Stat label="Verified" value={isLoading ? "—" : filtered.filter((s) => s.verification === "yes").length} />
+        <Stat label="Marked relevant" value={relevantCount} hint="Kept in this browser session only" />
+        <span className="flex-auto" />
+        <div className="card row g10" style={{ padding: "8px 12px", minWidth: 0 }}>
+          <span className="col" style={{ minWidth: 0 }}>
+            <b className="trunc">{brief ? brief.title : "Weekly brief"}</b>
+            <span className="t3">
+              {briefsLoading
+                ? "Loading…"
+                : briefsError
+                  ? "Couldn't reach the intelligence service"
+                  : brief
+                    ? `Generated ${new Date(brief.generatedAt).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" })} · ${brief.windowLabel}`
+                    : "No brief generated yet"}
+            </span>
+          </span>
+          {brief?.rating && <Tag tone={brief.rating === "Red" ? "fail" : brief.rating === "Orange" ? "warn" : "ok"}>{brief.rating}</Tag>}
+          {brief && (
+            <button type="button" className="b b-sm b-sec" onClick={() => window.print()}>
+              <Download className="h-3.5 w-3.5" /> PDF
             </button>
-          ))}
+          )}
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <SelectChip label="Severity" value={severityFilter} onChange={(v) => setSeverityFilter(v as SeverityFilter)} options={[["all", "All"], ["4plus", "4+"], ["3plus", "3+"], ["2plus", "2+"]]} />
-          <SelectChip label="Category" value={categoryFilter} onChange={(v) => setCategoryFilter(v as IntelligenceCategory | "all")} options={[["all", "All"], ["physical", "Physical"], ["cyber", "Cyber"], ["political", "Political"], ["macro", "Macro"]]} />
-          <SelectChip label="Date" value={rangeFilter} onChange={(v) => setRangeFilter(v as RangeFilter)} options={[["24h", "24h"], ["7d", "7d"], ["30d", "30d"], ["90d", "90d"]]} />
-          <SelectChip label="Verified" value={verifiedFilter} onChange={(v) => setVerifiedFilter(v as VerifiedFilter)} options={[["all", "All"], ["verified", "Verified"], ["unverified", "Unverified"]]} />
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search intelligence"
-              className="w-56 rounded-md border border-border bg-surface pl-7 pr-3 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
         </div>
+      </section>
+
+      <div className="row g8 wrap">
+        <label className="in row g8" style={{ width: 260 }}>
+          <Search className="h-4 w-4 t3" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search signals" aria-label="Search signals" className="f1" style={{ background: "transparent", border: 0, outline: "none", color: "inherit", minWidth: 0 }} />
+        </label>
+        <Seg label="Severity" value={sevFilter} onChange={setSevFilter} options={[{ value: "all", label: "All" }, { value: "4", label: "S4+" }, { value: "2", label: "S2+" }]} />
+        {CATEGORIES.map((c) => (
+          <button key={c.value} type="button" className={`chip${categories.has(c.value) ? " on" : ""}`} aria-pressed={categories.has(c.value)} onClick={() => toggleCategory(c.value)}>
+            {c.label}
+          </button>
+        ))}
+        <select className="in" style={{ width: "auto" }} value={verified} onChange={(e) => setVerified(e.target.value as VerifiedFilter)} aria-label="Verification">
+          <option value="any">Verification: any</option>
+          <option value="yes">Verified</option>
+          <option value="partial">Partly verified</option>
+          <option value="no">Unverified</option>
+        </select>
+        <Seg label="Time window" value={range} onChange={setRange} options={(["24h", "7d", "30d", "90d"] as RangeFilter[]).map((r) => ({ value: r, label: r }))} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-4 items-start">
-        <section className="rounded-lg border border-border bg-card p-4 space-y-3">
-          {isLoading && (
-            <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading intelligence…
-            </div>
-          )}
+      {feedError && <Notice tone="fail">Couldn't reach the intelligence service. This is a connection problem, not an empty feed. Try again shortly.</Notice>}
 
-          {feedError && (
-            <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              Could not reach the intelligence service. This is a connectivity issue, not an empty feed — retry shortly.
-            </div>
-          )}
-
-          {!mapView ? (
-            <div className="space-y-2">
-              {filteredItems.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border bg-surface p-8 text-center text-sm text-muted-foreground">
-                  {feedError ? "Unable to load intelligence items right now." : "No intelligence items match the current filters."}
-                </div>
-              ) : (
-                filteredItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => setSelectedId(item.id)}
-                    className={`w-full rounded-lg border p-4 text-left transition-colors ${selectedItem?.id === item.id ? "border-primary/50 bg-primary/5" : "border-border bg-surface hover:bg-surface-2"}`}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          <Badge severity={item.severity} />
-                          <span>{item.category}</span>
-                          <span>{formatConfidence(item.confidence)}</span>
-                          <span>{item.verified ? "Verified ✓" : "Partial"}</span>
-                          {feedFlags[item.id] && <span className="text-primary">{feedFlags[item.id]}</span>}
-                        </div>
-                        <div className="text-sm font-semibold">{item.title}</div>
-                        <p className="line-clamp-2 text-sm text-muted-foreground">{item.summary}</p>
-                      </div>
-                      <div className="text-right text-[11px] text-muted-foreground">
-                        <div>{item.sourceName}</div>
-                        <div>{formatAgo(item.reportedAt)} · {item.zone}</div>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <ActionPill onClick={() => setSelectedId(item.id)} label="View full" icon={<ChevronRight className="h-3 w-3" />} />
-                      <ActionPill onClick={() => markRelevant(item.id)} label="Relevant to us" icon={<BrainCircuit className="h-3 w-3" />} />
-                      <ActionPill onClick={() => dismissItem(item.id)} label="Dismiss" icon={<X className="h-3 w-3" />} />
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]" style={{ alignItems: "start" }}>
+        <div className="col g8" style={{ minWidth: 0 }}>
+          {mode === "map" ? (
+            <SignalMap token={tokenData?.token ?? ""} signals={placed} total={filtered.length} selectedId={selectedId} onSelect={setSelectedId} />
+          ) : isLoading ? (
+            <Panel>
+              <Empty>
+                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading signals…
+              </Empty>
+            </Panel>
+          ) : filtered.length === 0 ? (
+            <Panel>
+              <Empty>{feedError ? "Signals couldn't be loaded." : signals.length ? "No signals match these filters." : "No signals collected in this window."}</Empty>
+            </Panel>
           ) : (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-border bg-surface overflow-hidden">
-                <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2"><MapPinned className="h-3.5 w-3.5" /> OSINT map view</div>
-                  <div>{filteredItems.length} plotted items</div>
-                </div>
-                <div className="relative h-[520px]">
-                  {tokenData?.token ? (
-                    <div ref={mapEl} className="absolute inset-0" />
-                  ) : (
-                    <div className="absolute inset-0 grid place-items-center p-8 text-center text-sm text-muted-foreground">
-                      Add `MAPBOX_PUBLIC_TOKEN` to enable the OSINT map.
-                    </div>
+            filtered.map((s) => (
+              <article
+                key={s.id}
+                className="card col g8"
+                style={{ padding: 14, borderColor: selectedId === s.id ? "var(--blue-ln)" : undefined, cursor: "pointer" }}
+                onClick={() => setSelectedId(s.id)}
+              >
+                <div className="row g8 wrap">
+                  <Sev level={s.severity} />
+                  <Tag>{CATEGORIES.find((c) => c.value === s.category)?.label}</Tag>
+                  <Tag tone={VERIFY_TONE[s.verification]}>{VERIFY_LABEL[s.verification]}</Tag>
+                  {flags[s.id] === "relevant" && <Tag tone="blue">Relevant</Tag>}
+                  <span className="flex-auto" />
+                  {s.confidence != null && (
+                    <span title="Classifier confidence from the intelligence service">
+                      <Confidence value={s.confidence} />
+                    </span>
                   )}
                 </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {zoneScores.slice(0, 4).map((zone) => (
-                  <div key={zone.zone} className="rounded-lg border border-border bg-surface px-3 py-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{zone.zone}</span>
-                      <span className="font-mono text-muted-foreground">{zone.score}%</span>
-                    </div>
-                    <div className="mt-1 text-muted-foreground">{zone.incidents} intelligence items · {zone.trend}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-
-        <aside className="space-y-4">
-          <div className="rounded-lg border border-border bg-card p-4 sticky top-4">
-            <div className={`transform transition-transform duration-300 ${selectedItem ? "translate-x-0 opacity-100" : "translate-x-4 opacity-70"}`}>
-              {selectedItem ? (
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      <Badge severity={selectedItem.severity} />
-                      <span>{selectedItem.category}</span>
-                      <span>{formatConfidence(selectedItem.confidence)}</span>
-                    </div>
-                    <h2 className="mt-2 text-lg font-semibold">{selectedItem.title}</h2>
-                    <div className="mt-1 text-xs text-muted-foreground">{selectedItem.sourceName} · {formatAgo(selectedItem.reportedAt)} · {selectedItem.zone}</div>
-                  </div>
-                  <div className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted-foreground">{selectedItem.summary}</div>
-                  <InfoRow label="Source link" value={<a href={selectedItem.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Open source <ExternalLink className="h-3 w-3" /></a>} />
-                  <InfoRow label="Matched keywords" value={selectedItem.matchedKeywords.join(", ") || "None detected"} />
-                  <InfoRow label="Location relevance" value={`${selectedItem.locationRelevance}%`} />
-                  <InfoRow label="Verification" value={selectedItem.verified ? "Verified" : "Unverified"} />
-                  <InfoRow label="Analyst notes" value={selectedItem.analystNotes} />
-                  <InfoRow label="Related incidents" value={selectedItem.relatedIncidentIds.length ? selectedItem.relatedIncidentIds.join(", ") : "None"} />
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    <button onClick={() => markRelevant(selectedItem.id)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-                      <BrainCircuit className="h-3.5 w-3.5" /> Mark relevant
-                    </button>
-                    <button onClick={() => dismissItem(selectedItem.id)} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2">
-                      <X className="h-3.5 w-3.5" /> Dismiss
-                    </button>
-                    <button onClick={() => escalateToIncident(selectedItem)} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2">
-                      <ChevronRight className="h-3.5 w-3.5" /> Escalate to incident
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">Select an intelligence item to view its detail panel.</div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border bg-card p-4">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Weekly brief</div>
-                <h3 className="text-sm font-semibold">Latest generated brief</h3>
-              </div>
-              {canManage && (
-                <button
-                  onClick={generateBrief}
-                  disabled={generatingBrief}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-                >
-                  {generatingBrief ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                  {generatingBrief ? "Generating…" : "Generate new brief"}
-                </button>
-              )}
-            </div>
-
-            {briefsError && briefHistory.length === 0 ? (
-              <div className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-xs text-destructive">
-                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>Could not reach the intelligence service to load the latest brief. This is a connectivity issue — the last brief may still be available in a moment.</span>
-              </div>
-            ) : (
-            <div className="mt-4 rounded-lg border border-border bg-surface p-4">
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                <FileText className="h-3.5 w-3.5" /> {briefHistory[0]?.windowLabel ?? "Current window"}
-              </div>
-              <h4 className="mt-2 text-base font-semibold">{briefHistory[0]?.title ?? currentBrief.title}</h4>
-              <p className="mt-2 text-sm text-muted-foreground">{briefHistory[0]?.summary ?? currentBrief.summary}</p>
-              <ul className="mt-3 space-y-1.5 text-xs text-foreground">
-                {(briefHistory[0]?.highlights ?? currentBrief.highlights).map((item) => (
-                  <li key={item} className="flex items-start gap-2">
-                    <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>Score {briefHistory[0]?.score ?? currentBrief.score}%</span>
-                <button onClick={downloadPdf} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-xs hover:bg-surface-2">
-                  <Download className="h-3.5 w-3.5" /> Download PDF
-                </button>
-              </div>
-            </div>
-            )}
-
-            <div className="mt-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Brief history</div>
-              <div className="mt-2 space-y-2">
-                {(briefHistory.slice(0, 12)).map((entry) => (
+                <h3 style={{ fontSize: 14.5, fontWeight: 600, lineHeight: 1.4, margin: 0 }}>{s.title}</h3>
+                <div className="row g8 wrap t3" style={{ fontSize: 12 }}>
+                  {s.sourceName && <span>{s.sourceName}</span>}
+                  {s.reportedAt && <span>· {timeAgo(s.reportedAt)}</span>}
+                  {s.area && <span>· {s.area}</span>}
+                  <span className="flex-auto" />
                   <button
-                    key={entry.id}
-                    onClick={() => setBriefHistory((prev) => [entry, ...prev.filter((item) => item.id !== entry.id)])}
-                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-left text-xs hover:bg-surface-2"
+                    type="button"
+                    className="b b-sm b-gh"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFlags((f) => ({ ...f, [s.id]: "dismissed" }));
+                    }}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{entry.title}</span>
-                      <span className="text-[10px] text-muted-foreground">{entry.score}%</span>
-                    </div>
-                    <div className="mt-1 text-muted-foreground">{new Date(entry.generatedAt).toLocaleString("en-GB")}</div>
+                    Dismiss
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    className="b b-sm b-sec"
+                    aria-pressed={flags[s.id] === "relevant"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFlags((f) => ({ ...f, [s.id]: "relevant" }));
+                    }}
+                  >
+                    Relevant
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        <aside className="col g12 side">
+          {selected ? (
+            <Panel
+              title="Signal"
+              actions={
+                <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Close signal" onClick={() => setSelectedId(null)}>
+                  <X size={14} />
+                </button>
+              }
+            >
+              <div className="col g12">
+                <div className="row g8 wrap">
+                  <Sev level={selected.severity} label />
+                  <Tag tone={VERIFY_TONE[selected.verification]}>{VERIFY_LABEL[selected.verification]}</Tag>
+                  {selected.status && <Tag>{selected.status}</Tag>}
+                </div>
+                <p style={{ margin: 0, lineHeight: 1.55 }}>{selected.summary}</p>
+                <dl className="kv">
+                  <dt>Source</dt>
+                  <dd>
+                    {selected.sourceUrl ? (
+                      <a href={selected.sourceUrl} target="_blank" rel="noreferrer noopener" className="lnk row g4">
+                        {selected.sourceName ?? "Open source"} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      selected.sourceName ?? "—"
+                    )}
+                  </dd>
+                  <dt>Reported</dt>
+                  <dd>{selected.reportedAt ? new Date(selected.reportedAt).toLocaleString("en-GB") : "—"}</dd>
+                  <dt>Area</dt>
+                  <dd>{selected.area ?? "—"}</dd>
+                  <dt>Location</dt>
+                  <dd>{selected.locationNote ?? "—"}</dd>
+                  <dt>Confidence</dt>
+                  <dd>{selected.confidence != null ? `${selected.confidence}%` : "—"}</dd>
+                  <dt>Keywords</dt>
+                  <dd>{selected.keywords.length ? selected.keywords.join(", ") : "—"}</dd>
+                  <dt>Analyst notes</dt>
+                  <dd>{selected.notes ?? "None yet"}</dd>
+                </dl>
+                <div className="row g8 wrap">
+                  {canManage && (
+                    <button type="button" className="b b-sm b-pri" onClick={() => escalate(selected)}>
+                      Open as incident
+                    </button>
+                  )}
+                  <button type="button" className="b b-sm b-sec" onClick={() => setFlags((f) => ({ ...f, [selected.id]: "relevant" }))}>
+                    Mark relevant
+                  </button>
+                  <button type="button" className="b b-sm b-gh" onClick={() => setFlags((f) => ({ ...f, [selected.id]: "dismissed" }))}>
+                    Dismiss
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
+            </Panel>
+          ) : (
+            <Panel>
+              <Empty>Select a signal to see its source and details.</Empty>
+            </Panel>
+          )}
+
+          <Panel title="Latest brief" meta={brief?.windowLabel}>
+            {briefsLoading ? (
+              <Empty>Loading…</Empty>
+            ) : briefsError ? (
+              <Notice tone="fail">Couldn't reach the intelligence service to load the brief.</Notice>
+            ) : !brief ? (
+              <Empty>{canManage ? "No brief yet. Generate one to summarise the week." : "No brief has been generated yet."}</Empty>
+            ) : (
+              <div className="col g10">
+                <div className="row g8">
+                  <b className="f1">{brief.title}</b>
+                  {brief.rating && <Tag tone={brief.rating === "Red" ? "fail" : brief.rating === "Orange" ? "warn" : "ok"}>{brief.rating}</Tag>}
+                </div>
+                <p className="t2" style={{ margin: 0 }}>
+                  {brief.summary}
+                </p>
+                {brief.highlights.length > 0 && (
+                  <ul className="col g6" style={{ margin: 0, paddingLeft: 18 }}>
+                    {brief.highlights.map((h) => (
+                      <li key={h} style={{ fontSize: 12.5 }}>
+                        {h}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <span className="t3" style={{ fontSize: 12 }}>
+                  Generated {new Date(brief.generatedAt).toLocaleString("en-GB")}
+                </span>
+              </div>
+            )}
+          </Panel>
         </aside>
       </div>
     </div>
   );
 }
 
-// Every field below comes directly from osint's own classification (add_incident() /
-// classify_text() in osint/operations/core.py) - severity, confidence, matched_keywords,
-// verified, and source are real, not synthesized. This replaces an earlier version of this
-// function that was written for the dashboard's own incident log (a different table with a
-// different shape) and fabricated most of these fields (a formula-derived confidence, a
-// deterministic-but-fake source name, keyword matches against a hardcoded local list) because
-// that table has no equivalent real data - see the "OSINT intelligence feed shows the wrong
-// table" fix this replaces.
-function deriveOsintIntelligenceItem(item: OsintIntelligenceItem, index: number): IntelligenceItem {
-  const category = categoryForThreatType(item.threat_category);
-  const severity = Math.max(1, Math.min(5, Number(item.severity ?? 3)));
-  const confidence = Math.max(0, Math.min(100, Number(item.confidence ?? 50)));
-  const qualityScore = Math.max(0, Math.min(100, Number(item.quality_score ?? 50)));
-  const reportedAt = item.collected_at ?? new Date(Date.now() - index * 3600_000).toISOString();
-  const summary = String(item.summary ?? "").replace(/\s+/g, " ").trim() || "No summary available.";
-  const title = summary.length > 90 ? `${summary.slice(0, 87).trimEnd()}...` : summary;
-  const matchedKeywords = String(item.matched_keywords ?? "")
-    .split(",")
-    .map((word) => word.trim())
-    .filter(Boolean);
-  const verified = item.verified === "Yes" || item.verified === "Partial";
-  const zone = item.geo_relevance && item.geo_relevance !== "None" ? item.geo_relevance : "Nigeria";
-  const locationRelevance = clamp(Math.round(qualityScore * 0.6 + confidence * 0.4), 10, 99);
+function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+  return (
+    <div className="col" title={hint}>
+      <span className="t3" style={{ fontSize: 12 }}>
+        {label}
+      </span>
+      <b style={{ fontSize: 20, fontVariantNumeric: "tabular-nums" }}>{value}</b>
+    </div>
+  );
+}
+
+function SignalMap({ token, signals, total, selectedId, onSelect }: { token: string; signals: Signal[]; total: number; selectedId: string | null; onSelect: (id: string) => void }) {
+  const el = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markers = useRef<mapboxgl.Marker[]>([]);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!token || !el.current || mapRef.current) return;
+    mapboxgl.accessToken = token;
+    const first = signals[0]?.coord;
+    const m = new mapboxgl.Map({ container: el.current, style: "mapbox://styles/mapbox/dark-v11", center: first ?? [3.4219, 6.4281], zoom: first ? 11 : 9, attributionControl: false });
+    m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    m.on("load", () => {
+      requestAnimationFrame(() => m.resize());
+      setReady(true);
+    });
+    mapRef.current = m;
+    return () => {
+      markers.current.forEach((mk) => mk.remove());
+      markers.current = [];
+      m.remove();
+      mapRef.current = null;
+      setReady(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m || !ready) return;
+    markers.current.forEach((mk) => mk.remove());
+    markers.current = [];
+    for (const s of signals) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-label", `S${s.severity}: ${s.title}`);
+      const on = s.id === selectedId;
+      b.style.cssText = `width:${on ? 20 : 16}px;height:${on ? 20 : 16}px;transform:rotate(45deg);border-radius:3px;background:var(--s${Math.min(5, Math.max(1, s.severity))});box-shadow:0 0 0 2px #0A0C10${on ? ",0 0 0 5px rgba(122,155,255,.5)" : ""};padding:0;border:0;cursor:pointer`;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        onSelect(s.id);
+      };
+      markers.current.push(new mapboxgl.Marker({ element: b }).setLngLat(s.coord!).addTo(m));
+    }
+  }, [signals, ready, selectedId, onSelect]);
+
+  if (!token) {
+    return (
+      <div className="map" style={{ minHeight: 420 }}>
+        <Empty>The map needs a Mapbox token.</Empty>
+      </div>
+    );
+  }
+  return (
+    <div className="map" style={{ minHeight: 560 }}>
+      <div ref={el} className="absolute inset-0" />
+      <div className="glass" style={{ position: "absolute", left: 10, bottom: 10, padding: "6px 10px", fontSize: 12 }}>
+        {signals.length} of {total} signal{total === 1 ? "" : "s"} have a map position
+      </div>
+    </div>
+  );
+}
+
+function toSignal(item: OsintIntelligenceItem): Signal {
+  const summary = String(item.summary ?? "").replace(/\s+/g, " ").trim() || "No summary provided.";
+  const v = String(item.verified ?? "").toLowerCase();
+  const anyItem = item as OsintIntelligenceItem & { coord_x?: number | null; coord_y?: number | null };
+  const coord: [number, number] | null =
+    anyItem.coord_x != null && anyItem.coord_y != null && Number.isFinite(Number(anyItem.coord_x)) && Number.isFinite(Number(anyItem.coord_y))
+      ? [Number(anyItem.coord_x), Number(anyItem.coord_y)]
+      : null;
+  const area = item.geo_relevance && item.geo_relevance !== "None" ? item.geo_relevance : null;
   return {
     id: String(item.id),
-    title,
+    title: summary.length > 140 ? `${summary.slice(0, 137).trimEnd()}…` : summary,
     summary,
-    category,
-    severity,
-    confidence,
-    verified,
-    sourceName: item.source || "Public source",
-    sourceUrl: item.source_url || "",
-    zone,
-    location: item.location_relevance || zone,
-    reportedAt,
-    matchedKeywords: matchedKeywords.length ? matchedKeywords : ["public source"],
-    analystNotes:
-      item.notes ||
-      (verified
-        ? "Signal is corroborated by a credible public source. Keep it in the active watch list."
-        : "Unverified public signal. Verify against patrol, CCTV, or local reports before escalation."),
-    locationRelevance,
-    relatedIncidentIds: [],
-    coordX: toLng(item, index)[0],
-    coordY: toLng(item, index)[1],
-    statusLabel: item.status || "Monitoring",
+    category: categoryOf(item.threat_category),
+    severity: Math.max(1, Math.min(5, Number(item.severity ?? 1))),
+    confidence: item.confidence == null ? null : Math.max(0, Math.min(100, Number(item.confidence))),
+    verification: v === "yes" ? "yes" : v === "partial" ? "partial" : "no",
+    sourceName: item.source || null,
+    sourceUrl: item.source_url && /^https?:\/\//i.test(item.source_url) ? item.source_url : null,
+    area,
+    locationNote: item.location_relevance && item.location_relevance !== "None" ? item.location_relevance : null,
+    reportedAt: item.collected_at ?? null,
+    keywords: String(item.matched_keywords ?? "")
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean),
+    notes: item.notes || null,
+    status: item.status || null,
+    coord,
   };
 }
 
-function buildBrief(items: IntelligenceItem[], zone: string, range: RangeFilter): BriefEntry {
-  const critical = items.filter((item) => item.severity >= 4).length;
-  const verified = items.filter((item) => item.verified).length;
-  const topKeywords = topWords(items.flatMap((item) => item.matchedKeywords)).slice(0, 4);
-  return {
-    id: `${zone}-${range}-${new Date().toISOString()}`,
-    generatedAt: new Date().toISOString(),
-    title: `${zone} intelligence brief`,
-    summary: `${items.length} intelligence items analysed across the last ${range}. ${critical} are severity 4+. Verification coverage sits at ${Math.round((verified / Math.max(items.length, 1)) * 100)}%.`,
-    highlights: [
-      `${critical} severity 4+ signals require follow-up`,
-      `${verified} items are verified against live context`,
-      topKeywords.length ? `Dominant keywords: ${topKeywords.join(", ")}` : "No dominant keywords detected",
-      `Most active zone: ${zone}`,
-    ],
-    score: clamp(Math.round(52 + critical * 4 + verified * 2 + Math.min(8, items.length)), 55, 96),
-    windowLabel: `Generated for ${range}`,
-  };
-}
-
-function categoryForThreatType(type: string | undefined): IntelligenceCategory {
+function categoryOf(type: string | undefined): Category {
   switch (type) {
     case "Cyber":
       return "cyber";
@@ -609,128 +510,7 @@ function categoryForThreatType(type: string | undefined): IntelligenceCategory {
       return "political";
     case "Macro":
       return "macro";
-    case "Physical":
     default:
       return "physical";
   }
-}
-
-function toLng(item: any, index: number): [number, number] {
-  if (item.coord_x != null && item.coord_y != null) return [Number(item.coord_x), Number(item.coord_y)];
-  if (item.coords?.x != null && item.coords?.y != null) {
-    return [LAGOS[0] + (Number(item.coords.x) - 50) / 520, LAGOS[1] + (Number(item.coords.y) - 50) / 520];
-  }
-  return [LAGOS[0] + ((index * 29) % 100 - 50) / 650, LAGOS[1] + ((index * 47) % 100 - 50) / 650];
-}
-
-function fallbackReportedAt(relativeLabel: string) {
-  const minutes = parseRelativeMinutes(relativeLabel);
-  return new Date(Date.now() - minutes * 60_000).toISOString();
-}
-
-function zoneScoreFromText(zone: string) {
-  const value = zone.toLowerCase();
-  if (value.includes("lekki")) return 72;
-  if (value.includes("ikoyi")) return 58;
-  if (value.includes("vi")) return 64;
-  if (value.includes("ajah")) return 55;
-  return 48;
-}
-
-function parseRelativeMinutes(label: string) {
-  const lower = String(label).toLowerCase();
-  const num = Number(lower.match(/(\d+(?:\.\d+)?)/)?.[1] ?? 0);
-  if (lower.includes("hr")) return Math.round(num * 60);
-  if (lower.includes("min")) return Math.round(num);
-  if (lower.includes("day")) return Math.round(num * 1440);
-  return 15;
-}
-
-function rangeMsFor(range: RangeFilter) {
-  switch (range) {
-    case "24h":
-      return 24 * 3600_000;
-    case "7d":
-      return 7 * 24 * 3600_000;
-    case "30d":
-      return 30 * 24 * 3600_000;
-    case "90d":
-      return 90 * 24 * 3600_000;
-  }
-}
-
-function topWords(words: string[]) {
-  const counts = new Map<string, number>();
-  words.forEach((word) => counts.set(word, (counts.get(word) ?? 0) + 1));
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([word]) => word);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function formatAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const minutes = Math.max(1, Math.round(diff / 60_000));
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
-function formatConfidence(confidence: number) {
-  return `${confidence}% conf`;
-}
-
-function severityColor(s: number) {
-  if (s >= 5) return "hsl(0 84% 60%)";
-  if (s >= 4) return "hsl(24 95% 58%)";
-  if (s >= 3) return "hsl(38 92% 55%)";
-  return "hsl(220 9% 55%)";
-}
-
-function Badge({ severity }: { severity: number }) {
-  const label = severity >= 5 ? "Severity 5" : severity >= 4 ? "Severity 4" : severity >= 3 ? "Severity 3" : "Severity 2";
-  return <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground">{label}</span>;
-}
-
-function ActionPill({ label, icon, onClick }: { label: string; icon: React.ReactNode; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] hover:bg-surface-2">
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm">{value}</div>
-    </div>
-  );
-}
-
-function SelectChip({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<[string, string]>;
-}) {
-  return (
-    <label className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-xs">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="bg-transparent text-xs outline-none">
-        {options.map(([optValue, optLabel]) => (
-          <option key={optValue} value={optValue}>{optLabel}</option>
-        ))}
-      </select>
-    </label>
-  );
 }
