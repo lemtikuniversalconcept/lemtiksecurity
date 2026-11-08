@@ -2,10 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
-import { Bell, CheckCircle2, Loader2, Mail, MessageCircle, Mic2, Radar, Settings2, ShieldAlert, Smartphone, TriangleAlert, XCircle } from "lucide-react";
+import { Bell, Check, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { PageHeader, Sev, Switch } from "@/components/nw";
 import { toast } from "sonner";
 import { requireSectionAccess } from "@/lib/rbac";
-import { listAlerts, listMyNotifications, markAllNotificationsRead, markNotificationRead, getAlertPreferences, updateAlertPreferences } from "@/lib/alerts.functions";
+import { listAlerts, markAllNotificationsRead, markNotificationRead, getAlertPreferences, updateAlertPreferences } from "@/lib/alerts.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 
 type AlertRow = {
@@ -56,7 +57,6 @@ export const Route = createFileRoute("/app/alerts")({
 function AlertCentre() {
   const { access } = Route.useRouteContext();
   const list = useServerFn(listAlerts);
-  const listMine = useServerFn(listMyNotifications);
   const markRead = useServerFn(markNotificationRead);
   const markAll = useServerFn(markAllNotificationsRead);
   const getPrefs = useServerFn(getAlertPreferences);
@@ -68,11 +68,7 @@ function AlertCentre() {
     queryKey: ["alerts"],
     queryFn: () => list() as Promise<AlertRow[]>,
   });
-  const { data: unreadFeed = [] } = useQuery({
-    queryKey: ["my-notifications"],
-    queryFn: () => listMine() as Promise<AlertRow[]>,
-  });
-  const { data: prefs } = useQuery({
+  const { data: prefs, isError: prefsError } = useQuery({
     queryKey: ["alert-prefs"],
     queryFn: () => getPrefs(),
   });
@@ -88,7 +84,6 @@ function AlertCentre() {
   const canConfigure = access.specRole === "security_manager";
   const unreadCount = alerts.filter((a) => !a.read).length;
   const visibleAlerts = useMemo(() => alerts.filter((alert) => matchesTab(alert, tab)), [alerts, tab]);
-  const recentUnread = unreadFeed.slice(0, 5);
 
   useEffect(() => {
     if (!prefs) return;
@@ -146,289 +141,156 @@ function AlertCentre() {
     });
   };
 
+  const counts = (t: Tab) => alerts.filter((a) => matchesTab(a, t)).length;
+  const CHANNEL_COLS = ["in-app", "whatsapp", "sms", "email"] as const;
+
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Alerts & Notifications</div>
-          <h1 className="mt-1 text-2xl font-semibold">Alert centre</h1>
-          <p className="text-sm text-muted-foreground">Unread, incident, patrol, inventory, OSINT, and system alerts in one feed.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="rounded-md border border-border bg-card px-3 py-2 text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Unread</div>
-            <div className="mt-1 text-lg font-semibold">{unreadCount}</div>
+    <>
+      <PageHeader title="Alerts" sub={`Everything Lemtik sent, and the rules for who gets what · ${unreadCount} unread`}>
+        <button type="button" className="b b-sec" onClick={() => allMut.mutate()} disabled={!unreadCount || allMut.isPending}>
+          {allMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 size={15} strokeWidth={1.75} />} Mark all read
+        </button>
+      </PageHeader>
+
+      <div className="flex flex-wrap items-start" style={{ gap: 12 }}>
+        <section className="pn" style={{ flex: "999 1 560px", minWidth: 0 }}>
+          <div className="tabs" role="tablist" aria-label="Alert types" style={{ padding: "0 8px" }}>
+            {tabs.map((item) => (
+              <button key={item} type="button" role="tab" aria-selected={tab === item} className={`tab${tab === item ? " on" : ""}`} onClick={() => setTab(item)}>
+                {item}
+                {(item === "All" || item === "Unread") && <span className="c">{counts(item)}</span>}
+              </button>
+            ))}
           </div>
-          <button
-            onClick={() => allMut.mutate()}
-            disabled={!unreadCount || allMut.isPending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2 disabled:opacity-50"
-          >
-            {allMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-            Mark all as read
-          </button>
-          <a href="#settings" className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-            <Settings2 className="h-3.5 w-3.5" /> Configure preferences
-          </a>
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-border bg-card p-2">
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((item) => (
-            <button
-              key={item}
-              onClick={() => setTab(item)}
-              className={`rounded-md px-3 py-2 text-xs font-medium ${tab === item ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_0.8fr] gap-4">
-        <section className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Alert Centre Page</div>
-              <h2 className="mt-1 text-lg font-semibold">{tab} alerts</h2>
-            </div>
-            <Bell className="h-4 w-4 text-muted-foreground" />
-          </div>
-
           {isLoading ? (
-            <div className="mt-5 flex items-center justify-center gap-2 rounded-md border border-border bg-surface px-4 py-8 text-xs text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading alerts…
-            </div>
+            <div className="empty row g8" style={{ padding: 16 }}><Loader2 className="h-4 w-4 animate-spin" /> Loading alerts…</div>
           ) : visibleAlerts.length === 0 ? (
-            <div className="mt-5 rounded-md border border-dashed border-border bg-surface px-4 py-8 text-center text-xs text-muted-foreground">
-              No alerts in this bucket.
-            </div>
+            <div className="empty" style={{ padding: 16 }}>No alerts here.</div>
           ) : (
-            <div className="mt-5 space-y-3">
+            <div className="list">
               {visibleAlerts.map((alert) => {
                 const category = getCategory(alert);
-                const Icon = categoryIcon(category);
                 return (
-                  <article key={alert.id} className={`rounded-xl border p-4 ${alert.read ? "border-border bg-surface" : "border-primary/25 bg-primary/5"}`}>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <div className="grid h-10 w-10 place-items-center rounded-md border border-border bg-background">
-                          <Icon className="h-4 w-4 text-muted-foreground" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${severityTone(alert.severity)}`}>{severityLabel(alert.severity)}</span>
-                            {!alert.read && <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-primary">Unread</span>}
-                          </div>
-                          <h3 className="mt-2 text-sm font-semibold">{alert.title}</h3>
-                          {alert.body && <p className="mt-1 max-w-2xl text-xs text-muted-foreground whitespace-pre-line">{alert.body}</p>}
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                            <span>{new Date(alert.sent_at).toLocaleString("en-GB", { hour12: false })}</span>
-                            <span>·</span>
-                            <span>{timeAgo(alert.sent_at)}</span>
-                            <span>·</span>
-                            <span>{category.toUpperCase()}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {alert.incident_id ? (
-                          <Link to="/app/incidents/$id" params={{ id: alert.incident_id }} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-                            View
-                          </Link>
-                        ) : null}
-                        {!alert.read && (
-                          <button
-                            type="button"
-                            onClick={() => readMut.mutate(alert.id)}
-                            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-surface-2"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Dismiss
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </article>
+                  <div key={alert.id} className="row g10" style={{ padding: "10px 12px", alignItems: "flex-start", background: alert.read ? undefined : "rgba(52,98,240,.05)" }}>
+                    <span className={`dot${alert.read ? " d-off" : " d-blue"}`} style={{ marginTop: 6 }} aria-label={alert.read ? "Read" : "Unread"} />
+                    {alert.severity >= 2 && <Sev level={alert.severity} />}
+                    <span className="f1 col min-w-0">
+                      <span className="row g8 wrap">
+                        <b>{alert.title}</b>
+                        <span className="tg capitalize">{category}</span>
+                      </span>
+                      {alert.body && <span className="t3 whitespace-pre-line" style={{ fontSize: 12.5 }}>{alert.body}</span>}
+                    </span>
+                    <span className="mono t3" style={{ fontSize: 12 }} title={new Date(alert.sent_at).toLocaleString("en-GB")}>
+                      {new Date(alert.sent_at).toLocaleTimeString("en-GB")}
+                    </span>
+                    {alert.incident_id && (
+                      <Link to="/app/incidents/$id" params={{ id: alert.incident_id }} className="b b-sm b-gh">View</Link>
+                    )}
+                    {!alert.read && (
+                      <button type="button" onClick={() => readMut.mutate(alert.id)} className="b b-sm b-gh">Mark read</button>
+                    )}
+                  </div>
                 );
               })}
             </div>
           )}
         </section>
 
-        <aside className="space-y-4">
-          <section className="rounded-lg border border-border bg-card p-5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Unread Alerts</div>
-                <h2 className="mt-1 text-lg font-semibold">Last five unread</h2>
+        <aside className="pn" style={{ flex: "1 1 420px", minWidth: 0 }} id="settings">
+          <div className="pn-h">
+            <h3>Delivery rules</h3>
+            <span className="meta">Security manager only</span>
+            <span className="flex-auto" />
+            {canConfigure && prefs && (
+              <button type="button" className="b b-sm b-pri" onClick={savePrefs} disabled={updatePrefs.isPending}>
+                {updatePrefs.isPending && <Loader2 className="h-3 w-3 animate-spin" />} Save
+              </button>
+            )}
+          </div>
+          {!canConfigure ? (
+            <div className="empty" style={{ padding: 12 }}>Only security managers can change delivery rules.</div>
+          ) : prefsError ? (
+            <div className="empty" style={{ padding: 12 }}>Couldn’t load the delivery rules. Refresh to try again.</div>
+          ) : !prefs ? (
+            <div className="empty row g8" style={{ padding: 12 }}><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading rules…</div>
+          ) : (
+            <>
+              <div className="tblw">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Alert</th>
+                      <th>On</th>
+                      {CHANNEL_COLS.map((ch) => <th key={ch} className="capitalize">{ch === "in-app" ? "In-app" : ch === "sms" ? "SMS" : ch}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ALERT_TYPES.map((type) => {
+                      const channels = channelMap[type.id] ?? [...type.default];
+                      const on = enabled.includes(type.id);
+                      return (
+                        <tr key={type.id}>
+                          <td className="wrapc">{type.label}</td>
+                          <td><Switch on={on} onChange={() => toggleEnabled(type.id)} label={`${type.label} enabled`} /></td>
+                          {CHANNEL_COLS.map((ch) => {
+                            const checked = channels.includes(ch);
+                            return (
+                              <td key={ch}>
+                                <button type="button" role="checkbox" aria-checked={checked} aria-label={`${type.label} by ${ch}`} disabled={!on} onClick={() => toggleChannel(type.id, ch)} className={`chk${checked ? " on" : ""}`} style={on ? undefined : { opacity: 0.4 }}>
+                                  {checked && <Check size={11} strokeWidth={3} />}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <Mic2 className="h-4 w-4 text-muted-foreground" />
-            </div>
-
-            <div className="mt-4 space-y-2">
-              {recentUnread.length === 0 ? (
-                <div className="rounded-md border border-dashed border-border bg-surface px-3 py-6 text-center text-xs text-muted-foreground">No unread alerts.</div>
-              ) : (
-                recentUnread.map((alert) => (
-                  <div key={alert.id} className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{alert.title}</span>
-                      <span className="text-[10px] text-muted-foreground">{timeAgo(alert.sent_at)}</span>
+              <div className="col g12" style={{ padding: 12 }}>
+                <div className="row g10">
+                  <Switch on={quietEnabled} onChange={setQuietEnabled} label="Quiet hours" />
+                  <span className="f1 col">
+                    <b>Quiet hours</b>
+                    <span className="t3" style={{ fontSize: 12 }}>Only S4–S5 and SOS break through</span>
+                  </span>
+                  <input type="time" value={quietStart} onChange={(e) => setQuietStart(e.target.value)} className="in" style={{ width: 110 }} aria-label="Quiet hours start" />
+                  <span className="t3">to</span>
+                  <input type="time" value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)} className="in" style={{ width: 110 }} aria-label="Quiet hours end" />
+                </div>
+                <div className="col g8">
+                  <span className="lbl">Extra recipients</span>
+                  {extras.length === 0 && <span className="empty">None yet.</span>}
+                  {extras.map((recipient, index) => (
+                    <div key={index} className="row g8">
+                      <input value={recipient.label} onChange={(e) => setExtras((c) => c.map((r, i) => (i === index ? { ...r, label: e.target.value } : r)))} placeholder="Name" className="in" aria-label="Recipient name" />
+                      <input value={recipient.phone} onChange={(e) => setExtras((c) => c.map((r, i) => (i === index ? { ...r, phone: e.target.value } : r)))} placeholder="+234…" className="in" aria-label="Recipient phone" />
+                      <select value={recipient.severity_floor} onChange={(e) => setExtras((c) => c.map((r, i) => (i === index ? { ...r, severity_floor: Number(e.target.value) } : r)))} className="in" style={{ width: 96 }} aria-label="Minimum severity">
+                        {[1, 2, 3, 4, 5].map((s) => <option key={s} value={s}>S{s}+</option>)}
+                      </select>
+                      <button type="button" onClick={() => setExtras((c) => c.filter((_, i) => i !== index))} className="ibtn" aria-label="Remove recipient"><XCircle size={15} strokeWidth={1.75} /></button>
                     </div>
-                    <div className="mt-1 text-[10px] text-muted-foreground">{getCategory(alert).toUpperCase()}</div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <a href="#settings" className="mt-4 inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
-              View all <span aria-hidden>→</span>
-            </a>
-          </section>
-
-          <section id="settings" className="rounded-lg border border-border bg-card p-5">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Alert Configuration</div>
-                <h2 className="mt-1 text-lg font-semibold">Manager preferences</h2>
-              </div>
-              <Settings2 className="h-4 w-4 text-muted-foreground" />
-            </div>
-
-            {!canConfigure ? (
-              <div className="mt-4 rounded-md border border-dashed border-border bg-surface px-4 py-6 text-xs text-muted-foreground">
-                Alert preferences are manager-only. You can still view the live alert centre.
-              </div>
-            ) : !prefs ? (
-              <div className="mt-4 rounded-md border border-dashed border-border bg-surface px-4 py-6 text-xs text-muted-foreground">
-                Loading preferences…
-              </div>
-            ) : (
-              <div className="mt-4 space-y-4">
-                <div className="grid gap-2">
-                  {ALERT_TYPES.map((type) => {
-                    const isEnabled = enabled.includes(type.id);
-                    const channels = channelMap[type.id] ?? [...type.default];
-                    return (
-                      <button
-                        key={type.id}
-                        type="button"
-                        onClick={() => toggleEnabled(type.id)}
-                        className={`rounded-md border px-3 py-2 text-left text-xs ${isEnabled ? "border-primary bg-primary/5" : "border-border bg-surface"}`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{type.label}</span>
-                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{isEnabled ? "Enabled" : "Disabled"}</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {ALL_CHANNELS.map((ch) => (
-                            <button
-                              key={ch}
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleChannel(type.id, ch);
-                              }}
-                              className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${channels.includes(ch) ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"}`}
-                            >
-                              {ch}
-                            </button>
-                          ))}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-                  <label className="flex items-center gap-2">
-                    <input type="checkbox" checked={quietEnabled} onChange={(e) => setQuietEnabled(e.target.checked)} />
-                    Quiet hours enabled
-                  </label>
-                  <div className="mt-2 flex items-center gap-2">
-                    <input type="time" value={quietStart} onChange={(e) => setQuietStart(e.target.value)} className="rounded border border-border bg-card px-2 py-1" />
-                    <span>→</span>
-                    <input type="time" value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)} className="rounded border border-border bg-card px-2 py-1" />
-                  </div>
-                </div>
-
-                <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-                  <div className="font-medium">Additional recipients</div>
-                  <div className="mt-2 space-y-2">
-                    {extras.length === 0 ? (
-                      <div className="text-muted-foreground">No additional recipients configured.</div>
-                    ) : extras.map((recipient, index) => (
-                      <div key={index} className="grid grid-cols-12 items-center gap-2">
-                        <input
-                          value={recipient.label}
-                          onChange={(e) => setExtras((current) => current.map((row, i) => i === index ? { ...row, label: e.target.value } : row))}
-                          placeholder="Name"
-                          className="col-span-4 rounded border border-border bg-card px-2 py-1.5"
-                        />
-                        <input
-                          value={recipient.phone}
-                          onChange={(e) => setExtras((current) => current.map((row, i) => i === index ? { ...row, phone: e.target.value } : row))}
-                          placeholder="+234..."
-                          className="col-span-3 rounded border border-border bg-card px-2 py-1.5"
-                        />
-                        <select
-                          value={recipient.severity_floor}
-                          onChange={(e) => setExtras((current) => current.map((row, i) => i === index ? { ...row, severity_floor: Number(e.target.value) } : row))}
-                          className="col-span-2 rounded border border-border bg-card px-2 py-1.5"
-                        >
-                          {[1, 2, 3, 4, 5].map((s) => <option key={s} value={s}>Sev {s}+</option>)}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setExtras((current) => current.filter((_, i) => i !== index))}
-                          className="col-span-1 text-muted-foreground hover:text-critical"
-                        >
-                          <XCircle className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setExtras((current) => [...current, { label: "", phone: "", channels: ["whatsapp"], severity_floor: 5 }])}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px]"
-                  >
-                    <Bell className="h-3.5 w-3.5" /> Add recipient
+                  ))}
+                  <button type="button" className="b b-sm b-sec self-start" onClick={() => setExtras((c) => [...c, { label: "", phone: "", channels: ["whatsapp"], severity_floor: 5 }])}>
+                    <Bell size={13} strokeWidth={1.75} /> Add recipient
                   </button>
                 </div>
-
-                <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-                  <label className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Language</span>
-                    <select value={lang} onChange={(e) => setLang(e.target.value as "en" | "pcm")} className="rounded border border-border bg-card px-2 py-1">
-                      <option value="en">English</option>
-                      <option value="pcm">Pidgin</option>
-                    </select>
-                  </label>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={savePrefs}
-                  disabled={updatePrefs.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {updatePrefs.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Settings2 className="h-3.5 w-3.5" />}
-                  Save preferences
-                </button>
+                <label className="row g8">
+                  <span className="lbl">Message language</span>
+                  <select value={lang} onChange={(e) => setLang(e.target.value as "en" | "pcm")} className="in" style={{ width: 140 }}>
+                    <option value="en">English</option>
+                    <option value="pcm">Pidgin</option>
+                  </select>
+                </label>
+                <span className="t3" style={{ fontSize: 12 }}>In-app delivery is live. WhatsApp, SMS and email go out through the providers configured for your organisation.</span>
               </div>
-            )}
-          </section>
+            </>
+          )}
         </aside>
       </div>
-
-      <div className="rounded-md border border-border bg-surface px-4 py-3 text-[11px] text-muted-foreground">
-        <strong className="text-foreground">Delivery note:</strong> In-app alert delivery is live. WhatsApp, SMS, and email routes remain configurable through the preferences panel and downstream providers.
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -450,40 +312,6 @@ function getCategory(alert: AlertRow) {
   return "system";
 }
 
-function categoryIcon(category: string) {
-  switch (category) {
-    case "incidents":
-      return TriangleAlert;
-    case "patrols":
-      return Radar;
-    case "inventory":
-      return ShieldAlert;
-    case "osint":
-      return MessageCircle;
-    case "system":
-    default:
-      return Bell;
-  }
-}
 
-function severityLabel(severity: number) {
-  if (severity >= 5) return "Critical";
-  if (severity >= 4) return "High";
-  if (severity >= 3) return "Moderate";
-  return "Low";
-}
 
-function severityTone(severity: number) {
-  if (severity >= 5) return "border-critical/30 bg-critical/10 text-critical";
-  if (severity >= 4) return "border-high/30 bg-high/10 text-high";
-  if (severity >= 3) return "border-medium/30 bg-medium/10 text-medium";
-  return "border-border bg-background text-muted-foreground";
-}
 
-function timeAgo(iso: string) {
-  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h} hr ago` : `${Math.floor(h / 24)} d ago`;
-}

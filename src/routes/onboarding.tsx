@@ -13,7 +13,7 @@ export const Route = createFileRoute("/onboarding")({
   head: () => ({ meta: [{ title: "Welcome · Lemtik SOD" }] }),
   beforeLoad: async () => {
     const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user) throw redirect({ to: "/login" });
+    if (error || !data.user) throw redirect({ to: "/login", search: { redirect: undefined } });
   },
   component: Onboarding,
 });

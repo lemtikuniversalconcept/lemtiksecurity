@@ -38,7 +38,7 @@ function HomePage() {
     rafRef.current = window.requestAnimationFrame(tick);
     timerRef.current = window.setTimeout(() => {
       if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([80, 40, 80]);
-      navigate({ to: "/consumer/report" });
+      navigate({ to: "/consumer/report", search: { report_id: undefined } });
     }, HOLD_DURATION_MS);
   };
 

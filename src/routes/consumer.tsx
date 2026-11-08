@@ -20,7 +20,7 @@ export const Route = createFileRoute("/consumer")({
     const token = getConsumerToken();
     const onActivate = window.location.pathname.startsWith("/consumer/activate");
     if (!token && !onActivate) {
-      throw redirect({ to: "/consumer/activate" });
+      throw redirect({ to: "/consumer/activate", search: { token: undefined, reason: undefined } });
     }
   },
   component: ConsumerShell,

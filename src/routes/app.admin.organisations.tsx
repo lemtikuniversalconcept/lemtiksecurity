@@ -257,10 +257,10 @@ function OrganisationsList() {
                     <Td>{fmtDate(org.created_at)}</Td>
                     <Td>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Link to={`/app/admin/organisations/${org.id}`} className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-surface-2">
+                        <Link to="/app/admin/organisations/$id" params={{ id: org.id }} className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-surface-2">
                           <Eye className="h-3.5 w-3.5" /> View
                         </Link>
-                        <Link to={`/app/admin/organisations/${org.id}`} className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-surface-2">
+                        <Link to="/app/admin/organisations/$id" params={{ id: org.id }} className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-surface-2">
                           <SquarePen className="h-3.5 w-3.5" /> Edit
                         </Link>
                         <button
