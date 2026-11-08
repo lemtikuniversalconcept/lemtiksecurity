@@ -1,6 +1,5 @@
-import type { AiQueryResult, ApprovalDecision, CommandScope } from "@/lib/ai-commands.functions";
+import type { ApprovalDecision, CommandScope } from "@/lib/ai-commands.functions";
 
-const ACTIVE_INTENT_KEY = "lemtik_active_command_intent";
 const APPROVAL_HISTORY_KEY = "lemtik_approval_history";
 
 export type CommandHistoryEntry = {
@@ -34,20 +33,6 @@ function writeJson(key: string, value: unknown) {
   } catch {
     // ignore storage failures
   }
-}
-
-export function loadStoredCommandIntent(): AiQueryResult | null {
-  return readJson<AiQueryResult>(ACTIVE_INTENT_KEY);
-}
-
-export function saveStoredCommandIntent(intent: AiQueryResult | null) {
-  if (!intent) {
-    if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem(ACTIVE_INTENT_KEY);
-    }
-    return;
-  }
-  writeJson(ACTIVE_INTENT_KEY, intent);
 }
 
 export function loadStoredCommandHistory(): CommandHistoryEntry[] {
