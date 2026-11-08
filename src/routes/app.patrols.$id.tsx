@@ -1,37 +1,43 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
+import { toast } from "sonner";
 import {
   getPatrol, saveWaypoints, updatePatrolDetails, archivePatrol, duplicatePatrol,
-  listShifts, scheduleShift, updateShift, listCheckIns, recordCheckIn, sosAlert,
+  listShifts, scheduleShift, updateShift, listCheckIns,
 } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
-import { orgRoom, publishRealtimeEvent } from "@/lib/realtime.events";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
-  ArrowLeft, Plus, Trash2, Save, Copy, Archive, ArchiveRestore, Loader2,
-  Crosshair, CalendarPlus, CheckCircle2, AlertTriangle, Siren, PlayCircle, StopCircle, MapPin,
+  ChevronLeft, Plus, Trash2, Save, Copy, Archive, ArchiveRestore, Loader2,
+  CalendarPlus, PlayCircle, StopCircle, ArrowUp, ArrowDown, X,
 } from "lucide-react";
+import { Avatar, Empty, Kpi, Notice, Panel, Status, Tag, type Tone } from "@/components/nw";
 
 export const Route = createFileRoute("/app/patrols/$id")({
-  head: () => ({ meta: [{ title: "Patrol · Lemtik SOD" }] }),
+  head: () => ({ meta: [{ title: "Patrol route · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
-    requireSectionAccess(appAccess, [
-      "security_manager",
-      "operator",
-      "client_admin",
-    ]);
+    requireSectionAccess(appAccess, ["security_manager", "operator", "client_admin"]);
     return { appAccess };
   },
   component: PatrolDetail,
 });
 
-const LAGOS: [number, number] = [3.4219, 6.4281];
+const DEFAULT_CENTER: [number, number] = [3.4219, 6.4281];
+const STATUS_TONE: Record<string, Tone> = { on_route: "ok", delayed: "warn", missed: "fail", complete: "off" };
+const SHIFT_TONE: Record<string, Tone> = { active: "ok", scheduled: "blue", completed: "off", cancelled: "fail" };
+const CHECKIN_TONE: Record<string, "ok" | "warn" | "fail"> = { on_time: "ok", late: "warn", out_of_zone: "fail" };
+const METHODS = [
+  { value: "gps", label: "GPS · 50 m" },
+  { value: "qr", label: "QR code" },
+  { value: "nfc", label: "NFC" },
+] as const;
+const words = (s: unknown) => String(s ?? "").replace(/_/g, " ");
 
 type Waypoint = {
   id?: string;
@@ -41,12 +47,36 @@ type Waypoint = {
   coord_y: number | null;
   expected_minutes: number;
 };
+type Details = {
+  name: string;
+  officer: string;
+  shift: string;
+  total_duration_minutes: number;
+  grace_period_minutes: number;
+  checkin_method: "gps" | "qr" | "nfc";
+};
+
+/** Straight-line length of the route in metres (haversine between consecutive stops). */
+function routeLength(points: Waypoint[]) {
+  const placed = points.filter((w) => w.coord_x != null && w.coord_y != null);
+  let total = 0;
+  for (let i = 1; i < placed.length; i++) {
+    const [a, b] = [placed[i - 1], placed[i]];
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(b.coord_y! - a.coord_y!);
+    const dLng = toRad(b.coord_x! - a.coord_x!);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.coord_y!)) * Math.cos(toRad(b.coord_y!)) * Math.sin(dLng / 2) ** 2;
+    total += 2 * 6371000 * Math.asin(Math.sqrt(h));
+  }
+  return total;
+}
 
 function PatrolDetail() {
   const { id } = Route.useParams();
   const { appAccess } = Route.useRouteContext();
   const canManage = appAccess.specRole === "security_manager";
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const getP = useServerFn(getPatrol);
   const saveWp = useServerFn(saveWaypoints);
   const updP = useServerFn(updatePatrolDetails);
@@ -56,434 +86,605 @@ function PatrolDetail() {
   const schedSh = useServerFn(scheduleShift);
   const updSh = useServerFn(updateShift);
   const listCi = useServerFn(listCheckIns);
-  const ciFn = useServerFn(recordCheckIn);
-  const sosFn = useServerFn(sosAlert);
   const tokenFn = useServerFn(getMapboxToken);
 
-  const { data, isLoading } = useQuery({ queryKey: ["patrol", id], queryFn: () => getP({ data: { id } }) });
+  const { data, isLoading, error } = useQuery({ queryKey: ["patrol", id], queryFn: () => getP({ data: { id } }) });
   const { data: shifts = [] } = useQuery({ queryKey: ["shifts", id], queryFn: () => listSh({ data: { patrol_id: id } }) });
   const { data: checkins = [] } = useQuery({ queryKey: ["checkins", id], queryFn: () => listCi({ data: { patrol_id: id } }) });
-  const { data: token } = useQuery({ queryKey: ["mapbox_token"], queryFn: () => tokenFn(), staleTime: Infinity });
+  const { data: token } = useQuery({ queryKey: ["mapbox-token"], queryFn: () => tokenFn(), staleTime: Infinity });
 
   useRealtimeInvalidate("patrol_shifts", [["shifts", id]]);
   useRealtimeInvalidate("patrol_check_ins", [["checkins", id]]);
   useRealtimeInvalidate("patrol_waypoints", [["patrol", id]]);
 
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
-  const [details, setDetails] = useState({ name: "", officer: "", shift: "", total_duration_minutes: 60, grace_period_minutes: 10, checkin_method: "gps" as "gps"|"qr"|"nfc" });
-  const [activeWp, setActiveWp] = useState<number>(0);
+  const [details, setDetails] = useState<Details>({ name: "", officer: "", shift: "", total_duration_minutes: 60, grace_period_minutes: 10, checkin_method: "gps" });
+  const [activeWp, setActiveWp] = useState<number | null>(null);
+  const [wpDirty, setWpDirty] = useState(false);
+  const [detailsDirty, setDetailsDirty] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   useEffect(() => {
     if (!data) return;
     const p = data.patrol as any;
-    setDetails({
-      name: p.name ?? "", officer: p.officer ?? "", shift: p.shift ?? "",
-      total_duration_minutes: p.total_duration_minutes ?? 60,
-      grace_period_minutes: p.grace_period_minutes ?? 10,
-      checkin_method: (p.checkin_method ?? "gps") as any,
-    });
-    setWaypoints((data.waypoints ?? []).map((w: any) => ({
-      id: w.id, ord: w.ord, name: w.name,
-      coord_x: w.coord_x == null ? null : Number(w.coord_x),
-      coord_y: w.coord_y == null ? null : Number(w.coord_y),
-      expected_minutes: w.expected_minutes,
-    })));
+    if (!detailsDirty) {
+      setDetails({
+        name: p.name ?? "",
+        officer: p.officer ?? "",
+        shift: p.shift ?? "",
+        total_duration_minutes: p.total_duration_minutes ?? 60,
+        grace_period_minutes: p.grace_period_minutes ?? 10,
+        checkin_method: (p.checkin_method ?? "gps") as Details["checkin_method"],
+      });
+    }
+    if (!wpDirty) {
+      setWaypoints(
+        (data.waypoints ?? []).map((w: any) => ({
+          id: w.id,
+          ord: w.ord,
+          name: w.name,
+          coord_x: w.coord_x == null ? null : Number(w.coord_x),
+          coord_y: w.coord_y == null ? null : Number(w.coord_y),
+          expected_minutes: w.expected_minutes ?? 5,
+        })),
+      );
+    }
+    // only re-seed from the server when it sends new data; local edits are kept until saved
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // Map for waypoint builder
+  const editWaypoints = (fn: (prev: Waypoint[]) => Waypoint[]) => {
+    setWpDirty(true);
+    setWaypoints((prev) => fn(prev).map((w, idx) => ({ ...w, ord: idx })));
+  };
+  const editDetails = (patch: Partial<Details>) => {
+    setDetailsDirty(true);
+    setDetails((d) => ({ ...d, ...patch }));
+  };
+
+  // ---------- map ----------
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const [mapReady, setMapReady] = useState(false);
+  const canManageRef = useRef(canManage);
+  canManageRef.current = canManage;
 
   useEffect(() => {
-    if (!token?.token || !mapEl.current || mapRef.current) return;
+    if (!token?.token || !mapEl.current || mapRef.current || !data) return;
     mapboxgl.accessToken = token.token;
-    const center = waypoints.find((w) => w.coord_x != null && w.coord_y != null);
+    const first = (data.waypoints ?? []).find((w: any) => w.coord_x != null && w.coord_y != null) as any;
     const m = new mapboxgl.Map({
       container: mapEl.current,
       style: "mapbox://styles/mapbox/dark-v11",
-      center: center ? [center.coord_x!, center.coord_y!] : LAGOS,
-      zoom: 12, attributionControl: false,
+      center: first ? [Number(first.coord_x), Number(first.coord_y)] : DEFAULT_CENTER,
+      zoom: first ? 15 : 11,
+      attributionControl: false,
     });
     m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
-    m.on("load", () => requestAnimationFrame(() => m.resize()));
+    if (canManageRef.current) m.getCanvas().style.cursor = "crosshair";
+    m.on("load", () => {
+      requestAnimationFrame(() => m.resize());
+      setMapReady(true);
+    });
     m.on("click", (e) => {
-      if (!canManage) return;
-      setWaypoints((prev) => {
-        const next: Waypoint = {
-          ord: prev.length, name: `Waypoint ${prev.length + 1}`,
-          coord_x: e.lngLat.lng, coord_y: e.lngLat.lat, expected_minutes: 5,
-        };
+      if (!canManageRef.current) return;
+      editWaypoints((prev) => {
         setActiveWp(prev.length);
-        return [...prev, next];
+        return [...prev, { ord: prev.length, name: `Stop ${prev.length + 1}`, coord_x: Number(e.lngLat.lng.toFixed(6)), coord_y: Number(e.lngLat.lat.toFixed(6)), expected_minutes: 2 }];
       });
     });
     mapRef.current = m;
-    const ro = new ResizeObserver(() => { try { m.resize(); } catch {} });
-    if (mapEl.current) ro.observe(mapEl.current);
-    return () => { ro.disconnect(); m.remove(); mapRef.current = null; };
-  }, [token?.token, canManage]);
+    const ro = new ResizeObserver(() => {
+      try {
+        m.resize();
+      } catch {
+        /* map already removed */
+      }
+    });
+    ro.observe(mapEl.current);
+    return () => {
+      ro.disconnect();
+      m.remove();
+      mapRef.current = null;
+      setMapReady(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token?.token, !!data]);
 
-  // Redraw markers + line on waypoint changes
   useEffect(() => {
-    const m = mapRef.current; if (!m) return;
+    const m = mapRef.current;
+    if (!m || !mapReady) return;
     markersRef.current.forEach((mk) => mk.remove());
     markersRef.current = [];
     waypoints.forEach((w, i) => {
       if (w.coord_x == null || w.coord_y == null) return;
-      const el = document.createElement("div");
-      el.style.cssText = `width:22px;height:22px;border-radius:11px;background:#3b82f6;color:#fff;display:grid;place-items:center;font:600 11px ui-sans-serif,system-ui;border:2px solid #111827;cursor:pointer`;
+      const el = document.createElement("button");
+      el.type = "button";
+      el.setAttribute("aria-label", `Stop ${i + 1}: ${w.name}`);
+      const on = activeWp === i;
+      el.style.cssText = `width:24px;height:24px;border-radius:12px;background:${on ? "#7A9BFF" : "#3462F0"};color:#fff;display:grid;place-items:center;font:700 11px 'JetBrains Mono',ui-monospace,monospace;border:2px solid #0A0C10;box-shadow:0 0 0 ${on ? 4 : 0}px rgba(122,155,255,.35);cursor:${canManage ? "grab" : "pointer"};padding:0`;
       el.textContent = String(i + 1);
-      el.onclick = (e) => { e.stopPropagation(); setActiveWp(i); };
-      const mk = new mapboxgl.Marker(el).setLngLat([w.coord_x, w.coord_y]).addTo(m);
+      el.onclick = (e) => {
+        e.stopPropagation();
+        setActiveWp(i);
+      };
+      const mk = new mapboxgl.Marker({ element: el, draggable: canManage }).setLngLat([w.coord_x, w.coord_y]).addTo(m);
+      mk.on("dragend", () => {
+        const ll = mk.getLngLat();
+        editWaypoints((prev) => prev.map((p, idx) => (idx === i ? { ...p, coord_x: Number(ll.lng.toFixed(6)), coord_y: Number(ll.lat.toFixed(6)) } : p)));
+        setActiveWp(i);
+      });
       markersRef.current.push(mk);
     });
-    // Line layer
-    const lineSrcId = "wp-line";
     const coords = waypoints.filter((w) => w.coord_x != null && w.coord_y != null).map((w) => [w.coord_x!, w.coord_y!]);
-    const geo = { type: "FeatureCollection" as const, features: coords.length >= 2 ? [{ type: "Feature" as const, geometry: { type: "LineString" as const, coordinates: coords }, properties: {} }] : [] };
-    if (!m.isStyleLoaded()) { m.once("style.load", () => upsertLine()); } else { upsertLine(); }
-    function upsertLine() {
-      const src = m!.getSource(lineSrcId) as mapboxgl.GeoJSONSource | undefined;
-      if (src) { src.setData(geo as any); return; }
-      m!.addSource(lineSrcId, { type: "geojson", data: geo as any });
-      m!.addLayer({ id: lineSrcId, type: "line", source: lineSrcId, paint: { "line-color": "#3b82f6", "line-width": 2, "line-dasharray": [2, 2] } });
+    const geo = { type: "FeatureCollection", features: coords.length >= 2 ? [{ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} }] : [] };
+    const src = m.getSource("wp-line") as mapboxgl.GeoJSONSource | undefined;
+    if (src) src.setData(geo as any);
+    else {
+      m.addSource("wp-line", { type: "geojson", data: geo as any });
+      m.addLayer({ id: "wp-line", type: "line", source: "wp-line", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#7A9BFF", "line-width": 3, "line-dasharray": [2, 1.5] } });
     }
-  }, [waypoints]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waypoints, mapReady, activeWp, canManage]);
 
-  // Mutations
+  // ---------- mutations ----------
   const saveWpMut = useMutation({
     mutationFn: () => saveWp({ data: { patrol_id: id, waypoints } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["patrol", id] }),
+    onSuccess: () => {
+      setWpDirty(false);
+      qc.invalidateQueries({ queryKey: ["patrol", id] });
+      qc.invalidateQueries({ queryKey: ["patrol-waypoints"] });
+      toast.success("Route saved");
+    },
+    onError: (e: Error) => toast.error(e.message || "Couldn't save the route"),
   });
   const updMut = useMutation({
     mutationFn: () => updP({ data: { id, ...details } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["patrol", id] }),
+    onSuccess: () => {
+      setDetailsDirty(false);
+      qc.invalidateQueries({ queryKey: ["patrol", id] });
+      qc.invalidateQueries({ queryKey: ["patrols"] });
+      toast.success("Route details saved");
+    },
+    onError: (e: Error) => toast.error(e.message || "Couldn't save the details"),
   });
   const archMut = useMutation({
     mutationFn: (archived: boolean) => archP({ data: { id, archived } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["patrol", id] }),
+    onSuccess: (_r, archived) => {
+      qc.invalidateQueries({ queryKey: ["patrol", id] });
+      qc.invalidateQueries({ queryKey: ["patrols"] });
+      toast.success(archived ? "Route archived" : "Route restored");
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
-  const dupMut = useMutation({ mutationFn: () => dupP({ data: { id } }) });
+  const dupMut = useMutation({
+    mutationFn: () => dupP({ data: { id } }),
+    onSuccess: (row: any) => {
+      qc.invalidateQueries({ queryKey: ["patrols"] });
+      toast.success("Route duplicated");
+      if (row?.id) navigate({ to: "/app/patrols/$id", params: { id: row.id } });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
   const schedMut = useMutation({
     mutationFn: (v: any) => schedSh({ data: v }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["shifts", id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["shifts"] });
+      setShowSchedule(false);
+      toast.success("Shift scheduled");
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
   const shiftMut = useMutation({
     mutationFn: (v: any) => updSh({ data: v }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["shifts", id] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shifts"] }),
+    onError: (e: Error) => toast.error(e.message),
   });
 
-  // Declared before the isLoading/!data early return below (using data?.patrol
-  // rather than the later-defined `p`) — a hook after a conditional return changes
-  // the hook count between the loading and loaded renders, which is a Rules of
-  // Hooks violation (React error #310, crashes the whole patrol detail page).
-  const routeStats = useMemo(() => {
+  const stats = useMemo(() => {
     const p = data?.patrol as any;
-    const totalWaypoints = Math.max(p?.waypoints ?? waypoints.length, waypoints.length, 1);
+    const total = Math.max(Number(p?.waypoints ?? 0), waypoints.length);
     const checked = Number(p?.checked_in ?? 0);
-    const completion = Math.round((checked / totalWaypoints) * 100);
-    const activeShifts = shifts.filter((s: any) => s.status === "active").length;
-    const lateCheckins = checkins.filter((c: any) => c.status === "late" || c.status === "out_of_zone").length;
-    const avgLate = checkins.length ? Math.round(checkins.reduce((acc: number, c: any) => acc + (c.minutes_late ?? 0), 0) / checkins.length) : 0;
-    return { totalWaypoints, checked, completion, activeShifts, lateCheckins, avgLate };
-  }, [data?.patrol, waypoints.length, shifts, checkins]);
+    const exceptions = (checkins as any[]).filter((c) => c.status === "late" || c.status === "out_of_zone").length;
+    const lateRows = (checkins as any[]).filter((c) => Number(c.minutes_late ?? 0) > 0);
+    const avgLate = lateRows.length ? Math.round(lateRows.reduce((a, c) => a + Number(c.minutes_late), 0) / lateRows.length) : null;
+    const plannedMinutes = waypoints.reduce((a, w) => a + Number(w.expected_minutes || 0), 0);
+    return { total, checked, completion: total ? Math.round((checked / total) * 100) : 0, exceptions, avgLate, plannedMinutes, length: routeLength(waypoints) };
+  }, [data?.patrol, waypoints, checkins]);
 
+  if (error) {
+    return (
+      <Panel>
+        <Empty>
+          This route couldn't be loaded. {(error as Error).message}{" "}
+          <Link to="/app/patrols" className="lnk">
+            Back to patrols
+          </Link>
+        </Empty>
+      </Panel>
+    );
+  }
   if (isLoading || !data) {
-    return <div className="rounded-lg border border-border bg-card p-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading patrol…</div>;
+    return (
+      <Panel>
+        <Empty>
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading route…
+        </Empty>
+      </Panel>
+    );
   }
   const p = data.patrol as any;
   const archived = !!p.archived_at;
+  const active = activeWp != null ? waypoints[activeWp] : null;
+  const unplaced = waypoints.filter((w) => w.coord_x == null || w.coord_y == null).length;
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link to="/app/patrols" className="rounded-md border border-border bg-surface p-1.5 hover:bg-surface-2"><ArrowLeft className="h-4 w-4" /></Link>
-          <div>
-            <div className="text-[10px] font-mono text-muted-foreground">{p.code}{archived && " · ARCHIVED"}</div>
-            <h1 className="text-xl font-semibold">{details.name || p.name}</h1>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { if (canManage) dupMut.mutate(); }} disabled={!canManage || dupMut.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs hover:bg-surface-2 disabled:opacity-60">
-            <Copy className="h-3.5 w-3.5" /> Duplicate
-          </button>
-          <button onClick={() => { if (canManage) archMut.mutate(!archived); }} disabled={!canManage} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs hover:bg-surface-2 disabled:opacity-60">
-            {archived ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
-            {archived ? "Restore" : "Archive"}
-          </button>
-        </div>
+    <div className="col g16">
+      <div className="row g8 wrap">
+        <Link to="/app/patrols" className="row g4 t3 lnk">
+          <ChevronLeft className="h-3.5 w-3.5" /> Patrols
+        </Link>
+        <span className="t3">/</span>
+        <span className="mono t3">{p.code}</span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Metric label="Waypoint completion" value={`${routeStats.completion}%`} />
-        <Metric label="Checked in" value={`${routeStats.checked}/${routeStats.totalWaypoints}`} tone="resolved" />
-        <Metric label="Active shifts" value={routeStats.activeShifts.toString()} />
-        <Metric label="Late / zone out" value={routeStats.lateCheckins.toString()} tone={routeStats.lateCheckins > 0 ? "critical" : "resolved"} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-4">
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Route health</div>
-              <h2 className="text-sm font-semibold">Execution cadence</h2>
-            </div>
-            <span className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              avg late {routeStats.avgLate}m
-            </span>
-          </div>
-          <div className="mt-4 h-28 rounded-lg border border-border bg-surface p-3">
-            <div className="flex h-full items-end gap-2">
-              {[...waypoints].slice(0, 8).map((w, idx) => {
-                const pct = Math.round(((idx + 1) / Math.max(routeStats.totalWaypoints, 1)) * 100);
-                return (
-                  <div key={w.id ?? idx} className="flex-1 flex flex-col items-center justify-end gap-1">
-                    <div
-                      className="w-full rounded-t bg-gradient-to-t from-resolved via-primary to-critical/70"
-                      style={{ height: `${Math.max(10, pct)}%` }}
-                      title={`${w.name} · ${pct}%`}
-                    />
-                    <div className="text-[10px] font-mono text-muted-foreground truncate w-full text-center">{idx + 1}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Operational notes</div>
-            <h3 className="text-sm font-semibold">Patrol exceptions</h3>
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {routeStats.checked} of {routeStats.totalWaypoints} waypoints already logged.
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {checkins.length ? `${checkins.length} check-ins recorded in this route log.` : "No check-ins recorded yet."}
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {routeStats.lateCheckins > 0 ? `${routeStats.lateCheckins} exception check-ins need review.` : "No lateness exceptions detected."}
-          </div>
-        </div>
-      </div>
-
-      {/* Details */}
-      <section className={`rounded-lg border border-border bg-card p-5 space-y-3 ${canManage ? "" : "opacity-75"}`}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <F label="Route name"><input disabled={!canManage} className="inp disabled:opacity-60" value={details.name} onChange={(e) => setDetails({ ...details, name: e.target.value })} /></F>
-          <F label="Default officer"><input disabled={!canManage} className="inp disabled:opacity-60" value={details.officer} onChange={(e) => setDetails({ ...details, officer: e.target.value })} /></F>
-          <F label="Shift window"><input disabled={!canManage} className="inp disabled:opacity-60" value={details.shift} onChange={(e) => setDetails({ ...details, shift: e.target.value })} placeholder="18:00 – 06:00" /></F>
-          <F label="Total duration (min)"><input disabled={!canManage} type="number" min={5} max={720} className="inp disabled:opacity-60" value={details.total_duration_minutes} onChange={(e) => setDetails({ ...details, total_duration_minutes: Number(e.target.value) })} /></F>
-          <F label="Grace period (min)"><input disabled={!canManage} type="number" min={1} max={60} className="inp disabled:opacity-60" value={details.grace_period_minutes} onChange={(e) => setDetails({ ...details, grace_period_minutes: Number(e.target.value) })} /></F>
-          <F label="Check-in method">
-            <select disabled={!canManage} className="inp disabled:opacity-60" value={details.checkin_method} onChange={(e) => setDetails({ ...details, checkin_method: e.target.value as any })}>
-              <option value="gps">GPS (50m radius)</option>
-              <option value="qr">QR code at waypoint</option>
-              <option value="nfc">NFC tag (enterprise)</option>
-            </select>
-          </F>
-        </div>
-        <div className="flex justify-end">
-          <button onClick={() => { if (canManage) updMut.mutate(); }} disabled={!canManage || updMut.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-            {updMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Save details
-          </button>
-        </div>
-      </section>
-
-      {/* Route builder */}
-      <section className={`rounded-lg border border-border bg-card p-5 ${canManage ? "" : "opacity-75"}`}>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-semibold">Route waypoints</h2>
-            <p className="text-xs text-muted-foreground">Click the map to add a waypoint. Drag-free list below — edit name & expected time.</p>
-          </div>
-          <button onClick={() => { if (canManage) saveWpMut.mutate(); }} disabled={!canManage || saveWpMut.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-            {saveWpMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Save route
-          </button>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-3">
-          <div className="relative overflow-hidden rounded-md border border-border bg-surface h-[420px]">
-            {token?.token ? <div ref={mapEl} className="absolute inset-0" /> : (
-              <div className="absolute inset-0 grid place-items-center text-xs text-muted-foreground p-6 text-center">
-                Add MAPBOX_PUBLIC_TOKEN to enable map editing. You can still enter waypoint coordinates manually below.
-              </div>
-            )}
-          </div>
-          <div className="space-y-1.5 max-h-[420px] overflow-auto pr-1">
-            {waypoints.length === 0 && (
-              <div className="rounded-md border border-dashed border-border bg-surface p-4 text-xs text-muted-foreground text-center">
-                No waypoints yet. Click the map or add manually.
-              </div>
-            )}
-            {waypoints.map((w, i) => (
-              <div key={i} className={`rounded-md border p-2 ${activeWp === i ? "border-primary/50 bg-primary/5" : "border-border bg-surface"}`}>
-                <div className="flex items-center gap-2">
-                  <span className="inline-grid h-5 w-5 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">{i + 1}</span>
-                  <input disabled={!canManage} className="inp h-7 flex-1 disabled:opacity-60" value={w.name} onChange={(e) => updateWp(i, { name: e.target.value })} />
-                  <button disabled={!canManage} onClick={() => removeWp(i)} className="text-muted-foreground hover:text-critical disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-                <div className="mt-1.5 grid grid-cols-3 gap-1">
-                  <input disabled={!canManage} className="inp h-7 text-[11px] disabled:opacity-60" placeholder="lng" type="number" step="0.000001" value={w.coord_x ?? ""} onChange={(e) => updateWp(i, { coord_x: e.target.value === "" ? null : Number(e.target.value) })} />
-                  <input disabled={!canManage} className="inp h-7 text-[11px] disabled:opacity-60" placeholder="lat" type="number" step="0.000001" value={w.coord_y ?? ""} onChange={(e) => updateWp(i, { coord_y: e.target.value === "" ? null : Number(e.target.value) })} />
-                  <div className="flex items-center gap-1">
-                    <input disabled={!canManage} className="inp h-7 text-[11px] disabled:opacity-60" type="number" min={1} max={120} value={w.expected_minutes} onChange={(e) => updateWp(i, { expected_minutes: Number(e.target.value) })} />
-                    <span className="text-[10px] text-muted-foreground">min</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-            <button disabled={!canManage} onClick={addWp} className="w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-dashed border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2 disabled:opacity-60">
-              <Plus className="h-3.5 w-3.5" /> Add waypoint
+      <div className="row g12 wrap">
+        <h1 className="ph1">{canManage ? "Edit route" : "Route"} · {details.name || p.name}</h1>
+        {archived ? <Tag>Archived</Tag> : <Tag tone={(STATUS_TONE[p.status] ?? "blue") as any}>{words(p.status) || "unknown"}</Tag>}
+        <span className="flex-auto" />
+        {canManage && (
+          <>
+            <button type="button" className="b b-gh" onClick={() => dupMut.mutate()} disabled={dupMut.isPending}>
+              <Copy className="h-4 w-4" /> Duplicate
             </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Shifts */}
-      <section className={`rounded-lg border border-border bg-card p-5 ${canManage ? "" : "opacity-75"}`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Shift schedule</h2>
-          {canManage ? <ScheduleShiftForm onSchedule={(v) => schedMut.mutate(v)} loading={schedMut.isPending} patrolId={id} defaultOfficer={details.officer} /> : <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Read only</div>}
-        </div>
-        {shifts.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border bg-surface p-4 text-xs text-muted-foreground text-center">No shifts scheduled.</div>
-        ) : (
-          <div className="overflow-hidden rounded-md border border-border">
-            <table className="w-full text-xs">
-              <thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr><th className="px-3 py-2 text-left">Officer</th><th className="px-3 py-2 text-left">Start</th><th className="px-3 py-2 text-left">End</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-right">Actions</th></tr>
-              </thead>
-              <tbody>
-                {(shifts as any[]).map((s) => (
-                  <ShiftRow key={s.id} shift={s} onAction={(v) => shiftMut.mutate({ id: s.id, ...v })} loading={shiftMut.isPending} canManage={canManage} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <button type="button" className="b b-sec" onClick={() => archMut.mutate(!archived)} disabled={archMut.isPending}>
+              {archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+              {archived ? "Restore" : "Archive"}
+            </button>
+          </>
         )}
-      </section>
+      </div>
 
-      {/* Check-in log */}
-      <section className={`rounded-lg border border-border bg-card p-5 ${canManage ? "" : "opacity-75"}`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Patrol log</h2>
-          {canManage ? <QuickCheckInTester shifts={shifts as any[]} waypoints={waypoints} onCheck={(v) => ciMut.mutate(v)} onSos={(v) => sosMut.mutate(v)} loading={ciMut.isPending || sosMut.isPending} /> : <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Read only</div>}
-        </div>
-        {checkins.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border bg-surface p-4 text-xs text-muted-foreground text-center">No check-ins yet.</div>
-        ) : (
-          <div className="space-y-1.5 max-h-80 overflow-auto">
-            {(checkins as any[]).map((c) => (
-              <div key={c.id} className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2 text-xs">
-                <div className="flex items-center gap-2">
-                  {c.status === "on_time" && <CheckCircle2 className="h-3.5 w-3.5 text-resolved" />}
-                  {c.status === "late" && <AlertTriangle className="h-3.5 w-3.5 text-high" />}
-                  {c.status === "out_of_zone" && <MapPin className="h-3.5 w-3.5 text-critical" />}
-                  <span className="font-medium">{c.officer_name ?? "Officer"}</span>
-                  <span className="text-muted-foreground">· {c.method}</span>
-                  {c.minutes_late > 0 && <span className="text-high">+{c.minutes_late}m late</span>}
-                  {c.distance_m != null && <span className="text-muted-foreground">{Math.round(c.distance_m)}m</span>}
+      <div className="kpis">
+        <Kpi label="Progress" value={`${stats.checked}/${stats.total}`} unit={`· ${stats.completion}%`} title="Waypoints checked in on the current round" />
+        <Kpi label="Stops" value={waypoints.length} unit={stats.length ? `· ${(stats.length / 1000).toFixed(2)} km` : undefined} title="Straight-line distance between consecutive stops" />
+        <Kpi label="Planned walk" value={stats.plannedMinutes || "—"} unit={stats.plannedMinutes ? "min" : undefined} title="Sum of expected minutes at each stop" />
+        <Kpi label="Check-ins" value={(checkins as any[]).length} />
+        <Kpi label="Exceptions" value={stats.exceptions} title="Late or out-of-zone check-ins" />
+        <Kpi label="Avg lateness" value={stats.avgLate ?? "—"} unit={stats.avgLate != null ? "min" : undefined} title="Average minutes late across late check-ins" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="col g12" style={{ minWidth: 0 }}>
+          {token?.token ? (
+            <div className="map" style={{ minHeight: 520 }}>
+              <div ref={mapEl} className="absolute inset-0" />
+              {canManage && (
+                <div className="glass row g8" style={{ position: "absolute", left: 10, top: 10, padding: "6px 10px", fontSize: 12, maxWidth: "calc(100% - 70px)" }}>
+                  Click the map to add a stop. Drag a stop to move it.
                 </div>
-                <span className="font-mono text-muted-foreground">{new Date(c.created_at).toLocaleString("en-GB")}</span>
+              )}
+              {unplaced > 0 && (
+                <div className="glass" style={{ position: "absolute", left: 10, bottom: 10, padding: "6px 10px", fontSize: 12 }}>
+                  {unplaced} stop{unplaced === 1 ? " has" : "s have"} no position yet
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="map" style={{ minHeight: 240 }}>
+              <Empty>The map needs a Mapbox token. You can still enter stop coordinates by hand on the right.</Empty>
+            </div>
+          )}
+
+          <Panel
+            title="Shift schedule"
+            meta={`${(shifts as any[]).length}`}
+            actions={
+              canManage ? (
+                <button type="button" className="b b-sm b-sec" onClick={() => setShowSchedule((o) => !o)}>
+                  <CalendarPlus className="h-3.5 w-3.5" /> Schedule
+                </button>
+              ) : undefined
+            }
+            bodyClassName=""
+          >
+            {showSchedule && canManage && (
+              <div className="pn-b">
+                <ScheduleShiftForm
+                  patrolId={id}
+                  defaultOfficer={details.officer}
+                  loading={schedMut.isPending}
+                  onCancel={() => setShowSchedule(false)}
+                  onSchedule={(v) => schedMut.mutate(v)}
+                />
               </div>
-            ))}
-          </div>
-        )}
-      </section>
-      <CiMutContext orgId={appAccess.orgId} fn={ciFn} sos={sosFn} qc={qc} id={id} setMuts={(c: any, s: any) => { ciMut = c; sosMut = s; }} />
-      <style>{`.inp{width:100%;border-radius:.375rem;border:1px solid var(--border);background:var(--surface);padding:.4rem .55rem;font-size:.8125rem;color:var(--foreground)}.inp:focus{outline:none;box-shadow:0 0 0 1px var(--ring)}`}</style>
+            )}
+            {(shifts as any[]).length === 0 ? (
+              <Empty>No shifts scheduled for this route.</Empty>
+            ) : (
+              <div className="scroll">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Officer</th>
+                      <th>Start</th>
+                      <th>End</th>
+                      <th>Status</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(shifts as any[]).map((s) => (
+                      <ShiftRow key={s.id} shift={s} canManage={canManage} loading={shiftMut.isPending} onAction={(v) => shiftMut.mutate({ id: s.id, ...v })} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="Check-in log" meta={`${(checkins as any[]).length}`} bodyClassName="">
+            {(checkins as any[]).length === 0 ? (
+              <Empty>No check-ins yet. Officers check in from the officer app.</Empty>
+            ) : (
+              <div className="list scroll" style={{ maxHeight: 360 }}>
+                {(checkins as any[]).map((c) => (
+                  <div key={c.id} className="row g10" style={{ padding: "10px 14px" }}>
+                    <Avatar name={c.officer_name} />
+                    <span className="f1 col" style={{ minWidth: 0 }}>
+                      <b className="trunc">{c.officer_name ?? "Officer"}</b>
+                      <span className="t3">
+                        {String(c.method ?? "").toUpperCase()}
+                        {c.distance_m != null ? ` · ${Math.round(c.distance_m)} m from stop` : ""}
+                        {Number(c.minutes_late) > 0 ? ` · ${c.minutes_late} min late` : ""}
+                      </span>
+                    </span>
+                    <span className="mono t3" style={{ fontSize: 11 }}>
+                      {new Date(c.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    {c.status && <Tag tone={CHECKIN_TONE[c.status]}>{words(c.status)}</Tag>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+
+        <aside className="col g12">
+          <Panel
+            title="Route details"
+            actions={
+              canManage ? (
+                <button type="button" className="b b-sm b-pri" onClick={() => updMut.mutate()} disabled={!detailsDirty || updMut.isPending}>
+                  {updMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
+                </button>
+              ) : undefined
+            }
+          >
+            <fieldset disabled={!canManage} className="col g12" style={{ border: 0, padding: 0, margin: 0 }}>
+              <label className="fl">
+                <span className="lbl">Route name</span>
+                <input className="in" value={details.name} onChange={(e) => editDetails({ name: e.target.value })} />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="fl">
+                  <span className="lbl">Code</span>
+                  <input className="in mono" value={p.code ?? ""} readOnly aria-readonly="true" />
+                </label>
+                <label className="fl">
+                  <span className="lbl">Shift window</span>
+                  <input className="in mono" value={details.shift} onChange={(e) => editDetails({ shift: e.target.value })} placeholder="18:00 – 06:00" />
+                </label>
+                <label className="fl">
+                  <span className="lbl">Round length (min)</span>
+                  <input className="in" type="number" min={5} max={720} value={details.total_duration_minutes} onChange={(e) => editDetails({ total_duration_minutes: Number(e.target.value) })} />
+                </label>
+                <label className="fl">
+                  <span className="lbl">Grace period (min)</span>
+                  <input className="in" type="number" min={1} max={60} value={details.grace_period_minutes} onChange={(e) => editDetails({ grace_period_minutes: Number(e.target.value) })} />
+                </label>
+              </div>
+              <label className="fl">
+                <span className="lbl">Default officer</span>
+                <input className="in" value={details.officer} onChange={(e) => editDetails({ officer: e.target.value })} />
+              </label>
+              <div className="fl">
+                <span className="lbl">Check-in method</span>
+                <div className="seg" role="group" aria-label="Check-in method" style={{ display: "flex" }}>
+                  {METHODS.map((m) => (
+                    <button
+                      key={m.value}
+                      type="button"
+                      className={`f1${details.checkin_method === m.value ? " on" : ""}`}
+                      aria-pressed={details.checkin_method === m.value}
+                      onClick={() => editDetails({ checkin_method: m.value })}
+                      style={{ justifyContent: "center" }}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </fieldset>
+          </Panel>
+
+          <Panel
+            title="Stops"
+            meta={`${waypoints.length}${stats.length ? ` · ${(stats.length / 1000).toFixed(2)} km` : ""}`}
+            actions={
+              canManage ? (
+                <button type="button" className="b b-sm b-pri" onClick={() => saveWpMut.mutate()} disabled={!wpDirty || saveWpMut.isPending}>
+                  {saveWpMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save route
+                </button>
+              ) : undefined
+            }
+            bodyClassName=""
+          >
+            {wpDirty && (
+              <div className="pn-b" style={{ paddingBottom: 0 }}>
+                <Notice tone="warn">You have unsaved changes to the stops.</Notice>
+              </div>
+            )}
+            {waypoints.length === 0 ? (
+              <Empty>{canManage ? "No stops yet. Click the map or add one below." : "This route has no stops yet."}</Empty>
+            ) : (
+              <ol className="list scroll" style={{ maxHeight: 360, margin: 0, padding: 0, listStyle: "none" }}>
+                {waypoints.map((w, i) => (
+                  <li key={w.id ?? `new-${i}`} className="row g10" style={{ padding: "8px 14px", background: activeWp === i ? "var(--ink-2)" : undefined }}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveWp(activeWp === i ? null : i)}
+                      aria-pressed={activeWp === i}
+                      aria-label={`Select stop ${i + 1}`}
+                      className="mono"
+                      style={{ width: 22, height: 22, borderRadius: 11, background: "var(--blue)", color: "#fff", fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center", flex: "none", border: 0 }}
+                    >
+                      {i + 1}
+                    </button>
+                    <button type="button" className="f1 trunc text-left" onClick={() => setActiveWp(activeWp === i ? null : i)} style={{ background: "none", border: 0, color: "inherit", padding: 0 }}>
+                      {w.name || `Stop ${i + 1}`}
+                    </button>
+                    <span className="mono t2" style={{ fontSize: 12 }}>
+                      {w.expected_minutes} min
+                    </span>
+                    {(w.coord_x == null || w.coord_y == null) && <Tag tone="warn">No position</Tag>}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {active && activeWp != null && (
+              <div className="pn-b col g10" style={{ borderTop: "1px solid var(--line-1)" }}>
+                <div className="row g8">
+                  <b className="f1">Stop {activeWp + 1}</b>
+                  {canManage && (
+                    <>
+                      <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Move stop up" disabled={activeWp === 0} onClick={() => move(activeWp, -1)}>
+                        <ArrowUp size={14} />
+                      </button>
+                      <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Move stop down" disabled={activeWp === waypoints.length - 1} onClick={() => move(activeWp, 1)}>
+                        <ArrowDown size={14} />
+                      </button>
+                      <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Remove stop" onClick={() => removeWp(activeWp)}>
+                        <Trash2 size={14} />
+                      </button>
+                    </>
+                  )}
+                  <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label="Close stop editor" onClick={() => setActiveWp(null)}>
+                    <X size={14} />
+                  </button>
+                </div>
+                <fieldset disabled={!canManage} className="col g10" style={{ border: 0, padding: 0, margin: 0 }}>
+                  <label className="fl">
+                    <span className="lbl">Name</span>
+                    <input className="in" value={active.name} onChange={(e) => updateWp(activeWp, { name: e.target.value })} />
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="fl">
+                      <span className="lbl">Longitude</span>
+                      <input className="in mono" type="number" step="0.000001" value={active.coord_x ?? ""} onChange={(e) => updateWp(activeWp, { coord_x: e.target.value === "" ? null : Number(e.target.value) })} />
+                    </label>
+                    <label className="fl">
+                      <span className="lbl">Latitude</span>
+                      <input className="in mono" type="number" step="0.000001" value={active.coord_y ?? ""} onChange={(e) => updateWp(activeWp, { coord_y: e.target.value === "" ? null : Number(e.target.value) })} />
+                    </label>
+                    <label className="fl">
+                      <span className="lbl">Minutes</span>
+                      <input className="in" type="number" min={1} max={120} value={active.expected_minutes} onChange={(e) => updateWp(activeWp, { expected_minutes: Number(e.target.value) })} />
+                    </label>
+                  </div>
+                </fieldset>
+              </div>
+            )}
+            {canManage && (
+              <div className="pn-b">
+                <button type="button" className="b b-gh w-full" style={{ justifyContent: "center", borderStyle: "dashed" }} onClick={addWp}>
+                  <Plus className="h-4 w-4" /> Add stop without a position
+                </button>
+              </div>
+            )}
+          </Panel>
+        </aside>
+      </div>
     </div>
   );
 
   function addWp() {
-    setWaypoints((prev) => [...prev, { ord: prev.length, name: `Waypoint ${prev.length + 1}`, coord_x: null, coord_y: null, expected_minutes: 5 }]);
+    editWaypoints((prev) => {
+      setActiveWp(prev.length);
+      return [...prev, { ord: prev.length, name: `Stop ${prev.length + 1}`, coord_x: null, coord_y: null, expected_minutes: 2 }];
+    });
   }
-  function removeWp(i: number) { setWaypoints((prev) => prev.filter((_, idx) => idx !== i).map((w, idx) => ({ ...w, ord: idx }))); }
-  function updateWp(i: number, patch: Partial<Waypoint>) { setWaypoints((prev) => prev.map((w, idx) => idx === i ? { ...w, ...patch } : w)); }
-}
-
-function Metric({ label, value, tone = "muted" }: { label: string; value: string; tone?: "muted" | "critical" | "resolved" }) {
-  const toneClass = tone === "critical"
-    ? "text-critical bg-critical/10 border-critical/30"
-    : tone === "resolved"
-      ? "text-resolved bg-resolved/10 border-resolved/30"
-      : "text-muted-foreground bg-surface border-border";
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`mt-2 inline-flex rounded-md border px-2.5 py-1 text-2xl font-semibold tracking-tight ${toneClass}`}>{value}</div>
-    </div>
-  );
-}
-
-// Mutations need to be inside the component scope, but the layout below uses them — so
-// we declare placeholders via let in the closure. Simpler: hoist with useRef.
-let ciMut: any = { mutate: () => {}, isPending: false };
-let sosMut: any = { mutate: () => {}, isPending: false };
-
-function CiMutContext({ orgId, fn, sos, qc, id, setMuts }: any) {
-  const a = useMutation({
-    mutationFn: (v: any) => fn({ data: v }),
-    onSuccess: (row: any, variables: any) => {
-      publishRealtimeEvent(orgRoom(orgId), "patrol:checkin", {
-        patrol_id: id,
-        shift_id: variables.shift_id,
-        waypoint_id: variables.waypoint_id,
-        method: variables.method,
-        checkin_id: row?.id ?? null,
-      });
-      qc.invalidateQueries({ queryKey: ["checkins", id] });
-    },
-  });
-  const b = useMutation({
-    mutationFn: (v: any) => sos({ data: v }),
-    onSuccess: (row: any) => {
-      publishRealtimeEvent(orgRoom(orgId), "incident:created", {
-        patrol_id: id,
-        incident_id: row?.incident?.id ?? row?.id ?? null,
-        severity: 5,
-        source: "patrol-sos",
-      });
-      qc.invalidateQueries({ queryKey: ["checkins", id] });
-    },
-  });
-  useEffect(() => { setMuts(a, b); }, [a, b]);
-  return null;
-}
-
-function F({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block"><div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>{children}</label>;
+  function removeWp(i: number) {
+    editWaypoints((prev) => prev.filter((_, idx) => idx !== i));
+    setActiveWp(null);
+  }
+  function updateWp(i: number, patch: Partial<Waypoint>) {
+    editWaypoints((prev) => prev.map((w, idx) => (idx === i ? { ...w, ...patch } : w)));
+  }
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    editWaypoints((prev) => {
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+    setActiveWp(j);
+  }
 }
 
 function ShiftRow({ shift, onAction, loading, canManage }: { shift: any; onAction: (v: any) => void; loading: boolean; canManage: boolean }) {
   const [notes, setNotes] = useState(shift.handover_notes ?? "");
   const [open, setOpen] = useState(false);
   const status = shift.status as string;
+  const fmt = (iso: string) => new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   return (
     <>
-      <tr className="border-t border-border">
-        <td className="px-3 py-2">{shift.officer_name}</td>
-        <td className="px-3 py-2 font-mono">{new Date(shift.scheduled_start).toLocaleString("en-GB")}</td>
-        <td className="px-3 py-2 font-mono">{new Date(shift.scheduled_end).toLocaleString("en-GB")}</td>
-        <td className="px-3 py-2"><span className={`rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${status === "active" ? "border-resolved/40 text-resolved bg-resolved/10" : status === "completed" ? "border-border text-muted-foreground" : status === "cancelled" ? "border-critical/40 text-critical bg-critical/10" : "border-border bg-surface"}`}>{status}</span></td>
-        <td className="px-3 py-2 text-right">
-          <div className="inline-flex items-center gap-1">
-            {canManage && status === "scheduled" && <button onClick={() => onAction({ start: true })} disabled={loading} className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-[11px] hover:bg-surface-2"><PlayCircle className="h-3 w-3" /> Start</button>}
-            {canManage && status === "active" && <button onClick={() => onAction({ end: true })} disabled={loading} className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-[11px] hover:bg-surface-2"><StopCircle className="h-3 w-3" /> End</button>}
-            {canManage ? <button onClick={() => setOpen((o) => !o)} className="rounded border border-border bg-surface px-2 py-1 text-[11px] hover:bg-surface-2">Handover</button> : <span className="text-[11px] text-muted-foreground">View only</span>}
-          </div>
+      <tr>
+        <td>
+          <span className="row g8">
+            <Avatar name={shift.officer_name} />
+            <b>{shift.officer_name}</b>
+          </span>
+        </td>
+        <td className="mono t2">{fmt(shift.scheduled_start)}</td>
+        <td className="mono t2">{fmt(shift.scheduled_end)}</td>
+        <td>
+          <Status tone={SHIFT_TONE[status] ?? "neutral"}>{words(status)}</Status>
+        </td>
+        <td>
+          <span className="row g6" style={{ justifyContent: "flex-end" }}>
+            {canManage && status === "scheduled" && (
+              <button type="button" className="b b-sm b-sec" onClick={() => onAction({ start: true })} disabled={loading}>
+                <PlayCircle className="h-3.5 w-3.5" /> Start
+              </button>
+            )}
+            {canManage && status === "active" && (
+              <button type="button" className="b b-sm b-sec" onClick={() => onAction({ end: true })} disabled={loading}>
+                <StopCircle className="h-3.5 w-3.5" /> End
+              </button>
+            )}
+            {(canManage || shift.handover_notes) && (
+              <button type="button" className="b b-sm b-gh" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+                Handover
+              </button>
+            )}
+          </span>
         </td>
       </tr>
       {open && (
-        <tr className="bg-surface/50">
-          <td colSpan={5} className="px-3 py-2">
-            <textarea className="inp" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Handover notes for the next officer…" />
-            <div className="mt-1.5 flex justify-end">
-              <button onClick={() => onAction({ handover_notes: notes })} disabled={loading} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-                <Save className="h-3 w-3" /> Save notes
-              </button>
+        <tr>
+          <td colSpan={5}>
+            <div className="col g8">
+              <textarea className="in" rows={3} value={notes} readOnly={!canManage} onChange={(e) => setNotes(e.target.value)} placeholder="Handover notes for the next officer…" style={{ height: "auto", paddingTop: 8 }} />
+              {canManage && (
+                <div className="row" style={{ justifyContent: "flex-end" }}>
+                  <button type="button" className="b b-sm b-pri" onClick={() => onAction({ handover_notes: notes })} disabled={loading}>
+                    <Save className="h-3.5 w-3.5" /> Save notes
+                  </button>
+                </div>
+              )}
             </div>
           </td>
         </tr>
@@ -492,76 +693,73 @@ function ShiftRow({ shift, onAction, loading, canManage }: { shift: any; onActio
   );
 }
 
-function ScheduleShiftForm({ onSchedule, loading, patrolId, defaultOfficer }: { onSchedule: (v: any) => void; loading: boolean; patrolId: string; defaultOfficer: string }) {
-  const [open, setOpen] = useState(false);
+function ScheduleShiftForm({
+  onSchedule,
+  onCancel,
+  loading,
+  patrolId,
+  defaultOfficer,
+}: {
+  onSchedule: (v: any) => void;
+  onCancel: () => void;
+  loading: boolean;
+  patrolId: string;
+  defaultOfficer: string;
+}) {
   const [form, setForm] = useState({
     officer_name: defaultOfficer || "",
     scheduled_start: toLocalInput(new Date(Date.now() + 3600_000)),
     scheduled_end: toLocalInput(new Date(Date.now() + 3600_000 * 9)),
     repeat_days: 1,
   });
-  useEffect(() => { if (defaultOfficer) setForm((f) => ({ ...f, officer_name: defaultOfficer })); }, [defaultOfficer]);
+  const endBeforeStart = new Date(form.scheduled_end).getTime() <= new Date(form.scheduled_start).getTime();
   return (
-    <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"><CalendarPlus className="h-3.5 w-3.5" /> Schedule</button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 w-80 rounded-lg border border-border bg-card p-3 shadow-elegant space-y-2">
-          <F label="Officer name"><input className="inp" value={form.officer_name} onChange={(e) => setForm({ ...form, officer_name: e.target.value })} /></F>
-          <F label="Start"><input className="inp" type="datetime-local" value={form.scheduled_start} onChange={(e) => setForm({ ...form, scheduled_start: e.target.value })} /></F>
-          <F label="End"><input className="inp" type="datetime-local" value={form.scheduled_end} onChange={(e) => setForm({ ...form, scheduled_end: e.target.value })} /></F>
-          <F label="Repeat (days)"><input className="inp" type="number" min={1} max={30} value={form.repeat_days} onChange={(e) => setForm({ ...form, repeat_days: Number(e.target.value) })} /></F>
-          <div className="flex justify-end gap-2 pt-1">
-            <button onClick={() => setOpen(false)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs">Cancel</button>
-            <button onClick={() => { onSchedule({ patrol_id: patrolId, officer_name: form.officer_name, scheduled_start: new Date(form.scheduled_start).toISOString(), scheduled_end: new Date(form.scheduled_end).toISOString(), repeat_days: form.repeat_days }); setOpen(false); }} disabled={loading || !form.officer_name} className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-60">Schedule</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function QuickCheckInTester({ shifts, waypoints, onCheck, onSos, loading }: { shifts: any[]; waypoints: Waypoint[]; onCheck: (v: any) => void; onSos: (v: any) => void; loading: boolean }) {
-  const active = shifts.find((s) => s.status === "active") ?? shifts[0];
-  const [wpId, setWpId] = useState<string>("");
-  useEffect(() => { const w = waypoints.find((w) => w.id); if (w?.id) setWpId(w.id); }, [waypoints]);
-  if (!active || !waypoints.length) return null;
-  return (
-    <div className="flex items-center gap-2">
-      <select className="rounded border border-border bg-surface px-2 py-1 text-[11px]" value={wpId} onChange={(e) => setWpId(e.target.value)}>
-        {waypoints.filter((w) => w.id).map((w, i) => <option key={w.id} value={w.id!}>{i + 1}. {w.name}</option>)}
-      </select>
-      <button
-        disabled={loading || !wpId}
-        onClick={() => {
-          if (!navigator.geolocation) { onCheck({ shift_id: active.id, waypoint_id: wpId, method: "gps" }); return; }
-          navigator.geolocation.getCurrentPosition(
-            (pos) => onCheck({ shift_id: active.id, waypoint_id: wpId, method: "gps", coord_x: pos.coords.longitude, coord_y: pos.coords.latitude }),
-            () => onCheck({ shift_id: active.id, waypoint_id: wpId, method: "gps" }),
-            { enableHighAccuracy: true, timeout: 8000 },
-          );
-        }}
-        className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-      >
-        <Crosshair className="h-3.5 w-3.5" /> Check in
-      </button>
-      <button
-        disabled={loading}
-        onClick={() => {
-          if (!navigator.geolocation) { onSos({ shift_id: active.id }); return; }
-          navigator.geolocation.getCurrentPosition(
-            (pos) => onSos({ shift_id: active.id, coord_x: pos.coords.longitude, coord_y: pos.coords.latitude }),
-            () => onSos({ shift_id: active.id }),
-          );
-        }}
-        className="inline-flex items-center gap-1.5 rounded-md border border-critical/40 bg-critical/10 px-3 py-1.5 text-xs font-medium text-critical hover:bg-critical/20"
-      >
-        <Siren className="h-3.5 w-3.5" /> SOS
-      </button>
+    <div className="col g10">
+      <div className="grid gap-3 md:grid-cols-4">
+        <label className="fl">
+          <span className="lbl">Officer</span>
+          <input className="in" value={form.officer_name} onChange={(e) => setForm({ ...form, officer_name: e.target.value })} />
+        </label>
+        <label className="fl">
+          <span className="lbl">Start</span>
+          <input className="in" type="datetime-local" value={form.scheduled_start} onChange={(e) => setForm({ ...form, scheduled_start: e.target.value })} />
+        </label>
+        <label className="fl">
+          <span className="lbl">End</span>
+          <input className="in" type="datetime-local" value={form.scheduled_end} onChange={(e) => setForm({ ...form, scheduled_end: e.target.value })} />
+        </label>
+        <label className="fl">
+          <span className="lbl">Repeat for (days)</span>
+          <input className="in" type="number" min={1} max={30} value={form.repeat_days} onChange={(e) => setForm({ ...form, repeat_days: Number(e.target.value) })} />
+        </label>
+      </div>
+      {endBeforeStart && <Notice tone="warn">The shift has to end after it starts.</Notice>}
+      <div className="row g8" style={{ justifyContent: "flex-end" }}>
+        <button type="button" className="b b-sm b-gh" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="b b-sm b-pri"
+          disabled={loading || !form.officer_name || endBeforeStart}
+          onClick={() =>
+            onSchedule({
+              patrol_id: patrolId,
+              officer_name: form.officer_name,
+              scheduled_start: new Date(form.scheduled_start).toISOString(),
+              scheduled_end: new Date(form.scheduled_end).toISOString(),
+              repeat_days: form.repeat_days,
+            })
+          }
+        >
+          {loading ? "Scheduling…" : "Schedule shift"}
+        </button>
+      </div>
     </div>
   );
 }
 
 function toLocalInput(d: Date) {
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
