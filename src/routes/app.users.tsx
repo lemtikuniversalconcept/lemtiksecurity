@@ -1,24 +1,19 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { listMembers, listLocations, updateMemberRole, removeMember } from "@/lib/orgs.functions";
-import {
-  listInvites, createInvite, resendInvite, cancelInvite, bulkInvite, setUserActive,
-} from "@/lib/users.functions";
+import { listInvites, createInvite, resendInvite, cancelInvite, bulkInvite, setUserActive } from "@/lib/users.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import {
-  Plus, Loader2, ShieldCheck, X, Mail, Upload, Power, PowerOff, RefreshCw, ChevronRight, Users as UsersIcon, Clock3, Activity, ShieldAlert,
-} from "lucide-react";
+import { Plus, Loader2, X, Mail, Upload, RefreshCw, Copy, Search, ChevronRight } from "lucide-react";
+import { Avatar, Empty, Notice, PageHeader, Panel, Status, Tabs, Tag, timeAgo, type Tone } from "@/components/nw";
 
 export const Route = createFileRoute("/app/users")({
   head: () => ({ meta: [{ title: "Team · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     const appAccess = context.appAccess;
-    requireSectionAccess(appAccess, [
-      "security_manager",
-      "client_admin",
-    ]);
+    requireSectionAccess(appAccess, ["security_manager", "client_admin"]);
     return { appAccess };
   },
   component: Users,
@@ -26,51 +21,41 @@ export const Route = createFileRoute("/app/users")({
 
 const ROLES = ["officer", "supervisor", "manager", "client_admin", "security_forensic_analyst"] as const;
 type Role = (typeof ROLES)[number];
-
-const statusTone: Record<string, string> = {
-  "on-duty": "text-resolved bg-resolved/10 border-resolved/30",
-  "off-duty": "text-muted-foreground bg-muted border-border",
-  "break": "text-medium bg-medium/10 border-medium/30",
+const ROLE_LABEL: Record<string, string> = {
+  officer: "Officer",
+  supervisor: "Supervisor",
+  manager: "Security manager",
+  client_admin: "Client admin",
+  security_forensic_analyst: "Forensic analyst",
+  lemtik_admin: "Lemtik admin",
+};
+const roleLabel = (r: string) => ROLE_LABEL[r] ?? r.replace(/_/g, " ");
+const DUTY: Record<string, { tone: Tone; label: string }> = {
+  "on-duty": { tone: "ok", label: "On duty" },
+  break: { tone: "warn", label: "On break" },
+  "off-duty": { tone: "off", label: "Off duty" },
 };
 
-function timeAgo(iso?: string | null) {
-  if (!iso) return "—";
-  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return "now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h} hr ago` : `${Math.floor(h / 24)} d ago`;
-}
-
-function roleLabel(r: string) {
-  return r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function buildInvitePassword(email: string) {
-  const local = email.split("@")[0] ?? "user";
-  const safe = local.replace(/[^a-zA-Z0-9]/g, "").toUpperCase() || "USER";
-  return `LEM-2026-${safe}`;
+/** A random initial password, generated in the browser so the manager can see and share it. */
+function randomPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let out = "";
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}-${out.slice(12, 16)}`;
 }
 
 function Users() {
   const { appAccess } = Route.useRouteContext();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isDetailRoute = pathname.startsWith("/app/users/") && pathname !== "/app/users";
-
-  if (isDetailRoute) {
-    return <Outlet />;
-  }
-
+  if (isDetailRoute) return <Outlet />;
   return <UsersList appAccess={appAccess} />;
 }
 
-// app.users.$id is a nested child route of this one, so without rendering
-// <Outlet /> somewhere, navigating to /app/users/$id updates the URL and
-// document title but the child route's component has nowhere to mount —
-// the list below just keeps rendering underneath it. Splitting the list into
-// its own component (mirroring app.incidents.tsx's IncidentsList) keeps that
-// branch above every hook the list uses, so switching between the two never
-// changes how many hooks this component calls on a given render.
+// app.users.$id is a nested child route of this one, so without rendering <Outlet /> somewhere,
+// navigating to /app/users/$id updates the URL but the child has nowhere to mount. Splitting the
+// list into its own component keeps that branch above every hook the list uses.
 function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteContext>["appAccess"] }) {
   const qc = useQueryClient();
   const list = useServerFn(listMembers);
@@ -78,579 +63,485 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
   const assign = useServerFn(updateMemberRole);
   const remove = useServerFn(removeMember);
   const lInv = useServerFn(listInvites);
-  const cInv = useServerFn(createInvite);
   const rInv = useServerFn(resendInvite);
   const xInv = useServerFn(cancelInvite);
-  const bInv = useServerFn(bulkInvite);
   const setActive = useServerFn(setUserActive);
 
-  const { data: members = [], isLoading, error: loadErr } = useQuery({
-    queryKey: ["org-members"], queryFn: () => list(),
-  });
-  const { data: invites = [] } = useQuery({
-    queryKey: ["org-invites"], queryFn: () => lInv(),
-  });
-  const { data: locations = [] } = useQuery({
-    queryKey: ["org-locations"], queryFn: () => listLoc(),
-  });
+  const { data: members = [], isLoading, error: loadErr } = useQuery({ queryKey: ["org-members"], queryFn: () => list() });
+  const { data: invites = [] } = useQuery({ queryKey: ["org-invites"], queryFn: () => lInv() });
+  const { data: locations = [] } = useQuery({ queryKey: ["org-locations"], queryFn: () => listLoc() });
 
   const [tab, setTab] = useState<"members" | "invites">("members");
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("officer");
-  const [bulkText, setBulkText] = useState("");
-  const [bulkMode, setBulkMode] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [assignedLocations, setAssignedLocations] = useState<string[]>([]);
-  const [invitePassword, setInvitePassword] = useState("");
-  const [inviteStep, setInviteStep] = useState<"details" | "password">("details");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [duty, setDuty] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["org-members"] });
     qc.invalidateQueries({ queryKey: ["org-invites"] });
   };
+  const onError = (e: Error) => toast.error(e.message || "That didn't save.");
 
-  const roleMut = useMutation({
-    mutationFn: (d: { member_id: string; role: Role }) => assign({ data: d }),
-    onSuccess: refresh,
-  });
-  const removeMut = useMutation({
-    mutationFn: (member_id: string) => remove({ data: { member_id } }),
-    onSuccess: refresh,
-  });
+  const roleMut = useMutation({ mutationFn: (d: { member_id: string; role: Role }) => assign({ data: d }), onSuccess: () => (toast.success("Role updated"), refresh()), onError });
+  const removeMut = useMutation({ mutationFn: (member_id: string) => remove({ data: { member_id } }), onSuccess: () => (toast.success("Removed from the organisation"), setRemoving(null), refresh()), onError });
   const activeMut = useMutation({
     mutationFn: (d: { user_id: string; is_active: boolean }) => setActive({ data: d }),
-    onSuccess: refresh,
+    onSuccess: (_r, v) => (toast.success(v.is_active ? "Reactivated" : "Deactivated"), refresh()),
+    onError,
   });
-  const inviteMut = useMutation({
-    mutationFn: (password: string) => cInv({ data: { email: email.trim(), role, assigned_location_ids: assignedLocations, password } }),
-    onSuccess: () => { setEmail(""); setAssignedLocations([]); setInviteOpen(false); setInviteStep("details"); setInvitePassword(""); refresh(); },
-  });
-  const bulkMut = useMutation({
-    mutationFn: () => {
-      const rows = bulkText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
-        const [em, ro] = l.split(",").map((s) => s.trim());
-        return { email: em, role: (ro as Role) || undefined };
-      });
-      return bInv({ data: { rows } });
-    },
-    onSuccess: () => { setBulkText(""); setBulkMode(false); setInviteOpen(false); refresh(); },
-  });
-  const resendMut = useMutation({
-    mutationFn: (id: string) => rInv({ data: { invite_id: id } }),
-    onSuccess: refresh,
-  });
-  const cancelMut = useMutation({
-    mutationFn: (id: string) => xInv({ data: { invite_id: id } }),
-    onSuccess: refresh,
-  });
+  const resendMut = useMutation({ mutationFn: (id: string) => rInv({ data: { invite_id: id } }), onSuccess: (r: any) => (r?.delivery_warning ? toast.warning(`Invite renewed, but the email wasn't sent: ${r.delivery_warning}`) : toast.success("Invite resent"), refresh()), onError });
+  const cancelMut = useMutation({ mutationFn: (id: string) => xInv({ data: { invite_id: id } }), onSuccess: () => (toast.success("Invite cancelled"), refresh()), onError });
 
-  const visibleMembers = members.filter((m: any) => showInactive || m.profile?.is_active !== false);
-  const pendingInvites = invites.filter((i: any) => i.status === "pending");
-  const filteredMembers = visibleMembers.filter((m: any) => {
+  const pendingInvites = (invites as any[]).filter((i) => i.status === "pending");
+  const active = (members as any[]).filter((m) => m.profile?.is_active !== false);
+  const onDuty = active.filter((m) => m.profile?.status === "on-duty").length;
+  const supervisorsOn = active.filter((m) => ["supervisor", "manager"].includes(m.role) && m.profile?.status === "on-duty").length;
+  const rows = (members as any[]).filter((m) => {
+    if (!showInactive && m.profile?.is_active === false) return false;
+    if (roleFilter !== "all" && m.role !== roleFilter) return false;
+    if (duty && (m.profile?.status ?? "off-duty") !== duty) return false;
     const q = search.trim().toLowerCase();
-    const matchesSearch = !q
-      || [m.profile?.display_name, m.email, m.profile?.phone, m.role, m.user_id]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(q));
-    const matchesRole = roleFilter === "all" || m.role === roleFilter;
-    const matchesStatus = statusFilter === "all" || (m.profile?.status ?? "off-duty") === statusFilter;
-    return matchesSearch && matchesRole && matchesStatus;
+    return !q || [m.profile?.display_name, m.email, m.profile?.phone, m.profile?.employee_id].filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
   });
-  const metrics = useMemo(() => {
-    const activeMembers = members.filter((m: any) => m.profile?.is_active !== false);
-    const onDuty = activeMembers.filter((m: any) => m.profile?.status === "on-duty").length;
-    const supervisors = activeMembers.filter((m: any) => ["supervisor", "manager", "client_admin", "lemtik_admin"].includes(m.role)).length;
-    const inactive = members.length - activeMembers.length;
-    const recentlySeen = activeMembers.filter((m: any) => {
-      const stamp = m.profile?.last_seen_at || m.profile?.updated_at;
-      return stamp && Date.now() - new Date(stamp).getTime() <= 24 * 3600_000;
-    }).length;
-    const dutyRate = activeMembers.length ? Math.round((onDuty / activeMembers.length) * 100) : 0;
-    return { activeMembers, onDuty, supervisors, inactive, recentlySeen, dutyRate };
-  }, [members]);
   const canEditRoles = appAccess.dbRole === "manager";
   const editableRoles: Role[] = ["officer", "supervisor", "security_forensic_analyst"];
-  const canEditMemberRole = (member: any) => canEditRoles && member.user_id !== appAccess.userId && member.role !== "client_admin";
+  const canEditMemberRole = (m: any) => canEditRoles && m.user_id !== appAccess.userId && m.role !== "client_admin";
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Users & Access</div>
-          <h1 className="mt-1 text-2xl font-semibold">Team management</h1>
-          <p className="text-sm text-muted-foreground">{members.length} member{members.length === 1 ? "" : "s"} · {pendingInvites.length} pending invite{pendingInvites.length === 1 ? "" : "s"}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show inactive
-          </label>
-          <button
-            onClick={() => {
-              setInviteStep("details");
-              setInvitePassword("");
-              setInviteOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-3.5 w-3.5" /> Invite user
-          </button>
-        </div>
-      </div>
+    <div className="col g16">
+      <PageHeader title="Team" sub={`${active.length} people · ${onDuty} on duty now · ${supervisorsOn} supervisor${supervisorsOn === 1 ? "" : "s"} on shift`}>
+        <button type="button" className="b b-pri" onClick={() => setInviteOpen(true)}>
+          <Plus className="h-4 w-4" /> Invite
+        </button>
+      </PageHeader>
 
-      <div className="flex items-center gap-1 border-b border-border">
-        {(["members", "invites"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            {t === "members" ? "Members" : `Invites${pendingInvites.length ? ` (${pendingInvites.length})` : ""}`}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        label="Team views"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: "members", label: "People", count: active.length },
+          { value: "invites", label: "Invites", count: pendingInvites.length },
+        ]}
+      />
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name or email"
-          className="w-72 rounded-md border border-border bg-surface px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-ring"
-        />
-        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-          <option value="all">All roles</option>
-          {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-        </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-xs">
-          <option value="all">All statuses</option>
-          <option value="on-duty">On duty</option>
-          <option value="off-duty">Off duty</option>
-          <option value="break">Break</option>
-        </select>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Metric label="Team size" value={metrics.activeMembers.length.toString()} icon={UsersIcon} />
-        <Metric label="On duty" value={metrics.onDuty.toString()} icon={Activity} tone="resolved" />
-        <Metric label="Supervisor coverage" value={metrics.supervisors.toString()} icon={ShieldCheck} />
-        <Metric label="Inactive" value={metrics.inactive.toString()} icon={ShieldAlert} tone="critical" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.9fr] gap-4">
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Live staffing</div>
-              <h2 className="text-sm font-semibold">Duty coverage</h2>
-            </div>
-            <span className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              24h
-            </span>
-          </div>
-          <div className="mt-4 h-28 rounded-lg border border-border bg-surface p-3">
-            <div className="flex h-full items-end gap-2">
-              <div className="flex-1">
-                <div className="rounded-t bg-resolved/80" style={{ height: `${Math.max(18, metrics.dutyRate)}%` }} />
-                <div className="mt-1 text-[10px] text-center text-muted-foreground">On duty</div>
-              </div>
-              <div className="flex-1">
-                <div className="rounded-t bg-critical/70" style={{ height: `${Math.max(10, metrics.inactive * 12)}%` }} />
-                <div className="mt-1 text-[10px] text-center text-muted-foreground">Inactive</div>
-              </div>
-              <div className="flex-1">
-                <div className="rounded-t bg-primary/70" style={{ height: `${Math.max(18, metrics.recentlySeen * 5)}%` }} />
-                <div className="mt-1 text-[10px] text-center text-muted-foreground">Seen 24h</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Access health</div>
-            <h3 className="text-sm font-semibold">Invitation pipeline</h3>
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {pendingInvites.length} pending invite{pendingInvites.length === 1 ? "" : "s"} awaiting approval.
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {metrics.supervisors} supervisory roles currently active.
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            Duty coverage: {metrics.dutyRate}% of active personnel.
-          </div>
-        </div>
-      </div>
-
-      {loadErr && (
-        <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">
-          {(loadErr as Error).message}
-        </div>
-      )}
+      {loadErr && <Notice tone="fail">{(loadErr as Error).message}</Notice>}
 
       {tab === "members" && (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <section className="pn">
+          <div className="row g8 wrap" style={{ padding: "12px 14px" }}>
+            <label className="in row g8" style={{ width: 260 }}>
+              <Search className="h-4 w-4 t3" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or email" aria-label="Search people" className="f1" style={{ background: "transparent", border: 0, outline: "none", color: "inherit", minWidth: 0 }} />
+            </label>
+            <select className="in" style={{ width: "auto" }} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Role">
+              <option value="all">Role: all</option>
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {roleLabel(r)}
+                </option>
+              ))}
+            </select>
+            {Object.entries(DUTY).map(([k, v]) => (
+              <button key={k} type="button" className={`chip${duty === k ? " on" : ""}`} aria-pressed={duty === k} onClick={() => setDuty((d) => (d === k ? null : k))}>
+                {v.label}
+              </button>
+            ))}
+            <span className="flex-auto" />
+            <button type="button" className="b b-sm b-gh" aria-pressed={showInactive} onClick={() => setShowInactive((v) => !v)}>
+              {showInactive ? "Hide deactivated" : "Show deactivated"}
+            </button>
+          </div>
           {isLoading ? (
-            <div className="p-10 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading members…
-            </div>
+            <Empty>
+              <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading people…
+            </Empty>
+          ) : rows.length === 0 ? (
+            <Empty>{(members as any[]).length ? "Nobody matches these filters." : "No one has joined yet. Invite your team to get started."}</Empty>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="text-left px-4 py-3 font-medium">Member</th>
-                  <th className="text-left px-4 py-3 font-medium">Email</th>
-                  <th className="text-left px-4 py-3 font-medium">Phone</th>
-                  <th className="text-left px-4 py-3 font-medium">Role</th>
-                  <th className="text-left px-4 py-3 font-medium">Status</th>
-                  <th className="text-left px-4 py-3 font-medium">Last seen</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filteredMembers.map((m: any) => {
-                  const name = m.profile?.display_name || "Operator";
-                  const isActive = m.profile?.is_active !== false;
-                  return (
-                    <tr key={m.id} className={`hover:bg-surface/60 ${isActive ? "" : "opacity-60"}`}>
-                      <td className="px-4 py-3">
-                        <Link to="/app/users/$id" params={{ id: m.user_id }} className="flex items-center gap-3 group">
-                          <div className="grid h-8 w-8 place-items-center rounded-full bg-primary/15 border border-primary/40 text-[10px] font-bold text-primary">
-                            {name.split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="font-medium group-hover:underline">{name}</div>
-                            <div className="text-[10px] font-mono text-muted-foreground">{m.profile?.employee_id || m.user_id.slice(0, 8)}</div>
-                          </div>
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{m.email ?? "—"}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{m.profile?.phone ?? "—"}</td>
-                      <td className="px-4 py-3 text-xs">
-                        <div className="inline-flex items-center gap-2">
-                          <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+            <div className="scroll">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Phone</th>
+                    <th>Last seen</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((m: any) => {
+                    const name = m.profile?.display_name || m.email || "Unnamed";
+                    const isActive = m.profile?.is_active !== false;
+                    const st = DUTY[m.profile?.status ?? "off-duty"] ?? DUTY["off-duty"];
+                    const seen = m.profile?.last_seen_at || null;
+                    return (
+                      <tr key={m.id} style={{ opacity: isActive ? 1 : 0.6 }}>
+                        <td>
+                          <Link to="/app/users/$id" params={{ id: m.user_id }} className="row g10">
+                            <Avatar name={name} size="lg" own={m.user_id === appAccess.userId} />
+                            <span className="col">
+                              <b>{name}</b>
+                              <span className="t3">{m.email ?? m.profile?.employee_id ?? ""}</span>
+                            </span>
+                          </Link>
+                        </td>
+                        <td>
                           {canEditMemberRole(m) ? (
-                            <select
-                              value={m.role}
-                              disabled={roleMut.isPending}
-                              onChange={(e) => roleMut.mutate({ member_id: m.id, role: e.target.value as Role })}
-                              className="rounded-md border border-border bg-surface px-2 py-1 text-xs"
-                            >
-                              {editableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                            <select className="in" style={{ width: "auto", height: 30 }} value={m.role} disabled={roleMut.isPending} aria-label={`Role for ${name}`} onChange={(e) => roleMut.mutate({ member_id: m.id, role: e.target.value as Role })}>
+                              {Array.from(new Set([...editableRoles, m.role])).map((r) => (
+                                <option key={r} value={r}>
+                                  {roleLabel(r)}
+                                </option>
+                              ))}
                             </select>
                           ) : (
-                            <span className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-muted-foreground">
-                              {roleLabel(m.role)}
-                            </span>
+                            roleLabel(m.role)
                           )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        {!isActive ? (
-                          <span className="inline-flex rounded-md border border-critical/30 bg-critical/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-critical">
-                            Deactivated
+                        </td>
+                        <td>{isActive ? <Status tone={st.tone}>{st.label}</Status> : <Tag>Deactivated</Tag>}</td>
+                        <td className="mono t2">{m.profile?.phone ?? "—"}</td>
+                        <td className="mono t2">{seen ? timeAgo(seen) : "—"}</td>
+                        <td>
+                          <span className="row g6" style={{ justifyContent: "flex-end" }}>
+                            {m.user_id !== appAccess.userId && (
+                              <>
+                                <button type="button" className="b b-sm b-gh" disabled={activeMut.isPending} onClick={() => activeMut.mutate({ user_id: m.user_id, is_active: !isActive })}>
+                                  {isActive ? "Deactivate" : "Reactivate"}
+                                </button>
+                                <button type="button" className="b b-sm b-gh" onClick={() => setRemoving({ id: m.id, name })}>
+                                  Remove
+                                </button>
+                              </>
+                            )}
+                            <Link to="/app/users/$id" params={{ id: m.user_id }} className="ibtn" style={{ width: 28, height: 28 }} aria-label={`Open ${name}`}>
+                              <ChevronRight size={14} />
+                            </Link>
                           </span>
-                        ) : (
-                          <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider ${statusTone[m.profile?.status ?? "off-duty"] ?? statusTone["off-duty"]}`}>
-                            {m.profile?.status ?? "—"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">{timeAgo(m.profile?.last_seen_at || m.profile?.updated_at)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            onClick={() => activeMut.mutate({ user_id: m.user_id, is_active: !isActive })}
-                            disabled={activeMut.isPending}
-                            title={isActive ? "Deactivate" : "Reactivate"}
-                            className={`p-1 rounded ${isActive ? "text-muted-foreground hover:text-high" : "text-resolved hover:text-resolved/80"}`}
-                          >
-                            {isActive ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
-                          </button>
-                          <Link to="/app/users/$id" params={{ id: m.user_id }} className="p-1 text-muted-foreground hover:text-foreground" title="View profile">
-                            <ChevronRight className="h-4 w-4" />
-                          </Link>
-                          <button
-                            onClick={() => { if (confirm(`Remove ${name} from organisation?`)) removeMut.mutate(m.id); }}
-                            disabled={removeMut.isPending}
-                            className="p-1 text-muted-foreground hover:text-critical"
-                            title="Remove"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filteredMembers.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">No members.</td></tr>
-                )}
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
+        </section>
       )}
 
       {tab === "invites" && (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium">Email</th>
-                <th className="text-left px-4 py-3 font-medium">Role</th>
-                <th className="text-left px-4 py-3 font-medium">Status</th>
-                <th className="text-left px-4 py-3 font-medium">Expires</th>
-                <th className="text-left px-4 py-3 font-medium">Sent</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {invites.map((inv: any) => {
-                const expired = new Date(inv.expires_at).getTime() < Date.now();
-                const effStatus = inv.status === "pending" && expired ? "expired" : inv.status;
-                return (
-                  <tr key={inv.id}>
-                    <td className="px-4 py-3"><div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {inv.email}</div></td>
-                    <td className="px-4 py-3 text-xs">{roleLabel(inv.role)}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider ${
-                        effStatus === "pending" ? "text-primary bg-primary/10 border-primary/30" :
-                        effStatus === "accepted" ? "text-resolved bg-resolved/10 border-resolved/30" :
-                        effStatus === "expired" ? "text-high bg-high/10 border-high/30" :
-                        "text-muted-foreground bg-muted border-border"
-                      }`}>{effStatus}</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{new Date(inv.expires_at).toLocaleString("en-GB")}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">{timeAgo(inv.created_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      {inv.status === "pending" && (
-                        <div className="inline-flex items-center gap-1">
-                          <button onClick={() => resendMut.mutate(inv.id)} disabled={resendMut.isPending} className="p-1 text-muted-foreground hover:text-primary" title="Resend">
-                            <RefreshCw className="h-4 w-4" />
-                          </button>
-                          <button onClick={() => cancelMut.mutate(inv.id)} disabled={cancelMut.isPending} className="p-1 text-muted-foreground hover:text-critical" title="Cancel">
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-                    </td>
+        <Panel title="Invites" meta={`${pendingInvites.length} pending`} bodyClassName="">
+          {(invites as any[]).length === 0 ? (
+            <Empty>No invites yet.</Empty>
+          ) : (
+            <div className="scroll">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Sent</th>
+                    <th>Expires</th>
+                    <th />
                   </tr>
-                );
-              })}
-              {invites.length === 0 && (
-                <tr><td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">No invites yet. Click <strong>Invite user</strong> to add someone.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {(invites as any[]).map((inv) => {
+                    const expired = new Date(inv.expires_at).getTime() < Date.now();
+                    const eff = inv.status === "pending" && expired ? "expired" : inv.status;
+                    const tone: Tone = eff === "pending" ? "blue" : eff === "accepted" ? "ok" : eff === "expired" ? "warn" : "off";
+                    return (
+                      <tr key={inv.id}>
+                        <td className="mono">{inv.email}</td>
+                        <td>{roleLabel(inv.role)}</td>
+                        <td>
+                          <Status tone={tone}>{eff}</Status>
+                        </td>
+                        <td className="t2">{timeAgo(inv.created_at)}</td>
+                        <td className="t2">{new Date(inv.expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</td>
+                        <td>
+                          {inv.status === "pending" && (
+                            <span className="row g6" style={{ justifyContent: "flex-end" }}>
+                              <button type="button" className="b b-sm b-gh" disabled={resendMut.isPending} onClick={() => resendMut.mutate(inv.id)}>
+                                <RefreshCw className="h-3.5 w-3.5" /> Resend
+                              </button>
+                              <button type="button" className="b b-sm b-gh" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate(inv.id)}>
+                                Cancel
+                              </button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Panel>
       )}
 
-      {(roleMut.error || removeMut.error || activeMut.error || inviteMut.error || bulkMut.error) && (
-        <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">
-          {((roleMut.error || removeMut.error || activeMut.error || inviteMut.error || bulkMut.error) as Error).message}
-        </div>
-      )}
+      {inviteOpen && <InviteDialog locations={locations as any[]} onClose={() => setInviteOpen(false)} onDone={refresh} />}
 
-      {/* Invite dialog */}
-      {inviteOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4"
-          onClick={() => {
-            setInviteOpen(false);
-            setInviteStep("details");
-            setInvitePassword("");
-          }}
-        >
-          <div className="w-full max-w-lg rounded-lg border border-border bg-card p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold">{bulkMode ? "Bulk invite" : inviteStep === "password" ? "Set invitation password" : "Invite a user"}</div>
-                <div className="text-[11px] text-muted-foreground">
-                  {bulkMode
-                    ? "Provision users with password-based sign-in and email notice."
-                    : inviteStep === "password"
-                      ? "Use the default password pattern or set a custom one before provisioning."
-                      : "Creates the user in Supabase, then sends a Resend notification. No magic link."}
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setInviteOpen(false);
-                  setInviteStep("details");
-                  setInvitePassword("");
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
+      {removing && (
+        <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}>
+          <div className="col g12">
+            <p className="t2" style={{ margin: 0 }}>
+              They lose access to this organisation straight away. Their past reports and check-ins stay in the record.
+            </p>
+            <div className="row g8" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="b b-gh" onClick={() => setRemoving(null)}>
+                Keep
+              </button>
+              <button type="button" className="b b-red" disabled={removeMut.isPending} onClick={() => removeMut.mutate(removing.id)}>
+                {removeMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Remove
               </button>
             </div>
-
-            <div className="flex items-center gap-2 text-xs">
-              <button onClick={() => setBulkMode(false)} className={`px-2 py-1 rounded ${!bulkMode ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Single</button>
-              <button onClick={() => setBulkMode(true)} className={`px-2 py-1 rounded ${bulkMode ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>Bulk CSV</button>
-            </div>
-
-            {!bulkMode ? (
-              inviteStep === "details" ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const defaultPassword = buildInvitePassword(email);
-                    setInvitePassword(defaultPassword);
-                    setInviteStep("password");
-                  }}
-                  className="space-y-3"
-                >
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Email address</label>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => {
-                        const nextEmail = e.target.value;
-                        const nextDefault = buildInvitePassword(nextEmail);
-                        if (!invitePassword || invitePassword === buildInvitePassword(email)) {
-                          setInvitePassword(nextDefault);
-                        }
-                        setEmail(nextEmail);
-                      }}
-                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
-                      placeholder="name@example.com"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Role</label>
-                    <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm">
-                      {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Assigned locations</label>
-                    <div className="max-h-40 space-y-1 overflow-auto rounded-md border border-border bg-surface p-2 text-xs">
-                      {locations.length === 0 ? (
-                        <div className="px-1 py-2 text-muted-foreground">No locations configured yet.</div>
-                      ) : locations.map((location: any) => (
-                        <label key={location.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-background">
-                          <input
-                            type="checkbox"
-                            checked={assignedLocations.includes(location.id)}
-                            onChange={(e) => {
-                              setAssignedLocations((current) =>
-                                e.target.checked ? [...current, location.id] : current.filter((id) => id !== location.id),
-                              );
-                            }}
-                          />
-                          <span className="font-medium">{location.name}</span>
-                          <span className="text-muted-foreground">{location.address ?? ""}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!email.trim()}
-                    className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                    Next: set password
-                  </button>
-                </form>
-              ) : (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    inviteMut.mutate(invitePassword || buildInvitePassword(email));
-                  }}
-                  className="space-y-3"
-                >
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Initial password</label>
-                    <input
-                      type="text"
-                      required
-                      value={invitePassword}
-                      onChange={(e) => setInvitePassword(e.target.value)}
-                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm font-mono"
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      Default pattern: <span className="font-mono text-foreground">{buildInvitePassword(email)}</span>
-                    </p>
-                  </div>
-                  <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-                    {email} · {roleLabel(role)} · {assignedLocations.length} assigned location{assignedLocations.length === 1 ? "" : "s"}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setInviteStep("details")}
-                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-surface/70"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={inviteMut.isPending || !invitePassword.trim()}
-                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    >
-                      {inviteMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
-                      Send invitation
-                    </button>
-                  </div>
-                </form>
-              )
-            ) : (
-              <form onSubmit={(e) => { e.preventDefault(); bulkMut.mutate(); }} className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">CSV — one per line, "email,role" (role optional)</label>
-                  <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} required rows={8}
-                    placeholder={"jane@org.com,officer\njohn@org.com,supervisor"}
-                    className="w-full rounded-md border border-border bg-surface px-3 py-2 text-xs font-mono" />
-                </div>
-                <button type="submit" disabled={bulkMut.isPending || !bulkText.trim()}
-                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-                  {bulkMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  Send invites
-                </button>
-                {bulkMut.data?.results && (
-                  <div className="text-[11px] space-y-0.5 max-h-32 overflow-auto">
-                    {bulkMut.data.results.map((r, i) => (
-                      <div key={i} className={r.ok ? "text-resolved" : "text-critical"}>{r.ok ? "✓" : "✗"} {r.email}{r.error ? ` — ${r.error}` : ""}</div>
-                    ))}
-                  </div>
-                )}
-              </form>
-            )}
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
 }
 
-function Metric({ label, value, icon: Icon, tone = "muted" }: {
-  label: string;
-  value: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: "muted" | "critical" | "resolved";
-}) {
-  const toneClass = tone === "critical"
-    ? "text-critical bg-critical/10 border-critical/30"
-    : tone === "resolved"
-      ? "text-resolved bg-resolved/10 border-resolved/30"
-      : "text-muted-foreground bg-surface border-border";
+function Modal({ title, onClose, children, width = 480 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={`grid h-7 w-7 place-items-center rounded-md border ${toneClass}`}>
-          <Icon className="h-3.5 w-3.5" />
+    <div className="fixed inset-0 z-50 grid place-items-center px-4" style={{ background: "rgba(5,7,10,.72)" }} role="dialog" aria-modal="true" aria-label={title}>
+      <div className="pn w-full" style={{ maxWidth: width, borderColor: "var(--line-2)", maxHeight: "90vh", overflow: "auto" }}>
+        <div className="pn-h">
+          <h3 style={{ fontSize: 15 }}>{title}</h3>
+          <button type="button" onClick={onClose} className="ibtn ml-auto" style={{ width: 28, height: 28 }} aria-label="Close">
+            <X size={14} />
+          </button>
         </div>
+        <div className="pn-b">{children}</div>
       </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
     </div>
+  );
+}
+
+function CopyLine({ value }: { value: string }) {
+  return (
+    <span className="row g8">
+      <code className="mono" style={{ fontSize: 13, padding: "4px 8px", background: "var(--ink-2)", borderRadius: 6, border: "1px solid var(--line-2)" }}>
+        {value}
+      </code>
+      <button
+        type="button"
+        className="ibtn"
+        style={{ width: 28, height: 28 }}
+        aria-label="Copy password"
+        onClick={() =>
+          navigator.clipboard.writeText(value).then(
+            () => toast.success("Copied"),
+            () => toast.error("Couldn't copy. Select it and copy by hand."),
+          )
+        }
+      >
+        <Copy size={13} />
+      </button>
+    </span>
+  );
+}
+
+function InviteDialog({ locations, onClose, onDone }: { locations: any[]; onClose: () => void; onDone: () => void }) {
+  const cInv = useServerFn(createInvite);
+  const bInv = useServerFn(bulkInvite);
+  const [mode, setMode] = useState<"single" | "bulk">("single");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<Role>("officer");
+  const [assigned, setAssigned] = useState<string[]>([]);
+  const [password, setPassword] = useState(() => randomPassword());
+  const [bulkText, setBulkText] = useState("");
+  const [done, setDone] = useState<null | { kind: "single"; email: string; existing: boolean; warning: string | null; password: string } | { kind: "bulk"; results: Array<{ email: string; ok: boolean; error?: string; existing_account?: boolean; password?: string | null }> }>(null);
+
+  const single = useMutation({
+    mutationFn: () => cInv({ data: { email: email.trim(), role, assigned_location_ids: assigned, password } }),
+    onSuccess: (r: any) => {
+      setDone({ kind: "single", email: email.trim(), existing: !!r?.existing_account, warning: r?.delivery_warning ?? null, password });
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message || "The invite didn't go through."),
+  });
+  const bulk = useMutation({
+    mutationFn: () => {
+      const rows = bulkText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => {
+          const [em, ro] = l.split(",").map((s) => s.trim());
+          return { email: em, role: (ROLES as readonly string[]).includes(ro) ? (ro as Role) : undefined };
+        });
+      return bInv({ data: { rows } });
+    },
+    onSuccess: (r: any) => {
+      setDone({ kind: "bulk", results: r?.results ?? [] });
+      onDone();
+    },
+    onError: (e: Error) => toast.error(e.message || "The invites didn't go through."),
+  });
+
+  if (done?.kind === "single") {
+    return (
+      <Modal title="Invite sent" onClose={onClose}>
+        <div className="col g12">
+          {done.existing ? (
+            <Notice tone="blue">{done.email} already has a Lemtik login. They'll join with their existing password; nothing about their account was changed.</Notice>
+          ) : (
+            <>
+              <span className="t2">
+                A login was created for <b>{done.email}</b>. Share this initial password with them privately. It isn't shown again.
+              </span>
+              <CopyLine value={done.password} />
+            </>
+          )}
+          {done.warning && <Notice tone="warn">The invitation email wasn't sent: {done.warning}</Notice>}
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="b b-pri" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (done?.kind === "bulk") {
+    return (
+      <Modal title="Invites processed" onClose={onClose} width={620}>
+        <div className="col g12">
+          <span className="t2">Share each new password privately. They aren't shown again.</span>
+          <div className="scroll" style={{ maxHeight: 360 }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Result</th>
+                  <th>Initial password</th>
+                </tr>
+              </thead>
+              <tbody>
+                {done.results.map((r) => (
+                  <tr key={r.email}>
+                    <td className="mono">{r.email}</td>
+                    <td>{!r.ok ? <Tag tone="fail">{r.error ?? "Failed"}</Tag> : r.existing_account ? <Tag tone="blue">Existing login</Tag> : r.error ? <Tag tone="warn">Email not sent</Tag> : <Tag tone="ok">Invited</Tag>}</td>
+                    <td>{r.password ? <CopyLine value={r.password} /> : <span className="t3">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="b b-pri" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Invite people" onClose={onClose} width={540}>
+      <div className="col g12">
+        <div className="seg" role="group" aria-label="Invite mode" style={{ alignSelf: "flex-start" }}>
+          <button type="button" className={mode === "single" ? "on" : undefined} onClick={() => setMode("single")}>
+            One person
+          </button>
+          <button type="button" className={mode === "bulk" ? "on" : undefined} onClick={() => setMode("bulk")}>
+            Several (CSV)
+          </button>
+        </div>
+        {mode === "single" ? (
+          <form
+            className="col g12"
+            onSubmit={(e) => {
+              e.preventDefault();
+              single.mutate();
+            }}
+          >
+            <label className="fl">
+              <span className="lbl">Email</span>
+              <input className="in" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
+            </label>
+            <label className="fl">
+              <span className="lbl">Role</span>
+              <select className="in" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {roleLabel(r)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {locations.length > 0 && (
+              <div className="fl">
+                <span className="lbl">Locations they cover</span>
+                <div className="row g6 wrap">
+                  {locations.map((l) => (
+                    <button key={l.id} type="button" className={`chip${assigned.includes(l.id) ? " on" : ""}`} aria-pressed={assigned.includes(l.id)} onClick={() => setAssigned((a) => (a.includes(l.id) ? a.filter((x) => x !== l.id) : [...a, l.id]))}>
+                      {l.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <label className="fl">
+              <span className="lbl">Initial password (used only if they don't already have a login)</span>
+              <span className="row g8">
+                <input className="in mono f1" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+                <button type="button" className="b b-sm b-gh" onClick={() => setPassword(randomPassword())}>
+                  New
+                </button>
+              </span>
+            </label>
+            <div className="row g8" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="b b-gh" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="b b-pri" disabled={single.isPending || !email.trim() || password.length < 8}>
+                {single.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />} Send invite
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form
+            className="col g12"
+            onSubmit={(e) => {
+              e.preventDefault();
+              bulk.mutate();
+            }}
+          >
+            <label className="fl">
+              <span className="lbl">One per line: email, role (role optional, defaults to officer)</span>
+              <textarea className="in mono" required rows={8} value={bulkText} onChange={(e) => setBulkText(e.target.value)} placeholder={"jane@example.com,officer\njohn@example.com,supervisor"} style={{ height: "auto", paddingTop: 8 }} />
+            </label>
+            <span className="t3" style={{ fontSize: 12 }}>
+              Each new login gets its own random password, shown once on the next screen.
+            </span>
+            <div className="row g8" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="b b-gh" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className="b b-pri" disabled={bulk.isPending || !bulkText.trim()}>
+                {bulk.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Send invites
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </Modal>
   );
 }
