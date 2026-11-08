@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   getActiveOrg, updateOrganisation,
@@ -11,7 +11,8 @@ import {
 } from "@/lib/orgs.functions";
 import { issueConsumerSession } from "@/lib/consumer.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import { Loader2, Save, Plus, X, Building2, Activity, ShieldAlert, Mail, MapPin, Layers } from "lucide-react";
+import { Loader2, Save, Plus, X, MapPin } from "lucide-react";
+import { Empty, Notice, PageHeader, Panel, Tabs, Tag } from "@/components/nw";
 
 export const Route = createFileRoute("/app/org")({
   head: () => ({ meta: [{ title: "Organisation · Lemtik SOD" }] }),
@@ -40,13 +41,6 @@ function OrgSettings() {
   const { data: locations = [] } = useQuery({ queryKey: ["org-locations"], queryFn: () => listLoc() });
   const { data: settings } = useQuery({ queryKey: ["org-settings"], queryFn: () => getSet() });
   const [activeTab, setActiveTab] = useState<"profile" | "locations" | "alerts" | "thresholds" | "devices" | "integrations" | "subscription">("profile");
-  const health = useMemo(() => {
-    const configuredContacts = contacts.length;
-    const alertsConfigured = (settings?.whatsapp_alert_numbers ?? []).length + (settings?.default_incident_categories ?? []).length;
-    const webhookOn = !!settings?.webhook_url;
-    const completeness = Math.min(100, configuredContacts * 18 + alertsConfigured * 8 + (webhookOn ? 20 : 0));
-    return { configuredContacts, alertsConfigured, webhookOn, completeness };
-  }, [contacts, settings]);
 
   const [profile, setProfile] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -169,378 +163,323 @@ function OrgSettings() {
   });
 
   if (isLoading) {
-    return <div className="p-10 text-center text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin inline mr-2" />Loading…</div>;
+    return (
+      <Panel>
+        <Empty>
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
+        </Empty>
+      </Panel>
+    );
   }
 
   if (!org) {
-    return <div className="p-6 text-sm text-muted-foreground">No active organisation.</div>;
+    return (
+      <Panel>
+        <Empty>No active organisation.</Empty>
+      </Panel>
+    );
   }
 
+  const settingsTabs = ["alerts", "thresholds", "devices", "integrations"] as const;
+  const onSettingsTab = (settingsTabs as readonly string[]).includes(activeTab);
+  const devicesJsonError = devicesJsonProblem(devicesForm);
+  const typeLabel: Record<string, string> = { estate: "Estate", corporate: "Corporate", hotel: "Hotel", government: "Government" };
+
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="flex items-center gap-3">
-        <Building2 className="h-5 w-5 text-primary" />
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Organisation</div>
-          <h1 className="text-2xl font-semibold">{org.name}</h1>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Metric label="Contacts" value={health.configuredContacts.toString()} icon={Mail} />
-        <Metric label="Alert rules" value={health.alertsConfigured.toString()} icon={Activity} tone="resolved" />
-        <Metric label="Webhook" value={health.webhookOn ? "armed" : "off"} icon={ShieldAlert} tone={health.webhookOn ? "resolved" : "critical"} />
-        <Metric label="Health score" value={`${health.completeness}%`} icon={Building2} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.9fr] gap-4">
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Configuration health</div>
-              <h2 className="text-sm font-semibold">Organisation readiness</h2>
-            </div>
-            <span className="rounded-md border border-border bg-surface px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              {health.completeness}%
-            </span>
-          </div>
-          <div className="mt-4 h-28 rounded-lg border border-border bg-surface p-3">
-            <div className="flex h-full items-end gap-2">
-              <div className="flex-1">
-                <div className="rounded-t bg-resolved/80" style={{ height: `${Math.max(10, health.configuredContacts * 16)}%` }} />
-                <div className="mt-1 text-[10px] text-center text-muted-foreground">Contacts</div>
-              </div>
-              <div className="flex-1">
-                <div className="rounded-t bg-primary/70" style={{ height: `${Math.max(10, health.alertsConfigured * 8)}%` }} />
-                <div className="mt-1 text-[10px] text-center text-muted-foreground">Rules</div>
-              </div>
-              <div className="flex-1">
-                <div className="rounded-t bg-critical/70" style={{ height: `${health.webhookOn ? 78 : 18}%` }} />
-                <div className="mt-1 text-[10px] text-center text-muted-foreground">Webhook</div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Readiness notes</div>
-            <h3 className="text-sm font-semibold">Live profile checks</h3>
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {health.configuredContacts} emergency contact{health.configuredContacts === 1 ? "" : "s"} configured.
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {settings?.report_delivery_schedule ? `Reports scheduled: ${settings.report_delivery_schedule}.` : "No report delivery schedule set."}
-          </div>
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            {health.webhookOn ? "Webhook integration is live." : "Webhook integration is currently disabled."}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2 rounded-lg border border-border bg-card p-2">
-        {([
-          ["profile", "Organisation Profile"],
-          ["locations", "Locations"],
-          ["alerts", "Alert Configuration"],
-          ["thresholds", "Thresholds"],
-          ["devices", "Autonomy & Devices"],
-          ["integrations", "Integrations"],
-          ["subscription", "Subscription"],
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveTab(key)}
-            className={`rounded-md px-3 py-2 text-xs font-medium ${activeTab === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            {label}
+    <div className="col g16">
+      <PageHeader title="Organisation" sub={`${org.name} · ${typeLabel[org.type] ?? org.type}${org.address ? ` · ${org.address}` : ""} · plan: ${org.subscription_tier ?? "—"}`}>
+        {activeTab === "profile" && (
+          <button type="button" className="b b-pri" onClick={() => orgMut.mutate()} disabled={orgMut.isPending}>
+            {orgMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save profile
           </button>
-        ))}
-      </div>
+        )}
+        {onSettingsTab && (
+          <button type="button" className="b b-pri" onClick={() => setMut.mutate()} disabled={setMut.isPending || !!devicesJsonError} title={devicesJsonError ?? undefined}>
+            {setMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save changes
+          </button>
+        )}
+      </PageHeader>
+
+      <Tabs
+        label="Organisation settings"
+        value={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { value: "profile", label: "Profile" },
+          { value: "locations", label: "Sites & guest access", count: locations.length },
+          { value: "alerts", label: "Alerts" },
+          { value: "thresholds", label: "Thresholds" },
+          { value: "devices", label: "AI & automation" },
+          { value: "integrations", label: "Integrations" },
+          { value: "subscription", label: "Subscription" },
+        ]}
+      />
 
       {activeTab === "profile" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Profile</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Name" value={profile.name ?? ""} onChange={(v) => setProfile((p) => ({ ...p, name: v }))} />
-          <SelectField label="Type" value={profile.type ?? ""} onChange={(v) => setProfile((p) => ({ ...p, type: v }))}
-            options={[["estate","Estate"],["corporate","Corporate"],["hotel","Hotel"],["government","Government"]]} />
-          <Field label="Primary address" value={profile.address ?? ""} onChange={(v) => setProfile((p) => ({ ...p, address: v }))} className="col-span-2" />
-          <Field label="Logo URL" value={profile.logo_url ?? ""} onChange={(v) => setProfile((p) => ({ ...p, logo_url: v }))} className="col-span-2" />
-          <div className="col-span-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            Subscription: <span className="font-medium text-foreground">{org.subscription_tier}</span> · <span className="font-medium text-foreground">{org.subscription_status}</span>
-            <span className="ml-2 opacity-70">(managed by billing — contact support to change)</span>
-          </div>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]" style={{ alignItems: "start" }}>
+          <Panel title="Profile">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Name" value={profile.name ?? ""} onChange={(v) => setProfile((p) => ({ ...p, name: v }))} />
+              <label className="fl">
+                <span className="lbl">Type</span>
+                <select className="in" value={profile.type ?? ""} onChange={(e) => setProfile((p) => ({ ...p, type: e.target.value }))}>
+                  {Object.entries(typeLabel).map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Field label="Primary address" value={profile.address ?? ""} onChange={(v) => setProfile((p) => ({ ...p, address: v }))} className="sm:col-span-2" />
+              <Field label="Logo URL" value={profile.logo_url ?? ""} onChange={(v) => setProfile((p) => ({ ...p, logo_url: v }))} className="sm:col-span-2" mono />
+              <Field label="Billing contact name" value={profile.billing_contact_name ?? ""} onChange={(v) => setProfile((p) => ({ ...p, billing_contact_name: v }))} />
+              <Field label="Billing email" value={profile.billing_contact_email ?? ""} onChange={(v) => setProfile((p) => ({ ...p, billing_contact_email: v }))} />
+              <Field label="Billing phone" value={profile.billing_contact_phone ?? ""} onChange={(v) => setProfile((p) => ({ ...p, billing_contact_phone: v }))} mono />
+              <div />
+              <ColorField label="Brand primary" value={profile.brand_primary_color ?? "#3b82f6"} onChange={(v) => setProfile((p) => ({ ...p, brand_primary_color: v }))} />
+              <ColorField label="Brand secondary" value={profile.brand_secondary_color ?? "#10b981"} onChange={(v) => setProfile((p) => ({ ...p, brand_secondary_color: v }))} />
+            </div>
+            {orgMut.error && (
+              <div style={{ marginTop: 12 }}>
+                <Notice tone="fail">{(orgMut.error as Error).message}</Notice>
+              </div>
+            )}
+            {orgMut.isSuccess && !orgMut.isPending && (
+              <div style={{ marginTop: 12 }}>
+                <Notice tone="ok">Profile saved.</Notice>
+              </div>
+            )}
+          </Panel>
 
-          <Field label="Billing contact name" value={profile.billing_contact_name ?? ""} onChange={(v) => setProfile((p) => ({ ...p, billing_contact_name: v }))} />
-          <Field label="Billing email" value={profile.billing_contact_email ?? ""} onChange={(v) => setProfile((p) => ({ ...p, billing_contact_email: v }))} />
-          <Field label="Billing phone" value={profile.billing_contact_phone ?? ""} onChange={(v) => setProfile((p) => ({ ...p, billing_contact_phone: v }))} />
-          <ColorField label="Brand primary" value={profile.brand_primary_color ?? "#3b82f6"} onChange={(v) => setProfile((p) => ({ ...p, brand_primary_color: v }))} />
-          <ColorField label="Brand secondary" value={profile.brand_secondary_color ?? "#10b981"} onChange={(v) => setProfile((p) => ({ ...p, brand_secondary_color: v }))} />
+          <Panel title="Emergency contacts" meta={`${contacts.length}`} bodyClassName="">
+            {contacts.length === 0 ? (
+              <Empty>No emergency contacts yet. Officers and guests see these when they need help.</Empty>
+            ) : (
+              <div className="list">
+                {contacts.map((c) => (
+                  <div key={c.id} className="row g10" style={{ padding: "9px 14px" }}>
+                    <span className="f1 col" style={{ minWidth: 0 }}>
+                      <b className="trunc">
+                        {c.label}
+                        {c.name ? <span className="t3"> · {c.name}</span> : null}
+                      </b>
+                      <span className="mono t3" style={{ fontSize: 12 }}>
+                        {c.phone}
+                        {c.notes ? ` · ${c.notes}` : ""}
+                      </span>
+                    </span>
+                    <button type="button" className="ibtn" style={{ width: 28, height: 28 }} aria-label={`Remove ${c.label}`} disabled={delContactMut.isPending} onClick={() => delContactMut.mutate(c.id)}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="pn-b col g8" style={{ borderTop: "1px solid var(--line-1)" }}>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="in" placeholder="Label (e.g. Police)" aria-label="Label" value={newContact.label} onChange={(e) => setNewContact({ ...newContact, label: e.target.value })} />
+                <input className="in" placeholder="Name (optional)" aria-label="Name" value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} />
+                <input className="in mono" placeholder="Phone" aria-label="Phone" value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} />
+                <button type="button" className="b b-sec" onClick={() => contactMut.mutate(newContact)} disabled={!newContact.label || !newContact.phone || contactMut.isPending}>
+                  <Plus className="h-4 w-4" /> Add contact
+                </button>
+              </div>
+              {contactMut.error && <Notice tone="fail">{(contactMut.error as Error).message}</Notice>}
+            </div>
+          </Panel>
         </div>
-        {orgMut.error && <ErrText>{(orgMut.error as Error).message}</ErrText>}
-        <button onClick={() => orgMut.mutate()} disabled={orgMut.isPending}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-          {orgMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          Save profile
-        </button>
-      </section>
       )}
 
       {activeTab === "locations" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Locations</h2>
-            <p className="text-xs text-muted-foreground">Manage sites in the dedicated locations screen.</p>
-          </div>
-          <Link to="/app/locations" className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-xs hover:bg-surface-2">
-            <MapPin className="h-3.5 w-3.5" /> Open locations
-          </Link>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <InfoCard label="Registered locations" value={String(locations.length)} />
-          <InfoCard label="With coordinates" value={String(locations.filter((l: any) => l.coord_x != null && l.coord_y != null).length)} />
-          <InfoCard label="With geofence" value={String(locations.filter((l: any) => !!l.geofence).length)} />
-        </div>
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-surface text-[10px] uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium">Name</th>
-                <th className="text-left px-4 py-3 font-medium">Address</th>
-                <th className="text-left px-4 py-3 font-medium">Coords</th>
-                <th className="text-left px-4 py-3 font-medium">Geofence</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {locations.map((location: any) => (
-                <tr key={location.id}>
-                  <td className="px-4 py-3">{location.name}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{location.address ?? "—"}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground font-mono">{location.coord_x ?? "—"}, {location.coord_y ?? "—"}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">{location.geofence ? "set" : "—"}</td>
-                </tr>
-              ))}
-              {locations.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-muted-foreground">No locations configured yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+        <>
+          <Panel
+            title="Sites"
+            meta={`${locations.length} · ${locations.filter((l: any) => l.coord_x != null && l.coord_y != null).length} on the map · ${locations.filter((l: any) => !!l.geofence).length} with a geofence`}
+            actions={
+              <Link to="/app/locations" className="b b-sm b-sec">
+                <MapPin className="h-3.5 w-3.5" /> Manage sites
+              </Link>
+            }
+            bodyClassName=""
+          >
+            {locations.length === 0 ? (
+              <Empty>No sites yet.</Empty>
+            ) : (
+              <div className="scroll">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Address</th>
+                      <th>Coordinates</th>
+                      <th>Geofence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {locations.map((l: any) => (
+                      <tr key={l.id}>
+                        <td>
+                          <b>{l.name}</b>
+                        </td>
+                        <td className="t2">{l.address ?? "—"}</td>
+                        <td className="mono t2">{l.coord_x != null && l.coord_y != null ? `${Number(l.coord_y).toFixed(4)}, ${Number(l.coord_x).toFixed(4)}` : "—"}</td>
+                        <td>{l.geofence ? <Tag tone="ok">Set</Tag> : <span className="t3">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+          <GuestAccessCard locations={locations} />
+        </>
       )}
 
-      {activeTab === "locations" && <GuestAccessCard locations={locations} />}
-
       {activeTab === "alerts" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Alert Configuration</h2>
-        <div className="grid grid-cols-1 gap-3">
-          <Field label="WhatsApp alert numbers" value={setForm.whatsapp} onChange={(v) => setSetForm({ ...setForm, whatsapp: v })} placeholder="+234..., +234..." />
-          <Field label="Default incident categories" value={setForm.categories} onChange={(v) => setSetForm({ ...setForm, categories: v })} placeholder="intrusion, theft, fire" />
-          <TextareaField label="Escalation contacts (JSON)" value={JSON.stringify((settings as any)?.alert_escalation_contacts ?? [], null, 2)} onChange={() => {}} readOnly />
-          <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-            Quiet hours and additional recipients are managed from the reporting and alert flows. This screen keeps the live delivery numbers in one place.
+        <Panel title="Alert delivery">
+          <div className="col g12" style={{ maxWidth: 640 }}>
+            <Field label="WhatsApp alert numbers (comma separated)" value={setForm.whatsapp} onChange={(v) => setSetForm({ ...setForm, whatsapp: v })} placeholder="+234…, +234…" mono />
+            <Field label="Default incident categories (comma separated)" value={setForm.categories} onChange={(v) => setSetForm({ ...setForm, categories: v })} placeholder="intrusion, theft, fire" />
+            <div className="fl">
+              <span className="lbl">Escalation contacts</span>
+              {((settings as any)?.alert_escalation_contacts ?? []).length === 0 ? (
+                <span className="t3" style={{ fontSize: 12.5 }}>
+                  None set.
+                </span>
+              ) : (
+                <div className="list card">
+                  {((settings as any)?.alert_escalation_contacts ?? []).map((c: any, i: number) => (
+                    <div key={i} className="row g10" style={{ padding: "8px 12px", fontSize: 12.5 }}>
+                      <span className="tg">Level {c.level}</span>
+                      <span className="f1">{c.name}</span>
+                      <span className="mono t2">{c.phone}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </section>
+        </Panel>
       )}
 
       {activeTab === "thresholds" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Threshold Configuration</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Officers minimum total" value={thresholdForm.officers_min_total} onChange={(v) => setThresholdForm((p) => ({ ...p, officers_min_total: v }))} />
-          <Field label="Officers minimum armed" value={thresholdForm.officers_min_armed} onChange={(v) => setThresholdForm((p) => ({ ...p, officers_min_armed: v }))} />
-          <Field label="Vehicles minimum total" value={thresholdForm.vehicles_min_total} onChange={(v) => setThresholdForm((p) => ({ ...p, vehicles_min_total: v }))} />
-          <Field label="Vehicles minimum fuelled" value={thresholdForm.vehicles_min_fuelled} onChange={(v) => setThresholdForm((p) => ({ ...p, vehicles_min_fuelled: v }))} />
-          <Field label="Fuel reserve minimum %" value={thresholdForm.fuel_reserve_min} onChange={(v) => setThresholdForm((p) => ({ ...p, fuel_reserve_min: v }))} />
-          <div className="sm:col-span-2">
-            <Field label="Equipment thresholds" value={thresholdForm.equipment_thresholds} onChange={(v) => setThresholdForm((p) => ({ ...p, equipment_thresholds: v }))} placeholder="body armour:10, radios:8, first aid kits:4" />
+        <Panel title="Minimum levels" meta="Inventory raises an alert when anything drops below these">
+          <div className="grid gap-3 sm:grid-cols-2" style={{ maxWidth: 720 }}>
+            <Field label="Officers on the roster" value={thresholdForm.officers_min_total} onChange={(v) => setThresholdForm((p) => ({ ...p, officers_min_total: v }))} mono />
+            <Field label="Armed officers" value={thresholdForm.officers_min_armed} onChange={(v) => setThresholdForm((p) => ({ ...p, officers_min_armed: v }))} mono />
+            <Field label="Vehicles" value={thresholdForm.vehicles_min_total} onChange={(v) => setThresholdForm((p) => ({ ...p, vehicles_min_total: v }))} mono />
+            <Field label="Vehicles fuelled" value={thresholdForm.vehicles_min_fuelled} onChange={(v) => setThresholdForm((p) => ({ ...p, vehicles_min_fuelled: v }))} mono />
+            <Field label="Fuel reserve (%)" value={thresholdForm.fuel_reserve_min} onChange={(v) => setThresholdForm((p) => ({ ...p, fuel_reserve_min: v }))} mono />
+            <Field label="Equipment (item:minimum, comma separated)" value={thresholdForm.equipment_thresholds} onChange={(v) => setThresholdForm((p) => ({ ...p, equipment_thresholds: v }))} placeholder="radios:8, first aid kits:4" className="sm:col-span-2" />
           </div>
-        </div>
-        <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-          Thresholds are persisted in `organisation_settings.threshold_config` and drive inventory alerts and staffing warnings.
-        </div>
-      </section>
+        </Panel>
       )}
 
       {activeTab === "devices" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-5">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Autonomous Controller policy</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Controls how much the AI is allowed to do on its own before a human has to sign off. This applies to every device registered on the{" "}
-            <Link to="/app/devices" className="text-primary underline underline-offset-2">Devices</Link> page.
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-2">
-          {AUTOMATION_MODES.map((mode) => (
-            <label
-              key={mode.value}
-              className={`flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 transition-colors ${automationMode === mode.value ? "border-primary bg-primary/5" : "border-border bg-surface hover:border-primary/40"}`}
-            >
-              <input
-                type="radio"
-                name="automation_mode"
-                className="mt-1"
-                checked={automationMode === mode.value}
-                onChange={() => setAutomationMode(mode.value)}
-              />
-              <span>
-                <span className="block text-sm font-medium text-foreground">{mode.label}</span>
-                <span className="block text-xs text-muted-foreground">{mode.description}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-          Policy automation (mode 2) only ever runs a fixed, pre-approved allowlist automatically: camera view/pan/snapshot and sensor on/off. Physical actuators — doors, gates, elevators, locks, barriers, turnstiles — always require a human approval, in every mode except Emergency Response with a pre-signed playbook.
-        </div>
-
-        <div className="pt-2 border-t border-border">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Legacy device list (advanced)</h3>
-          <p className="mt-1 mb-2 text-xs text-muted-foreground">
-            Superseded by the <Link to="/app/devices" className="text-primary underline underline-offset-2">Devices</Link> page, which registers devices directly with the Autonomous Controller. Kept here read/write for reference only.
-          </p>
-          <TextareaField label="Registered devices (JSON)" value={devicesForm} onChange={setDevicesForm} placeholder='[{"name":"NW Wing CCTV","type":"camera","enabled":true}]' />
-        </div>
-      </section>
+        <>
+          <Panel title="How much can Lemtik do on its own?" meta="Applies to every device on the Devices page">
+            <div className="grid gap-3 md:grid-cols-2">
+              {AUTOMATION_MODES.map((mode) => (
+                <label
+                  key={mode.value}
+                  className="card col g8"
+                  style={{ padding: 14, cursor: "pointer", borderColor: automationMode === mode.value ? "var(--blue-ln)" : undefined, background: automationMode === mode.value ? "var(--blue-bg)" : undefined }}
+                >
+                  <span className="row g8">
+                    <input type="radio" name="automation_mode" checked={automationMode === mode.value} onChange={() => setAutomationMode(mode.value)} />
+                    <b>{mode.label}</b>
+                    {mode.value === 1 && <span className="tg">Default</span>}
+                    {Number((settings as any)?.automation_mode ?? 1) === mode.value && <span className="tg tg-blue">Current</span>}
+                  </span>
+                  <span className="t2" style={{ fontSize: 12.5 }}>
+                    {mode.description}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <Notice tone="blue">
+                Physical actuators (doors, gates, lifts, locks, barriers, turnstiles) always need a person to approve them, except under Emergency response with a pre-signed playbook.
+              </Notice>
+            </div>
+          </Panel>
+          <Panel title="Legacy device list" meta="Replaced by the Devices page; kept for reference">
+            <div className="col g8">
+              <textarea className="in mono" rows={8} value={devicesForm} onChange={(e) => setDevicesForm(e.target.value)} aria-label="Legacy device list (JSON)" style={{ height: "auto", paddingTop: 8, fontSize: 12 }} />
+              {devicesJsonError && <Notice tone="fail">{devicesJsonError} Fix it before saving, or the list would be lost.</Notice>}
+            </div>
+          </Panel>
+        </>
       )}
 
       {activeTab === "integrations" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Integrations</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Resend sender" value={integrationForm.resend_sender} onChange={(v) => setIntegrationForm((p) => ({ ...p, resend_sender: v }))} />
-          <Field label="Termii sender ID" value={integrationForm.termii_sender_id} onChange={(v) => setIntegrationForm((p) => ({ ...p, termii_sender_id: v }))} />
-          <Field label="Twilio WhatsApp number" value={integrationForm.twilio_whatsapp_number} onChange={(v) => setIntegrationForm((p) => ({ ...p, twilio_whatsapp_number: v }))} />
-          <Field label="API key label" value={integrationForm.api_key_label} onChange={(v) => setIntegrationForm((p) => ({ ...p, api_key_label: v }))} />
+        <div className="grid gap-4 lg:grid-cols-2" style={{ alignItems: "start" }}>
+          <Panel title="Messaging">
+            <div className="col g12">
+              <Field label="Email sender (Resend)" value={integrationForm.resend_sender} onChange={(v) => setIntegrationForm((p) => ({ ...p, resend_sender: v }))} placeholder="alerts@yourdomain.com" />
+              <Field label="SMS sender ID (Termii)" value={integrationForm.termii_sender_id} onChange={(v) => setIntegrationForm((p) => ({ ...p, termii_sender_id: v }))} mono />
+              <Field label="WhatsApp number (Twilio)" value={integrationForm.twilio_whatsapp_number} onChange={(v) => setIntegrationForm((p) => ({ ...p, twilio_whatsapp_number: v }))} mono />
+              <Field label="API key label" value={integrationForm.api_key_label} onChange={(v) => setIntegrationForm((p) => ({ ...p, api_key_label: v }))} />
+            </div>
+          </Panel>
+          <Panel title="Reports and webhook">
+            <div className="col g12">
+              <Field label="Report delivery schedule" value={setForm.schedule} onChange={(v) => setSetForm({ ...setForm, schedule: v })} placeholder="e.g. weekly Mondays 09:00" />
+              <Field label="Webhook URL" value={setForm.webhook_url} onChange={(v) => setSetForm({ ...setForm, webhook_url: v })} mono />
+              <Field label="Webhook secret" value={setForm.webhook_secret} onChange={(v) => setSetForm({ ...setForm, webhook_secret: v })} mono secret />
+            </div>
+          </Panel>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Report delivery schedule" value={setForm.schedule} onChange={(v) => setSetForm({ ...setForm, schedule: v })} placeholder="e.g. weekly Mondays 09:00" />
-          <Field label="Webhook URL" value={setForm.webhook_url} onChange={(v) => setSetForm({ ...setForm, webhook_url: v })} />
-          <Field label="Webhook secret" value={setForm.webhook_secret} onChange={(v) => setSetForm({ ...setForm, webhook_secret: v })} className="sm:col-span-2" />
-        </div>
-      </section>
       )}
 
       {activeTab === "subscription" && (
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Subscription</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <InfoCard label="Current tier" value={org.subscription_tier} />
-          <InfoCard label="Status" value={org.subscription_status} />
-          <InfoCard label="Billing contact" value={org.billing_contact_email ?? "—"} />
-        </div>
-        <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted-foreground">
-          Subscription changes are handled by the billing workflow. This page exposes the live plan and contact details only.
-        </div>
-      </section>
+        <Panel title="Subscription">
+          <dl className="kv">
+            <dt>Plan</dt>
+            <dd>{org.subscription_tier ?? "—"}</dd>
+            <dt>Status</dt>
+            <dd>{org.subscription_status ?? "—"}</dd>
+            <dt>Billing contact</dt>
+            <dd>{org.billing_contact_email ?? "—"}</dd>
+          </dl>
+          <p className="t3" style={{ fontSize: 12.5, marginBottom: 0 }}>
+            Plan changes are handled by Lemtik billing. Contact support to change your plan.
+          </p>
+        </Panel>
       )}
-
-      {activeTab === "profile" && (
-      <>
-      {/* Emergency contacts */}
-      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Emergency contacts</h2>
-        <ul className="divide-y divide-border">
-          {contacts.map((c) => (
-            <li key={c.id} className="flex items-center justify-between py-2 text-sm">
-              <div>
-                <div className="font-medium">{c.label} {c.name ? <span className="text-muted-foreground">· {c.name}</span> : null}</div>
-                <div className="text-xs text-muted-foreground font-mono">{c.phone}{c.notes ? ` · ${c.notes}` : ""}</div>
-              </div>
-              <button onClick={() => delContactMut.mutate(c.id)} className="text-muted-foreground hover:text-critical"><X className="h-4 w-4" /></button>
-            </li>
-          ))}
-          {contacts.length === 0 && <li className="py-2 text-xs text-muted-foreground">No contacts yet.</li>}
-        </ul>
-        <div className="grid grid-cols-4 gap-2">
-          <input placeholder="Label (Police)" value={newContact.label} onChange={(e) => setNewContact({ ...newContact, label: e.target.value })} className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm" />
-          <input placeholder="Name" value={newContact.name} onChange={(e) => setNewContact({ ...newContact, name: e.target.value })} className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm" />
-          <input placeholder="Phone" value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm" />
-          <button onClick={() => contactMut.mutate(newContact)} disabled={!newContact.label || !newContact.phone || contactMut.isPending}
-            className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            <Plus className="h-3.5 w-3.5" /> Add
-          </button>
-        </div>
-        {contactMut.error && <ErrText>{(contactMut.error as Error).message}</ErrText>}
-      </section>
-      </>
-      )}
-
-      {activeTab === "alerts" || activeTab === "thresholds" || activeTab === "devices" || activeTab === "integrations" ? (
-        <div className="flex justify-end">
-          <button onClick={() => setMut.mutate()} disabled={setMut.isPending}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            {setMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            Save settings
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-function Metric({ label, value, icon: Icon, tone = "muted" }: {
-  label: string;
-  value: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone?: "muted" | "critical" | "resolved";
-}) {
-  const toneClass = tone === "critical"
-    ? "text-critical bg-critical/10 border-critical/30"
-    : tone === "resolved"
-      ? "text-resolved bg-resolved/10 border-resolved/30"
-      : "text-muted-foreground bg-surface border-border";
+function Field({ label, value, onChange, className = "", placeholder, mono = false, secret = false }: { label: string; value: string; onChange: (v: string) => void; className?: string; placeholder?: string; mono?: boolean; secret?: boolean }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={`grid h-7 w-7 place-items-center rounded-md border ${toneClass}`}>
-          <Icon className="h-3.5 w-3.5" />
-        </div>
-      </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
-    </div>
+    <label className={`fl ${className}`}>
+      <span className="lbl">{label}</span>
+      <input className={`in${mono ? " mono" : ""}`} type={secret ? "password" : "text"} autoComplete={secret ? "new-password" : "off"} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+    </label>
   );
 }
 
-function Field({ label, value, onChange, className = "", placeholder }: { label: string; value: string; onChange: (v: string) => void; className?: string; placeholder?: string }) {
-  return (
-    <div className={`space-y-1.5 ${className}`}>
-      <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
-    </div>
-  );
-}
-function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm">
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </div>
-  );
-}
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <div className="space-y-1.5">
-      <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</label>
-      <div className="flex items-center gap-2">
-        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} className="h-9 w-12 rounded-md border border-border bg-surface" />
-        <input value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 rounded-md border border-border bg-surface px-3 py-2 text-xs font-mono" />
-      </div>
-    </div>
+    <label className="fl">
+      <span className="lbl">{label}</span>
+      <span className="row g8">
+        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} aria-label={`${label} colour picker`} style={{ width: 40, height: 34, borderRadius: 8, border: "1px solid var(--line-2)", background: "var(--ink-1)", padding: 2 }} />
+        <input className="in mono f1" value={value} onChange={(e) => onChange(e.target.value)} />
+      </span>
+    </label>
   );
 }
-function ErrText({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2 text-xs text-critical">{children}</div>;
+
+function devicesJsonProblem(value: string): string | null {
+  if (!value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? null : "The legacy device list must be a JSON array.";
+  } catch {
+    return "The legacy device list isn't valid JSON.";
+  }
 }
 
 function GuestAccessCard({ locations }: { locations: any[] }) {
@@ -566,87 +505,50 @@ function GuestAccessCard({ locations }: { locations: any[] }) {
   });
 
   return (
-    <section className="rounded-lg border border-border bg-card p-5 space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Guest emergency access</h2>
-        <p className="text-xs text-muted-foreground">Issue a one-time code so a guest can use the emergency reporting app while on premises.</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div>
-          <label className="text-xs text-muted-foreground">Location</label>
-          <select
-            value={locationId}
-            onChange={(e) => setLocationId(e.target.value)}
-            className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
-          >
-            <option value="">Any / unspecified</option>
-            {locations.map((l: any) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </select>
+    <Panel title="Guest emergency access" meta="A one-time code so a guest can report an emergency while on site">
+      <div className="col g12">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="fl">
+            <span className="lbl">Site</span>
+            <select className="in" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+              <option value="">Any site</option>
+              {locations.map((l: any) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Field label="Guest reference" value={guestReference} onChange={setGuestReference} placeholder="Booking #12345" />
+          <Field label="Expires in (hours)" value={expiresInHours} onChange={setExpiresInHours} placeholder="24" mono />
         </div>
-        <Field label="Guest reference" value={guestReference} onChange={setGuestReference} placeholder="Booking #12345" />
-        <Field label="Expires in (hours)" value={expiresInHours} onChange={setExpiresInHours} placeholder="24" />
-      </div>
-      {issueMut.error && <ErrText>{(issueMut.error as Error).message}</ErrText>}
-      <button
-        onClick={() => issueMut.mutate()}
-        disabled={issueMut.isPending}
-        className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-      >
-        {issueMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-        Issue code
-      </button>
-
-      {issueMut.data && (
-        <div className="flex flex-col sm:flex-row items-start gap-4 rounded-md border border-border bg-surface p-4">
-          {qrDataUrl && <img src={qrDataUrl} alt="Guest access QR code" className="h-40 w-40 rounded-md bg-white p-2" />}
-          <div className="space-y-1.5">
-            <InfoCard label="Code" value={issueMut.data.token} />
-            <div className="text-xs text-muted-foreground break-all">{issueMut.data.qr_code_url}</div>
-            <div className="text-xs text-muted-foreground">Expires {new Date(issueMut.data.expires_at).toLocaleString()}</div>
+        {issueMut.error && <Notice tone="fail">{(issueMut.error as Error).message}</Notice>}
+        <div className="row">
+          <button type="button" className="b b-pri" onClick={() => issueMut.mutate()} disabled={issueMut.isPending}>
+            {issueMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Issue code
+          </button>
+        </div>
+        {issueMut.data && (
+          <div className="card row g16 wrap" style={{ padding: 14 }}>
+            {qrDataUrl && <img src={qrDataUrl} alt="Guest access QR code" style={{ width: 160, height: 160, borderRadius: 8, background: "#fff", padding: 8 }} />}
+            <div className="col g6" style={{ minWidth: 0 }}>
+              <span className="t3" style={{ fontSize: 12 }}>
+                Code
+              </span>
+              <b className="mono" style={{ fontSize: 18 }}>
+                {issueMut.data.token}
+              </b>
+              <span className="t3 mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>
+                {issueMut.data.qr_code_url}
+              </span>
+              <span className="t2" style={{ fontSize: 12.5 }}>
+                Expires {new Date(issueMut.data.expires_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
           </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
-    </div>
-  );
-}
-
-function TextareaField({
-  label,
-  value,
-  onChange,
-  readOnly = false,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  readOnly?: boolean;
-  placeholder?: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</label>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        readOnly={readOnly}
-        placeholder={placeholder}
-        rows={6}
-        className="w-full rounded-md border border-border bg-surface px-3 py-2 text-xs font-mono"
-      />
-    </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 
@@ -672,10 +574,10 @@ function parseEquipmentThresholds(value: string) {
 }
 
 const AUTOMATION_MODES = [
-  { value: 0, label: "Advisory only", description: "The AI can suggest actions but nothing is ever executed automatically." },
-  { value: 1, label: "Human approval required (default)", description: "Every action, including camera/sensor control, needs a signed-off approval before it runs." },
-  { value: 2, label: "Policy automation", description: "A fixed allowlist of low-risk, non-physical actions (camera view/pan/snapshot, sensor on/off) runs immediately without approval. Everything else still requires one." },
-  { value: 3, label: "Emergency response", description: "Pre-approved emergency playbooks execute automatically during a declared emergency." },
+  { value: 0, label: "Advisory only", description: "Lemtik suggests. Nothing runs by itself, not even a camera move." },
+  { value: 1, label: "Human approval", description: "Every action, including camera and sensor control, waits for a named person to approve it." },
+  { value: 2, label: "Policy automation", description: "A fixed list of low-risk, non-physical actions (camera view, pan, snapshot; sensor on/off) runs straight away. Everything else waits for approval." },
+  { value: 3, label: "Emergency response", description: "Pre-approved emergency playbooks run by themselves during a declared emergency. Everything else waits for approval." },
 ];
 
 function parseSmartDevices(value: string) {
