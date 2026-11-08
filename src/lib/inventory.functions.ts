@@ -292,8 +292,9 @@ function mapAlert(row: InventoryAlertRow) {
     resource: row.resource_type || row.metric || "Resource",
     currentValue: row.metric ? `${row.metric}: ${row.current_value ?? "—"}` : String(row.current_value ?? "—"),
     threshold: row.threshold_value != null ? String(row.threshold_value) : "—",
-    action: row.recommended_action || row.message || "Review inventory",
-    createdAt: row.last_alerted_at || row.first_alerted_at || new Date().toISOString(),
+    action: row.recommended_action || row.message || "",
+    level: row.alert_level ?? null,
+    createdAt: row.last_alerted_at || row.first_alerted_at || null,
     resolved: Boolean(row.resolved),
   };
 }
@@ -467,6 +468,10 @@ export const getInventory = createServerFn({ method: "GET" })
       equipment: ((equipment.data ?? []) as EquipmentRow[]).map(mapEquipment),
       fuelReserve: currentLitres,
       fuelThreshold,
+      fuelCapacity: reserveRow?.capacity_litres ?? null,
+      fuelThresholdLitres: reserveRow?.threshold_litres ?? null,
+      fuelUpdatedAt: reserveRow?.updated_at ?? reserveRow?.last_restocked ?? null,
+      hasFuelRecord: !!reserveRow,
       fuelLogs: reserveRow
         ? [{
             id: reserveRow.id,
@@ -593,7 +598,8 @@ export const logFuelDelivery = createServerFn({ method: "POST" })
     if (readError) throwSafeError("fuel.read", readError, "Unable to load fuel reserve.");
     const current = Number(existing?.current_litres ?? data.current_litres ?? 0);
     const capacity = Number(existing?.capacity_litres ?? data.capacity_litres ?? Math.max(current, 1));
-    const threshold = Number(existing?.threshold_litres ?? data.threshold_litres ?? 0);
+    // An explicit threshold in the request is a manager changing it; otherwise keep the stored one.
+    const threshold = Number(data.threshold_litres ?? existing?.threshold_litres ?? 0);
     const next = Math.min(capacity, current + Number(data.litresAdded ?? 0));
     const { error } = await context.supabase
       .from("fuel_reserves")
@@ -674,6 +680,20 @@ export const addInventoryItem = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+export const resolveInventoryAlert = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ id: z.string().min(1) }).parse(input))
+  .handler(async ({ data, context }) => {
+    const orgId = await currentOrgId(context);
+    const { error } = await context.supabase
+      .from("inventory_alerts" as any)
+      .update({ resolved: true } as any)
+      .eq("id", data.id)
+      .eq("org_id", orgId.toString());
+    if (error) throwSafeError("inventory.alert.resolve", error, "Unable to resolve the alert.");
+    return { ok: true };
+  });
+
 export const updateFuelReserve = logFuelDelivery;
 export const listInventoryOfficers = listOfficers;
 export const listInventoryVehicles = listVehicles;
