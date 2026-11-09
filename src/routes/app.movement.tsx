@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
-import { Anchor, BellRing, Car, Check, Copy, Loader2, Plus, RefreshCw, Save, ShieldCheck, Trash2, User, X } from "lucide-react";
+import { Anchor, BellRing, Car, Check, Copy, Loader2, Plus, RefreshCw, Save, Ship, ShieldCheck, Trash2, User, X } from "lucide-react";
 import { requireSectionAccess } from "@/lib/rbac";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { basemapOptions, BasemapSwitch, useBasemap } from "@/lib/basemap";
@@ -28,6 +28,8 @@ import {
   type MovementGeofence,
   type MovementSubject,
 } from "@/lib/movement.functions";
+import { getNearbyShips, listVoyages, type NearbyShip, type Voyage } from "@/lib/voyages.functions";
+import { VoyagesView } from "@/components/movement/Voyages";
 
 export const Route = createFileRoute("/app/movement")({
   head: () => ({ meta: [{ title: "Protected movement · Lemtik SOD" }] }),
@@ -37,7 +39,7 @@ export const Route = createFileRoute("/app/movement")({
   component: Movement,
 });
 
-type Tab = "live" | "subjects" | "zones" | "alerts";
+type Tab = "live" | "subjects" | "voyages" | "zones" | "alerts";
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
 
@@ -92,12 +94,17 @@ function Movement() {
   const listSubjects = useServerFn(listMovementSubjects);
   const listZones = useServerFn(listMovementGeofences);
   const listAlerts = useServerFn(listMovementAlerts);
+  const listVoyagesFn = useServerFn(listVoyages);
 
   const subjectsQ = useQuery({ queryKey: ["movement-subjects"], queryFn: () => listSubjects(), refetchInterval: 60_000 });
   const zonesQ = useQuery({ queryKey: ["movement-zones"], queryFn: () => listZones() });
   const alertsQ = useQuery({ queryKey: ["movement-alerts"], queryFn: () => listAlerts(), refetchInterval: 60_000 });
   useRealtimeInvalidate("movement_subjects", [["movement-subjects"]]);
   useRealtimeInvalidate("movement_alerts", [["movement-alerts"]]);
+  const voyagesQ = useQuery({ queryKey: ["movement-voyages"], queryFn: () => listVoyagesFn(), refetchInterval: 60_000 });
+  useRealtimeInvalidate("movement_voyages", [["movement-voyages"]]);
+  const voyages = voyagesQ.data ?? [];
+  const underway = voyages.filter((v) => v.status === "underway");
 
   const subjects = subjectsQ.data ?? [];
   const zones = zonesQ.data ?? [];
@@ -114,6 +121,7 @@ function Movement() {
         <Kpi label="Tracking now" value={subjectsQ.isLoading ? "—" : tracked.length} unit={`of ${subjects.length}`} />
         <Kpi label="SOS" value={subjects.filter((s) => stateOf(s) === "sos").length} deltaClass="fail" />
         <Kpi label="Silent trackers" value={subjects.filter((s) => stateOf(s) === "silent").length} title="Tracking is on but nothing has been received within the subject's silent window" />
+        <Kpi label="Voyages underway" value={underway.length} />
         <Kpi label="Open alerts" value={openAlerts.length} />
         <Kpi label="Zones" value={zones.filter((z) => z.active).length} />
       </div>
@@ -124,11 +132,13 @@ function Movement() {
         tabs={[
           { value: "live", label: "Live" },
           { value: "subjects", label: "People & assets", count: subjects.length },
+          { value: "voyages", label: "Voyages", count: underway.length || undefined },
           { value: "zones", label: "Zones", count: zones.length },
           { value: "alerts", label: "Alerts", count: openAlerts.length || undefined },
         ]}
       />
-      {tab === "live" && <LiveView subjects={subjects} zones={zones} alerts={openAlerts} />}
+      {tab === "live" && <LiveView subjects={subjects} zones={zones} alerts={openAlerts} voyages={underway} />}
+      {tab === "voyages" && <VoyagesView voyages={voyages} subjects={subjects} />}
       {tab === "subjects" && <SubjectsView subjects={subjects} loading={subjectsQ.isLoading} />}
       {tab === "zones" && <ZonesView zones={zones} subjects={subjects} />}
       {tab === "alerts" && <AlertsView alerts={alerts} subjects={subjects} />}
@@ -138,7 +148,19 @@ function Movement() {
 
 // ---------------------------------------------------------------- Live
 
-function LiveView({ subjects, zones, alerts }: { subjects: MovementSubject[]; zones: MovementGeofence[]; alerts: MovementAlert[] }) {
+function LiveView({ subjects, zones, alerts, voyages }: { subjects: MovementSubject[]; zones: MovementGeofence[]; alerts: MovementAlert[]; voyages: Voyage[] }) {
+  const shipsFn = useServerFn(getNearbyShips);
+  const [ships, setShips] = useState<{ list: NearbyShip[]; at: number; note?: string; configured: boolean } | null>(null);
+  const [shipsOn, setShipsOn] = useState(false);
+  const shipsM = useMutation({
+    mutationFn: () => {
+      const b = mapRef.current!.getBounds()!;
+      return shipsFn({ data: { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() } });
+    },
+    onSuccess: (r) => setShips({ list: r.ships, at: Date.now(), note: r.note, configured: r.configured }),
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const ownMmsi = new Set(subjects.map((s) => s.mmsi).filter(Boolean) as string[]);
   const { data: tokenData } = useMapboxToken();
   const token = tokenData?.token ?? "";
   const [basemap, setBasemap] = useBasemap();
@@ -167,6 +189,11 @@ function LiveView({ subjects, zones, alerts }: { subjects: MovementSubject[]; zo
       map.addSource("mv-zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({ id: "mv-zones-fill", type: "fill", source: "mv-zones", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.12 } });
       map.addLayer({ id: "mv-zones-line", type: "line", source: "mv-zones", paint: { "line-color": ["get", "color"], "line-width": 1.5, "line-dasharray": [2, 1.5] } });
+      map.addSource("mv-voyages", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({ id: "mv-voyages-line", type: "line", source: "mv-voyages", paint: { "line-color": ["get", "color"], "line-width": 2.5, "line-dasharray": [3, 2], "line-opacity": 0.9 } });
+      map.addSource("mv-ships", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({ id: "mv-ships-dot", type: "circle", source: "mv-ships", paint: { "circle-radius": ["case", ["get", "own"], 6, 4], "circle-color": ["case", ["get", "own"], "#2BD576", "#C7D2E5"], "circle-stroke-color": "#0A0C10", "circle-stroke-width": 1.2, "circle-opacity": 0.9 } });
+      map.addLayer({ id: "mv-ships-label", type: "symbol", source: "mv-ships", minzoom: 9, layout: { "text-field": ["get", "label"], "text-size": 10, "text-offset": [0, 1.1], "text-anchor": "top", "text-font": ["DIN Pro Regular", "Arial Unicode MS Regular"] }, paint: { "text-color": "#C7D2E5", "text-halo-color": "#0A0C10", "text-halo-width": 1.2 } });
       map.addSource("mv-trail", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({ id: "mv-trail-line", type: "line", source: "mv-trail", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#4F8BFF", "line-width": 4, "line-opacity": 0.85 } });
       map.addSource("mv-subjects", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -201,7 +228,26 @@ function LiveView({ subjects, zones, alerts }: { subjects: MovementSubject[]; zo
       type: "FeatureCollection",
       features: placed.map((s) => ({ type: "Feature", properties: { id: s.id, name: s.name, color: STATE[stateOf(s)].color }, geometry: { type: "Point", coordinates: [s.last_lng!, s.last_lat!] } })),
     } as any);
-  }, [ready, zones, placed]);
+    (map.getSource("mv-voyages") as mapboxgl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: voyages.filter((v) => v.route.length > 1).map((v) => ({ type: "Feature", properties: { color: v.off_route ? "#F5A524" : "#4F8BFF" }, geometry: { type: "LineString", coordinates: v.route } })),
+    } as any);
+  }, [ready, zones, placed, voyages]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const list = shipsOn ? ships?.list ?? [] : [];
+    (map.getSource("mv-ships") as mapboxgl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: list.map((sh) => ({
+        type: "Feature",
+        properties: { own: ownMmsi.has(sh.mmsi), label: `${sh.name ?? sh.mmsi}${sh.speed_kn != null ? ` · ${sh.speed_kn.toFixed(1)} kn` : ""}` },
+        geometry: { type: "Point", coordinates: [sh.lng, sh.lat] },
+      })),
+    } as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, ships, shipsOn]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -226,6 +272,42 @@ function LiveView({ subjects, zones, alerts }: { subjects: MovementSubject[]; zo
         <div ref={el} style={{ position: "absolute", inset: 0 }} />
         {!token && <div className="absolute inset-0 grid place-items-center t3">{tokenData ? "No Mapbox token configured." : <Loader2 className="h-5 w-5 animate-spin" />}</div>}
         {token && <BasemapSwitch value={basemap} onChange={setBasemap} style={{ left: 10, bottom: 10 }} />}
+        {token && (
+          <div className="glass col g4" style={{ position: "absolute", right: 10, bottom: 34, padding: "6px 8px", fontSize: 12, zIndex: 2, maxWidth: 260 }}>
+            <div className="row g6">
+              <button
+                type="button"
+                className={`b b-sm ${shipsOn ? "b-pri" : "b-sec"}`}
+                onClick={() => {
+                  if (shipsOn) return setShipsOn(false);
+                  setShipsOn(true);
+                  if (!ships || Date.now() - ships.at > 60_000) shipsM.mutate();
+                }}
+                disabled={!ready}
+              >
+                <Ship size={13} /> Ships nearby
+              </button>
+              {shipsOn && (
+                <button type="button" className="ibtn" style={{ width: 26, height: 26 }} aria-label="Refresh ships" onClick={() => shipsM.mutate()} disabled={shipsM.isPending}>
+                  {shipsM.isPending ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                </button>
+              )}
+            </div>
+            {shipsOn && (
+              <span className="t3">
+                {shipsM.isPending
+                  ? "Listening to the public AIS feed (about 12 s)…"
+                  : !ships
+                    ? ""
+                    : !ships.configured
+                      ? "Not switched on yet: add a free AISStream key as AISSTREAM_API_KEY in Vercel."
+                      : ships.note
+                        ? ships.note
+                        : `${ships.list.length} ship${ships.list.length === 1 ? "" : "s"} heard in this view · ${new Date(ships.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Public AIS: coverage can be patchy, and small boats often don't transmit.`}
+              </span>
+            )}
+          </div>
+        )}
         {sel && (
           <div className="glass col g4" style={{ position: "absolute", left: 10, top: 10, padding: "8px 12px", maxWidth: 320, fontSize: 12.5, zIndex: 2 }}>
             <div className="row g8">
@@ -344,8 +426,11 @@ type SubjectForm = {
   device_kind: MovementSubject["device_kind"];
   device_id: string;
   silent_after_minutes: number;
+  checkin_every_minutes: number | null;
+  stop_alert_minutes: number | null;
 };
-const NEW_SUBJECT: SubjectForm = { kind: "person", category: "student", name: "", reference: "", mmsi: "", phone: "", emergency_contact: "", notes: "", device_kind: "phone", device_id: "", silent_after_minutes: 15 };
+const NEW_SUBJECT: SubjectForm = { kind: "person", category: "student", name: "", reference: "", mmsi: "", phone: "", emergency_contact: "", notes: "", device_kind: "phone", device_id: "", silent_after_minutes: 15, checkin_every_minutes: null, stop_alert_minutes: null };
+const mins = (m: number) => (m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}`);
 
 function SubjectsView({ subjects, loading }: { subjects: MovementSubject[]; loading: boolean }) {
   const [form, setForm] = useState<SubjectForm | null>(null);
@@ -386,7 +471,7 @@ function SubjectsView({ subjects, loading }: { subjects: MovementSubject[]; load
         )}
       </Panel>
       {form && <SubjectEditor form={form} setForm={setForm} onSaved={(id) => { setForm(null); setOpenId(id); }} />}
-      {open && !form && <SubjectDetail s={open} onEdit={() => setForm({ id: open.id, kind: open.kind, category: open.category, name: open.name, reference: open.reference ?? "", mmsi: open.mmsi ?? "", phone: open.phone ?? "", emergency_contact: open.emergency_contact ?? "", notes: open.notes ?? "", device_kind: open.device_kind, device_id: open.device_id ?? "", silent_after_minutes: open.silent_after_minutes })} onClose={() => setOpenId(null)} />}
+      {open && !form && <SubjectDetail s={open} onEdit={() => setForm({ id: open.id, kind: open.kind, category: open.category, name: open.name, reference: open.reference ?? "", mmsi: open.mmsi ?? "", phone: open.phone ?? "", emergency_contact: open.emergency_contact ?? "", notes: open.notes ?? "", device_kind: open.device_kind, device_id: open.device_id ?? "", silent_after_minutes: open.silent_after_minutes, checkin_every_minutes: open.checkin_every_minutes, stop_alert_minutes: open.stop_alert_minutes })} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
@@ -411,6 +496,8 @@ function SubjectEditor({ form, setForm, onSaved }: { form: SubjectForm; setForm:
           device_kind: form.device_kind,
           device_id: form.device_id || null,
           silent_after_minutes: form.silent_after_minutes,
+          checkin_every_minutes: form.checkin_every_minutes,
+          stop_alert_minutes: form.stop_alert_minutes,
         },
       }),
     onSuccess: (r) => {
@@ -427,7 +514,7 @@ function SubjectEditor({ form, setForm, onSaved }: { form: SubjectForm; setForm:
       <form className="col g10" onSubmit={(e) => { e.preventDefault(); if (form.name.trim() && !mmsiBad) m.mutate(); }}>
         <div className="seg" role="group" aria-label="Kind">
           {(["person", "vehicle", "vessel"] as const).map((k) => (
-            <button key={k} type="button" className={form.kind === k ? "on" : undefined} onClick={() => setForm({ ...form, kind: k, category: CATEGORIES_FOR[k][0], device_kind: k === "person" ? "phone" : form.device_kind })}>
+            <button key={k} type="button" className={form.kind === k ? "on" : undefined} onClick={() => setForm({ ...form, kind: k, category: CATEGORIES_FOR[k][0], device_kind: k === "person" ? "phone" : form.device_kind, ...(k === "vessel" && !form.id ? { stop_alert_minutes: form.stop_alert_minutes ?? 20, checkin_every_minutes: form.checkin_every_minutes ?? 60 } : {}) })}>
               <KindIcon kind={k} /> {k === "person" ? "Person" : k === "vehicle" ? "Vehicle" : "Boat"}
             </button>
           ))}
@@ -462,9 +549,28 @@ function SubjectEditor({ form, setForm, onSaved }: { form: SubjectForm; setForm:
         <label className="fl">
           <span>Alert if no position for</span>
           <select className="in" value={form.silent_after_minutes} onChange={(e) => set("silent_after_minutes", Number(e.target.value))}>
-            {[5, 10, 15, 30, 60, 120, 360].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}`}</option>)}
+            {[5, 10, 15, 30, 60, 120, 360].map((m) => <option key={m} value={m}>{mins(m)}</option>)}
           </select>
         </label>
+        <div className="grid g10" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <label className="fl">
+            <span>"All OK" check-in every</span>
+            <select className="in" value={form.checkin_every_minutes ?? ""} onChange={(e) => set("checkin_every_minutes", e.target.value ? Number(e.target.value) : null)}>
+              <option value="">Not required</option>
+              {[15, 30, 60, 120, 240].map((m) => <option key={m} value={m}>{mins(m)}</option>)}
+            </select>
+          </label>
+          <label className="fl">
+            <span>Alert if stopped for</span>
+            <select className="in" value={form.stop_alert_minutes ?? ""} onChange={(e) => set("stop_alert_minutes", e.target.value ? Number(e.target.value) : null)}>
+              <option value="">Never</option>
+              {[10, 20, 30, 60, 120].map((m) => <option key={m} value={m}>{mins(m)}</option>)}
+            </select>
+          </label>
+        </div>
+        <span className="t3" style={{ fontSize: 12 }}>
+          A missed check-in alerts the control room. A stop alert fires when they're stopped or drifting outside a safe zone — for boats, a common sign of trouble at sea.
+        </span>
         <label className="fl"><span>Notes</span><textarea className="in" rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} maxLength={1000} /></label>
         <button type="submit" className="b b-pri" disabled={m.isPending || !form.name.trim() || mmsiBad}>
           {m.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} {form.id ? "Save" : "Add"}
@@ -543,7 +649,16 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
         <section className="row g10">
           <span className="col f1">
             <b>Tracking</b>
-            <span className="t3" style={{ fontSize: 12 }}>{s.tracking_enabled ? `On · alerts if silent for ${s.silent_after_minutes} min` : "Off · nothing is received or stored"}</span>
+            <span className="t3" style={{ fontSize: 12 }}>
+              {s.tracking_enabled
+                ? `On · alerts if silent for ${s.silent_after_minutes} min${s.checkin_every_minutes ? ` · check-in every ${s.checkin_every_minutes} min` : ""}${s.stop_alert_minutes ? ` · stop alert after ${s.stop_alert_minutes} min` : ""}`
+                : "Off · nothing is received or stored"}
+            </span>
+            {s.tracking_enabled && s.checkin_every_minutes != null && (
+              <span className="t3" style={{ fontSize: 12, color: s.checkin_overdue ? "var(--s4)" : undefined }}>
+                {s.checkin_overdue ? "Check-in overdue" : s.last_checkin_at ? `Last check-in ${new Date(s.last_checkin_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "No check-in yet"}
+              </span>
+            )}
           </span>
           <Switch label="Tracking" on={s.tracking_enabled} disabled={s.consent_status !== "granted" || tracking.isPending} onChange={(v) => tracking.mutate(v)} />
         </section>
@@ -552,7 +667,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
           <span className="o-lbl">{s.device_kind === "phone" ? "TRACKER LINK FOR THEIR PHONE" : "TRACKER SETUP"}</span>
           {s.device_kind === "phone" ? (
             <>
-              <span className="t3" style={{ fontSize: 12.5 }}>Send this link to {s.name} (or scan the QR with their phone). They press Start sharing; there's an SOS button too. No app install or login.</span>
+              <span className="t3" style={{ fontSize: 12.5 }}>Send this link to {s.name} (or scan the QR with their phone). They press Start sharing, and can tap All OK to check in or hold SOS{s.kind === "vessel" ? " or Man overboard" : ""}. No app install or login.</span>
               <div className="row g8">
                 <input className="in mono f1" readOnly value={link} style={{ fontSize: 11.5 }} />
                 <button type="button" className="ibtn" aria-label="Copy link" onClick={() => copy(link)}><Copy size={14} /></button>

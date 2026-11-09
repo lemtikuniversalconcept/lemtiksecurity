@@ -34,6 +34,11 @@ export type MovementSubject = {
   last_battery: number | null;
   last_seen_at: string | null;
   state: "idle" | "moving" | "stopped" | "silent" | "sos";
+  checkin_every_minutes: number | null;
+  last_checkin_at: string | null;
+  checkin_overdue: boolean;
+  stop_alert_minutes: number | null;
+  stopped_since: string | null;
   created_at: string;
 };
 
@@ -53,6 +58,7 @@ export type MovementAlert = {
   id: string;
   subject_id: string;
   geofence_id: string | null;
+  voyage_id: string | null;
   kind: string;
   severity: number;
   message: string;
@@ -92,6 +98,8 @@ const subjectInput = z.object({
   device_kind: z.enum(["phone", "gps_tracker", "satellite_tracker"]),
   device_id: z.string().trim().max(64).nullable().optional(),
   silent_after_minutes: z.number().int().min(1).max(1440),
+  checkin_every_minutes: z.number().int().min(5).max(1440).nullable().optional(),
+  stop_alert_minutes: z.number().int().min(5).max(720).nullable().optional(),
 });
 
 export const saveMovementSubject = createServerFn({ method: "POST" })
@@ -111,6 +119,8 @@ export const saveMovementSubject = createServerFn({ method: "POST" })
       device_kind: data.device_kind,
       device_id: data.device_id || null,
       silent_after_minutes: data.silent_after_minutes,
+      checkin_every_minutes: data.checkin_every_minutes ?? null,
+      stop_alert_minutes: data.stop_alert_minutes ?? null,
     };
     const q = data.id
       ? sb(context).from("movement_subjects").update(row).eq("id", data.id).eq("organisation_id", orgId).select("id").single()
@@ -152,7 +162,7 @@ export const setMovementTracking = createServerFn({ method: "POST" })
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const { error } = await sb(context)
       .from("movement_subjects")
-      .update(data.enabled ? { tracking_enabled: true } : { tracking_enabled: false, state: "idle" })
+      .update(data.enabled ? { tracking_enabled: true, tracking_started_at: new Date().toISOString(), checkin_overdue: false, stop_alerted: false, stopped_since: null } : { tracking_enabled: false, state: "idle" })
       .eq("id", data.id)
       .eq("organisation_id", orgId);
     if (error) throwSafeError("movement.tracking", error, data.enabled ? "Tracking can only be switched on after consent is recorded." : "Unable to switch tracking off.");
@@ -241,7 +251,7 @@ export const listMovementAlerts = createServerFn({ method: "GET" })
     const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
     const { data, error } = await sb(context)
       .from("movement_alerts")
-      .select("id, subject_id, geofence_id, kind, severity, message, lat, lng, acknowledged_at, created_at")
+      .select("id, subject_id, geofence_id, voyage_id, kind, severity, message, lat, lng, acknowledged_at, created_at")
       .eq("organisation_id", orgId)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -265,8 +275,8 @@ export const acknowledgeMovementAlert = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throwSafeError("movement.ack", error, "Unable to acknowledge.");
     // Clearing the last open SOS takes the subject out of SOS state.
-    if (row?.kind === "sos") {
-      const { count } = await sb(context).from("movement_alerts").select("id", { count: "exact", head: true }).eq("subject_id", row.subject_id).eq("kind", "sos").is("acknowledged_at", null);
+    if (row?.kind === "sos" || row?.kind === "man_overboard") {
+      const { count } = await sb(context).from("movement_alerts").select("id", { count: "exact", head: true }).eq("subject_id", row.subject_id).in("kind", ["sos", "man_overboard"]).is("acknowledged_at", null);
       if (!count) await sb(context).from("movement_subjects").update({ state: "stopped" }).eq("id", row.subject_id).eq("state", "sos");
     }
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_alert", resourceId: data.id, actionType: "acknowledge", actionDetail: {} });
@@ -318,6 +328,8 @@ export const getTrackerInfo = createServerFn({ method: "POST" })
       consent: s.consent_status,
       tracking: s.tracking_enabled,
       sos: s.state === "sos",
+      checkin_every_minutes: s.checkin_every_minutes,
+      last_checkin_at: s.last_checkin_at,
     };
   });
 
@@ -332,11 +344,22 @@ export const reportTrackerFix = createServerFn({ method: "POST" })
       heading: z.number().min(0).max(360).nullable().optional(),
       battery: z.number().int().min(0).max(100).nullable().optional(),
       sos: z.boolean().optional(),
+      event: z.enum(["position", "sos", "man_overboard", "checkin"]).optional(),
     }).parse(d),
   )
   .handler(async ({ data }) => {
     const { subjectByToken, ingestFix } = await import("./movement.server");
     const s = await subjectByToken(data.token);
     if (!s) return { ok: false, reason: "This tracker link isn't valid any more. Ask your security team for a new one." };
-    return ingestFix(s, data, "phone", !!data.sos);
+    return ingestFix(s, data, "phone", data.event ?? (data.sos ? "sos" : "position"));
+  });
+
+/** "All OK" from the crew's phone before it has a GPS fix. */
+export const trackerCheckIn = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) => z.object({ token: z.string().regex(/^[0-9a-f]{32}$/i) }).parse(d))
+  .handler(async ({ data }) => {
+    const { subjectByToken, checkInWithoutFix } = await import("./movement.server");
+    const s = await subjectByToken(data.token);
+    if (!s) return { ok: false, reason: "This tracker link isn't valid any more. Ask your security team for a new one." };
+    return checkInWithoutFix(s);
   });

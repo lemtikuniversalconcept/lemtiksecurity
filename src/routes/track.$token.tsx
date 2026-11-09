@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, MapPin, ShieldCheck } from "lucide-react";
-import { getTrackerInfo, reportTrackerFix } from "@/lib/movement.functions";
+import { CheckCircle2, LifeBuoy, Loader2, MapPin, ShieldCheck } from "lucide-react";
+import { getTrackerInfo, reportTrackerFix, trackerCheckIn } from "@/lib/movement.functions";
 import { LemtikMark, Notice } from "@/components/nw";
 
 /**
@@ -23,13 +23,16 @@ function Tracker() {
   const { token } = Route.useParams();
   const loadInfo = useServerFn(getTrackerInfo);
   const send = useServerFn(reportTrackerFix);
+  const checkInNoFix = useServerFn(trackerCheckIn);
 
   const [info, setInfo] = useState<Info | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [last, setLast] = useState<{ at: number; accuracy: number; ok: boolean } | null>(null);
-  const [sosSent, setSosSent] = useState(false);
-  const [hold, setHold] = useState(0);
+  const [sosSent, setSosSent] = useState<null | "sos" | "man_overboard">(null);
+  const [hold, setHold] = useState<{ kind: "sos" | "man_overboard"; p: number } | null>(null);
+  const [lastCheckin, setLastCheckin] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
   const watchId = useRef<number | null>(null);
   const latest = useRef<GeolocationPosition | null>(null);
   const lastSent = useRef(0);
@@ -40,7 +43,8 @@ function Tracker() {
     loadInfo({ data: { token } })
       .then((r) => {
         setInfo(r);
-        if (r.found && r.sos) setSosSent(true);
+        if (r.found && r.sos) setSosSent("sos");
+        if (r.found && r.last_checkin_at) setLastCheckin(Date.parse(r.last_checkin_at));
       })
       .catch(() => setError("Couldn't reach Lemtik. Check your connection and reload."));
   }, [loadInfo, token]);
@@ -55,7 +59,7 @@ function Tracker() {
   };
 
   const push = useCallback(
-    async (p: GeolocationPosition, sos = false) => {
+    async (p: GeolocationPosition, event: "position" | "sos" | "man_overboard" | "checkin" = "position") => {
       lastSent.current = Date.now();
       try {
         const r = await send({
@@ -67,13 +71,13 @@ function Tracker() {
             speed_mps: p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : null,
             heading: p.coords.heading != null && Number.isFinite(p.coords.heading) ? p.coords.heading : null,
             battery: await battery(),
-            sos,
+            event,
           },
         });
         setLast({ at: Date.now(), accuracy: p.coords.accuracy, ok: r.ok });
         if (!r.ok) {
           setError(r.reason ?? "Your security team isn't receiving your location.");
-          if (!sos) stop();
+          if (event === "position") stop();
         } else setError(null);
         return r.ok;
       } catch {
@@ -122,35 +126,54 @@ function Tracker() {
     return () => window.clearInterval(t);
   }, [sharing, push]);
 
-  const fireSos = async () => {
-    const p = latest.current ?? (await new Promise<GeolocationPosition | null>((res) => navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 10_000 })));
+  const currentFix = async () =>
+    latest.current ?? (await new Promise<GeolocationPosition | null>((res) => navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 10_000 })));
+
+  const fireAlarm = async (kind: "sos" | "man_overboard") => {
+    const p = await currentFix();
     if (!p) {
-      setError("No GPS fix yet, so the SOS couldn't include your location. Call your security team now.");
+      setError(`No GPS fix yet, so the ${kind === "sos" ? "SOS" : "man overboard alert"} couldn't include your location. Call your security team now.`);
       return;
     }
-    const ok = await push(p, true);
+    const ok = await push(p, kind);
     if (ok) {
-      setSosSent(true);
+      setSosSent(kind);
       navigator.vibrate?.([250, 120, 250]);
       if (!sharing) start();
     }
   };
-  const startHold = () => {
+  const startHold = (kind: "sos" | "man_overboard") => {
     const t0 = Date.now();
     holdTimer.current = window.setInterval(() => {
       const k = (Date.now() - t0) / HOLD_MS;
-      setHold(Math.min(1, k));
+      setHold({ kind, p: Math.min(1, k) });
       if (k >= 1) {
         endHold();
-        void fireSos();
+        void fireAlarm(kind);
       }
     }, 40);
   };
   function endHold() {
     if (holdTimer.current) window.clearInterval(holdTimer.current);
     holdTimer.current = null;
-    setHold(0);
+    setHold(null);
   }
+
+  const checkIn = async () => {
+    setChecking(true);
+    try {
+      const p = latest.current;
+      const ok = p ? await push(p, "checkin") : (await checkInNoFix({ data: { token } })).ok;
+      if (ok) {
+        setLastCheckin(Date.now());
+        navigator.vibrate?.(80);
+      } else setError("Check-in didn't go through. Try again, or call your security team.");
+    } catch {
+      setError("Check-in didn't go through. Check your connection and try again.");
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const shell = (children: React.ReactNode) => (
     <div className="min-h-dvh col" style={{ background: "var(--ink-0)", color: "var(--tx-1)", maxWidth: 480, margin: "0 auto", padding: "20px 18px 32px", gap: 16 }}>
@@ -167,6 +190,41 @@ function Tracker() {
   if (!info.found) return shell(<Notice tone="fail">This tracker link isn't valid. It may have been replaced. Ask your security team for the current link.</Notice>);
 
   const ready = info.consent === "granted" && info.tracking;
+  const every = info.checkin_every_minutes;
+  const nextDue = every && lastCheckin ? lastCheckin + every * 60_000 : null;
+  const fmt = (t: number) => new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const holdBtn = (kind: "sos" | "man_overboard", size: number) => {
+    const p = hold?.kind === kind ? hold.p : 0;
+    const label = kind === "sos" ? "SOS" : "MAN OVERBOARD";
+    return (
+      <button
+        type="button"
+        aria-label={`Hold for 2 seconds to send ${kind === "sos" ? "SOS" : "a man overboard alert"}`}
+        onPointerDown={() => startHold(kind)}
+        onPointerUp={endHold}
+        onPointerLeave={endHold}
+        onPointerCancel={endHold}
+        style={{
+          alignSelf: "center",
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          border: 0,
+          color: "#fff",
+          background: `conic-gradient(#fff ${p * 360}deg, transparent 0) border-box, ${kind === "sos" ? "var(--s5)" : "#E8590C"}`,
+          padding: 7,
+          touchAction: "none",
+          userSelect: "none",
+        }}
+      >
+        <span className="col" style={{ width: "100%", height: "100%", borderRadius: "50%", background: kind === "sos" ? "var(--s5)" : "#E8590C", alignItems: "center", justifyContent: "center", gap: 2 }}>
+          {kind === "man_overboard" && <LifeBuoy size={22} />}
+          <b style={{ fontSize: kind === "sos" ? 32 : 13, textAlign: "center", lineHeight: 1.1 }}>{label}</b>
+          <span style={{ fontSize: 11.5, opacity: 0.85 }}>{p > 0 ? "keep holding" : "hold 2 s"}</span>
+        </span>
+      </button>
+    );
+  };
   return shell(
     <>
       <div className="col g4">
@@ -183,7 +241,11 @@ function Tracker() {
       ) : (
         <>
           {error && <Notice tone="fail">{error}</Notice>}
-          {sosSent && <Notice tone="fail">SOS sent. Your security team has your location. Keep this page open and call them if you can.</Notice>}
+          {sosSent && (
+            <Notice tone="fail">
+              {sosSent === "sos" ? "SOS sent." : "Man overboard alert sent."} Your security team has your location. Keep this page open and call them if you can.
+            </Notice>
+          )}
 
           <div className="o-card col g8" style={{ padding: 14 }}>
             <div className="row g8">
@@ -199,31 +261,29 @@ function Tracker() {
             </button>
           </div>
 
-          <button
-            type="button"
-            aria-label="Hold for 2 seconds to send SOS"
-            onPointerDown={startHold}
-            onPointerUp={endHold}
-            onPointerLeave={endHold}
-            onPointerCancel={endHold}
-            style={{
-              alignSelf: "center",
-              width: 168,
-              height: 168,
-              borderRadius: 84,
-              border: 0,
-              color: "#fff",
-              background: `conic-gradient(#fff ${hold * 360}deg, transparent 0) border-box, var(--s5)`,
-              padding: 7,
-              touchAction: "none",
-              userSelect: "none",
-            }}
-          >
-            <span className="col" style={{ width: "100%", height: "100%", borderRadius: "50%", background: "var(--s5)", alignItems: "center", justifyContent: "center" }}>
-              <b style={{ fontSize: 32 }}>SOS</b>
-              <span style={{ fontSize: 12, opacity: 0.85 }}>{hold > 0 ? "keep holding" : "hold 2 s"}</span>
+          <div className="o-card col g8" style={{ padding: 14 }}>
+            <div className="row g8">
+              <CheckCircle2 size={16} className="t3" />
+              <b className="f1">Check in</b>
+            </div>
+            <span className="t3" style={{ fontSize: 13 }}>
+              {every
+                ? lastCheckin
+                  ? `Last check-in ${fmt(lastCheckin)}. Next due by ${fmt(nextDue!)}${nextDue! < Date.now() ? " — overdue, check in now" : ""}.`
+                  : `Your team expects an "All OK" every ${every} minutes.`
+                : lastCheckin
+                  ? `Last check-in ${fmt(lastCheckin)}.`
+                  : "Let your security team know you're safe."}
             </span>
-          </button>
+            <button type="button" className="b b-sec" style={{ height: 46, fontSize: 15 }} onClick={() => void checkIn()} disabled={checking}>
+              {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 size={16} />} All OK
+            </button>
+          </div>
+
+          <div className="row" style={{ justifyContent: "center", gap: 20, flexWrap: "wrap" }}>
+            {holdBtn("sos", 156)}
+            {info.kind === "vessel" && holdBtn("man_overboard", 156)}
+          </div>
         </>
       )}
 

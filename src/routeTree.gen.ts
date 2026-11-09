@@ -64,6 +64,7 @@ import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id
 import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
 import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
 import { Route as AppAdminOrganisationsIdRouteImport } from './routes/app.admin.organisations.$id'
+import { Route as AppMovementVoyagesIdRouteImport } from './routes/app.movement_.voyages.$id'
 import { Route as ForensicCasesIdAiRouteImport } from './routes/forensic.cases.$id.ai'
 import { Route as ForensicCasesIdEvidenceRouteImport } from './routes/forensic.cases.$id.evidence'
 import { Route as ForensicCasesIdReidRouteImport } from './routes/forensic.cases.$id.reid'
@@ -343,6 +344,11 @@ const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AppAdminOrganisationsRoute,
 } as any)
+const AppMovementVoyagesIdRoute = AppMovementVoyagesIdRouteImport.update({
+  id: '/movement_/voyages/$id',
+  path: '/movement/voyages/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const ForensicCasesIdAiRoute = ForensicCasesIdAiRouteImport.update({
   id: '/ai',
   path: '/ai',
@@ -415,6 +421,7 @@ export interface FileRoutesByFullPath {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/movement/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
   '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
   '/forensic/cases/$id/reid': typeof ForensicCasesIdReidRoute
@@ -471,6 +478,7 @@ export interface FileRoutesByTo {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/movement/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
   '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
   '/forensic/cases/$id/reid': typeof ForensicCasesIdReidRoute
@@ -532,6 +540,7 @@ export interface FileRoutesById {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/movement_/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
   '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
   '/forensic/cases/$id/reid': typeof ForensicCasesIdReidRoute
@@ -594,6 +603,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/movement/voyages/$id'
     | '/forensic/cases/$id/ai'
     | '/forensic/cases/$id/evidence'
     | '/forensic/cases/$id/reid'
@@ -650,6 +660,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/movement/voyages/$id'
     | '/forensic/cases/$id/ai'
     | '/forensic/cases/$id/evidence'
     | '/forensic/cases/$id/reid'
@@ -710,6 +721,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/movement_/voyages/$id'
     | '/forensic/cases/$id/ai'
     | '/forensic/cases/$id/evidence'
     | '/forensic/cases/$id/reid'
@@ -1116,6 +1128,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminOrganisationsIdRouteImport
       parentRoute: typeof AppAdminOrganisationsRoute
     }
+    '/app/movement_/voyages/$id': {
+      id: '/app/movement_/voyages/$id'
+      path: '/movement/voyages/$id'
+      fullPath: '/app/movement/voyages/$id'
+      preLoaderRoute: typeof AppMovementVoyagesIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/forensic/cases/$id/ai': {
       id: '/forensic/cases/$id/ai'
       path: '/ai'
@@ -1210,6 +1229,7 @@ interface AppRouteChildren {
   AppAdminBillingRoute: typeof AppAdminBillingRoute
   AppAdminOrganisationsRoute: typeof AppAdminOrganisationsRouteWithChildren
   AppAdminSystemRoute: typeof AppAdminSystemRoute
+  AppMovementVoyagesIdRoute: typeof AppMovementVoyagesIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -1233,6 +1253,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminBillingRoute: AppAdminBillingRoute,
   AppAdminOrganisationsRoute: AppAdminOrganisationsRouteWithChildren,
   AppAdminSystemRoute: AppAdminSystemRoute,
+  AppMovementVoyagesIdRoute: AppMovementVoyagesIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

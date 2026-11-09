@@ -81,7 +81,7 @@ async function handle(request: Request) {
       recorded_at: toIso(params.get("timestamp")),
     },
     params.get("source") === "satellite" ? "satellite" : "device",
-    params.get("alarm") === "sos" || params.get("sos") === "1",
+    params.get("alarm") === "sos" || params.get("sos") === "1" ? "sos" : "position",
   );
   return new Response(result.ok ? "ok" : result.reason ?? "rejected", { status: result.ok ? 200 : 403 });
 }
