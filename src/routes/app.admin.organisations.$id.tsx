@@ -8,6 +8,8 @@ import {
   setPlatformOrganisationStatus,
   updatePlatformOrganisation,
 } from "@/lib/platform.organisations.functions";
+import { toast } from "sonner";
+import { Kpi, PageHeader } from "@/components/nw";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
   ArrowLeft,
@@ -124,14 +126,24 @@ function OrganisationDetail() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["platform-organisation", id] }),
   });
 
+  const [pending, setPending] = useState<"suspend" | "delete" | null>(null);
   const suspendMut = useMutation({
     mutationFn: () => suspendOrg({ data: { organisation_id: id, subscription_status: "suspended" } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform-organisation", id] }),
+    onSuccess: () => {
+      toast.success("Organisation suspended");
+      setPending(null);
+      qc.invalidateQueries({ queryKey: ["platform-organisation", id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => deleteOrg({ data: { organisation_id: id } }),
-    onSuccess: () => nav({ to: "/app/admin/organisations" }),
+    onSuccess: () => {
+      toast.success("Organisation deleted");
+      nav({ to: "/app/admin/organisations" });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const metrics = useMemo(() => data?.metrics ?? null, [data]);
@@ -143,39 +155,51 @@ function OrganisationDetail() {
   const org = data?.org;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <button onClick={() => nav({ to: "/app/admin/organisations" })} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to organisations
-          </button>
-          <h1 className="mt-2 text-2xl font-semibold">{org?.name ?? "Organisation"}</h1>
-          <p className="text-sm text-muted-foreground">
-            {org ? `${pretty(org.type)} · ${pretty(org.subscription_status)} · ${pretty(org.subscription_tier)}` : "Loading organisation profile"}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => suspendMut.mutate()} disabled={suspendMut.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2 disabled:opacity-50">
-            {suspendMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="h-3.5 w-3.5" />} Suspend
-          </button>
-          <button
-            onClick={() => {
-              if (window.confirm(`Delete ${org?.name ?? "this organisation"}? This cannot be undone.`)) deleteMut.mutate();
-            }}
-            disabled={deleteMut.isPending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-critical/30 px-3 py-2 text-xs text-critical hover:bg-critical/10 disabled:opacity-50"
-          >
-            {deleteMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete
-          </button>
-        </div>
+    <div className="col g16">
+      <button type="button" onClick={() => nav({ to: "/app/admin/organisations" })} className="row g4 t3 lnk" style={{ fontSize: 12.5, background: "none", border: 0, padding: 0, alignSelf: "flex-start" }}>
+        <ArrowLeft className="h-3.5 w-3.5" /> Organisations
+      </button>
+      <PageHeader title={org?.name ?? "Organisation"} sub={org ? `${pretty(org.type)} · ${pretty(org.subscription_status)} · ${pretty(org.subscription_tier)}` : "Loading…"}>
+        <button type="button" className="b b-sec" onClick={() => setPending("suspend")} disabled={!org || org.subscription_status === "suspended"}>
+          <PauseCircle className="h-4 w-4" /> Suspend
+        </button>
+        <button type="button" className="b b-gh" onClick={() => setPending("delete")} disabled={!org} style={{ color: "var(--fail)" }}>
+          <Trash2 className="h-4 w-4" /> Delete
+        </button>
+      </PageHeader>
+
+      <div className="kpis">
+        <Kpi label="Users" value={metrics ? metrics.users : "—"} />
+        <Kpi label="Locations" value={metrics ? metrics.locations : "—"} />
+        <Kpi label="Incidents, 30 days" value={metrics ? metrics.incidents30d : "—"} />
+        <Kpi label="Monthly at list price" value={metrics ? metrics.mrr : "—"} />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Users" value={metrics ? metrics.users.toString() : "—"} icon={Users} />
-        <Stat label="Locations" value={metrics ? metrics.locations.toString() : "—"} icon={MapPin} tone="resolved" />
-        <Stat label="Incidents 30d" value={metrics ? metrics.incidents30d.toString() : "—"} icon={ShieldAlert} tone="critical" />
-        <Stat label="MRR" value={metrics ? metrics.mrr : "—"} icon={CalendarDays} tone="resolved" />
-      </div>
+      {pending && (
+        <div className="fixed inset-0 z-50 grid place-items-center px-4" style={{ background: "rgba(5,7,10,.72)" }} role="dialog" aria-modal="true" aria-label={pending === "delete" ? "Delete organisation" : "Suspend organisation"}>
+          <div className="pn w-full" style={{ maxWidth: 460, borderColor: "var(--line-2)" }}>
+            <div className="pn-h">
+              <h3 style={{ fontSize: 15 }}>
+                {pending === "delete" ? "Delete" : "Suspend"} {org?.name}?
+              </h3>
+            </div>
+            <div className="pn-b col g12">
+              <p className="t2" style={{ margin: 0 }}>
+                {pending === "delete" ? "The organisation and its data are removed. This can't be undone." : "Their staff, officers and guests lose access until you reactivate the subscription."}
+              </p>
+              <div className="row g8" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="b b-gh" onClick={() => setPending(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="b b-red" disabled={suspendMut.isPending || deleteMut.isPending} onClick={() => (pending === "delete" ? deleteMut.mutate() : suspendMut.mutate())}>
+                  {(suspendMut.isPending || deleteMut.isPending) && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {pending === "delete" ? "Delete organisation" : "Suspend"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="rounded-3xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">

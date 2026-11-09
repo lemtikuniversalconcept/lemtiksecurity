@@ -8,6 +8,8 @@ import {
   listPlatformOrganisations,
   setPlatformOrganisationStatus,
 } from "@/lib/platform.organisations.functions";
+import { toast } from "sonner";
+import { Kpi, PageHeader } from "@/components/nw";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
   Building2,
@@ -152,14 +154,25 @@ function OrganisationsList() {
     onError: () => setCreating(false),
   });
 
+  const [pending, setPending] = useState<{ kind: "suspend" | "delete"; id: string; name: string } | null>(null);
   const suspendMut = useMutation({
     mutationFn: (organisation_id: string) => setStatus({ data: { organisation_id, subscription_status: "suspended" } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform-organisations"] }),
+    onSuccess: () => {
+      toast.success("Organisation suspended");
+      setPending(null);
+      qc.invalidateQueries({ queryKey: ["platform-organisations"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: (organisation_id: string) => deleteOrg({ data: { organisation_id } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform-organisations"] }),
+    onSuccess: () => {
+      toast.success("Organisation deleted");
+      setPending(null);
+      qc.invalidateQueries({ queryKey: ["platform-organisations"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const organisations = data?.organisations ?? [];
@@ -190,20 +203,14 @@ function OrganisationsList() {
   ];
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Admin Console</div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Organisation management</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-300">
-          Create, inspect, suspend, and remove client organisations from the platform control plane.
-        </p>
-      </section>
+    <div className="col g16">
+      <PageHeader title="Organisations" sub="Create, inspect, suspend and remove client organisations." />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Organisations" value={totals.total.toString()} icon={Building2} />
-        <Stat label="Active" value={totals.active.toString()} icon={ShieldAlert} tone="resolved" />
-        <Stat label="Trial" value={totals.trial.toString()} icon={CalendarDays} tone="muted" />
-        <Stat label="Overdue" value={totals.overdue.toString()} icon={ShieldAlert} tone="critical" />
+      <div className="kpis">
+        <Kpi label="Organisations" value={data ? totals.total : "—"} />
+        <Kpi label="Active" value={data ? totals.active : "—"} />
+        <Kpi label="Trial" value={data ? totals.trial : "—"} />
+        <Kpi label="Past due" value={data ? totals.overdue : "—"} />
       </div>
 
       <section className="rounded-3xl border border-border bg-card p-5 space-y-4">
@@ -264,18 +271,14 @@ function OrganisationsList() {
                           <SquarePen className="h-3.5 w-3.5" /> Edit
                         </Link>
                         <button
-                          onClick={() => suspendMut.mutate(org.id)}
-                          disabled={suspendMut.isPending}
+                          onClick={() => setPending({ kind: "suspend", id: org.id, name: org.name })}
+                          disabled={suspendMut.isPending || org.subscription_status === "suspended"}
                           className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-surface-2 disabled:opacity-50"
                         >
                           Suspend
                         </button>
                         <button
-                          onClick={() => {
-                            if (window.confirm(`Delete organisation ${org.name}? This cannot be undone.`)) {
-                              deleteMut.mutate(org.id);
-                            }
-                          }}
+                          onClick={() => setPending({ kind: "delete", id: org.id, name: org.name })}
                           disabled={deleteMut.isPending}
                           className="inline-flex items-center gap-1 rounded-md border border-critical/30 px-2.5 py-1 text-xs text-critical hover:bg-critical/10 disabled:opacity-50"
                         >
@@ -440,6 +443,39 @@ function OrganisationsList() {
           </div>
         </div>
       </section>
+
+      {pending && (
+        <div className="fixed inset-0 z-50 grid place-items-center px-4" style={{ background: "rgba(5,7,10,.72)" }} role="dialog" aria-modal="true" aria-label={pending.kind === "delete" ? "Delete organisation" : "Suspend organisation"}>
+          <div className="pn w-full" style={{ maxWidth: 460, borderColor: "var(--line-2)" }}>
+            <div className="pn-h">
+              <h3 style={{ fontSize: 15 }}>
+                {pending.kind === "delete" ? "Delete" : "Suspend"} {pending.name}?
+              </h3>
+            </div>
+            <div className="pn-b col g12">
+              <p className="t2" style={{ margin: 0 }}>
+                {pending.kind === "delete"
+                  ? "The organisation and its data are removed. This can't be undone."
+                  : "Their staff, officers and guests lose access until you reactivate the subscription."}
+              </p>
+              <div className="row g8" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="b b-gh" onClick={() => setPending(null)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="b b-red"
+                  disabled={suspendMut.isPending || deleteMut.isPending}
+                  onClick={() => (pending.kind === "delete" ? deleteMut.mutate(pending.id) : suspendMut.mutate(pending.id))}
+                >
+                  {(suspendMut.isPending || deleteMut.isPending) && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {pending.kind === "delete" ? "Delete organisation" : "Suspend"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
