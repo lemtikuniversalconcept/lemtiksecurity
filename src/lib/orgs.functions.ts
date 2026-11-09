@@ -425,5 +425,49 @@ export const findProximityMembers = createServerFn({ method: "POST" })
         },
       },
     });
-    return result?.data?.recommended_officers ?? [];
+    if (result?.data?.recommended_officers?.length) return result.data.recommended_officers;
+    return rankOfficersByDrivingTime(context.supabase, orgId, [data.coord_x, data.coord_y], data.limit ?? 6);
   });
+
+// Officers whose phone reported a position recently, ranked by real driving time to the
+// incident (Mapbox Matrix, free up to 100,000 elements a month). If Mapbox can't be reached,
+// they are ranked by straight-line distance and no ETA is shown.
+const POSITION_FRESH_MS = 2 * 60 * 60 * 1000;
+
+async function rankOfficersByDrivingTime(supabase: any, orgId: string, target: [number, number], limit: number) {
+  const { data: rows, error } = await supabase.from("officers").select("*").eq("org_id", orgId);
+  if (error) throwSafeError("proximity.officers", error, "Unable to load officer positions.");
+  const now = Date.now();
+  const placed = ((rows ?? []) as Array<Record<string, any>>)
+    .filter((o) => o.status !== "off_duty" && o.current_lat != null && o.current_lng != null)
+    .filter((o) => !o.location_updated_at || now - Date.parse(o.location_updated_at) < POSITION_FRESH_MS)
+    .map((o) => {
+      const coord: [number, number] = [Number(o.current_lng), Number(o.current_lat)];
+      const straight = Math.hypot((coord[0] - target[0]) * 111_320 * Math.cos((target[1] * Math.PI) / 180), (coord[1] - target[1]) * 110_540);
+      return { o, coord, straight };
+    })
+    .sort((a, b) => a.straight - b.straight)
+    .slice(0, 24);
+  if (!placed.length) return [];
+
+  const { mapboxMatrixTo } = await import("./mapbox.server");
+  const times = await mapboxMatrixTo(placed.map((p) => p.coord), target, "driving");
+  const ranked = placed.map((p, i) => {
+    const t = times?.[i] ?? null;
+    const mins = t ? Math.max(1, Math.round(t.duration / 60)) : null;
+    return {
+      id: String(p.o.id),
+      user_id: String(p.o.id),
+      name: String(p.o.name ?? "Officer"),
+      role: String(p.o.role ?? p.o.rank ?? "officer"),
+      zone: String(p.o.zone ?? p.o.assigned_zone ?? ""),
+      status: String(p.o.status ?? ""),
+      distance: t ? t.distance : p.straight,
+      distance_kind: t ? "road" : "straight",
+      eta_seconds: t ? t.duration : null,
+      eta: mins == null ? undefined : `${mins} min`,
+    };
+  });
+  ranked.sort((a, b) => (a.eta_seconds ?? Infinity) - (b.eta_seconds ?? Infinity) || a.distance - b.distance);
+  return ranked.slice(0, limit);
+}

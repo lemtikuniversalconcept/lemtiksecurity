@@ -22,6 +22,7 @@ import {
   ScanEye,
   Search,
   Siren,
+  Timer,
   UserCheck,
   Users,
   X,
@@ -33,6 +34,7 @@ import { listOfficers } from "@/lib/inventory.functions";
 import { listDevices, type DeviceRecord } from "@/lib/devices.functions";
 import { listCameras, type CameraRecord } from "@/lib/cameras.functions";
 import { getMapboxToken } from "@/lib/config.functions";
+import { getResponseReach, searchPlaces } from "@/lib/maps.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { statusMeta, typeMeta, type IncidentStatus, type IncidentType } from "@/lib/mockData";
 import { requireSectionAccess } from "@/lib/rbac";
@@ -150,6 +152,8 @@ function LiveMap() {
   const getToken = useServerFn(getMapboxToken);
   const assignFn = useServerFn(assignIncidentToMe);
   const statusFn = useServerFn(updateIncidentStatus);
+  const placesFn = useServerFn(searchPlaces);
+  const reachFn = useServerFn(getResponseReach);
 
   useRealtimeInvalidate("incidents", [["incidents"]]);
   useRealtimeInvalidate("patrols", [["patrols"]]);
@@ -176,6 +180,9 @@ function LiveMap() {
   const [myPos, setMyPos] = useState<[number, number] | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [telemetry, setTelemetry] = useState<TelemetryRow[]>([]);
+  const [places, setPlaces] = useState<{ name: string; address: string; coord: [number, number] }[]>([]);
+  const [reach, setReach] = useState<{ center: [number, number]; minutes: number[]; geojson: any } | null>(null);
+  const [reachState, setReachState] = useState<"idle" | "loading" | "failed">("idle");
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -598,8 +605,60 @@ function LiveMap() {
       if (c && [l.name, l.address].filter(Boolean).join(" ").toLowerCase().includes(q)) out.push({ label: l.name, kind: "Location", coord: c });
     }
     for (const o of placedOfficers) if (o.officer.name.toLowerCase().includes(q)) out.push({ label: o.officer.name, kind: "Officer", coord: o.coord });
-    return out.slice(0, 6);
-  }, [searchTerm, incidents, locations, placedOfficers]);
+    const own = out.slice(0, 5);
+    for (const p of places) own.push({ label: p.address ? `${p.name} · ${p.address}` : p.name, kind: "Place", coord: p.coord });
+    return own.slice(0, 9);
+  }, [searchTerm, incidents, locations, placedOfficers, places]);
+
+  // Addresses and places from Mapbox, after a short pause in typing.
+  useEffect(() => {
+    const q = searchTerm.trim();
+    if (q.length < 3) {
+      setPlaces([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      const c = mapRef.current?.getCenter();
+      placesFn({ data: { q, near: c ? [c.lng, c.lat] : undefined } })
+        .then((r) => setPlaces(r as typeof places))
+        .catch(() => setPlaces([]));
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [searchTerm, placesFn]);
+
+  const showReach = (lng: number, lat: number) => {
+    setMenu(null);
+    setReachState("loading");
+    reachFn({ data: { center: [lng, lat], mode: "driving" } })
+      .then((r) => {
+        if (!r.geojson?.features?.length) return setReachState("failed");
+        setReach({ center: [lng, lat], minutes: r.minutes, geojson: r.geojson });
+        setReachState("idle");
+        mapRef.current?.easeTo({ center: [lng, lat], zoom: Math.min(mapRef.current.getZoom(), 12.5), duration: 600 });
+      })
+      .catch(() => setReachState("failed"));
+  };
+
+  // Response-reach shading. Re-added after a style change rebuilds the map.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const ids = ["reach-fill", "reach-line"];
+    if (!reach) {
+      ids.forEach((id) => map.getLayer(id) && map.removeLayer(id));
+      if (map.getSource("reach")) map.removeSource("reach");
+      return;
+    }
+    // Largest area first so the smaller, nearer ones draw on top.
+    const data = { type: "FeatureCollection", features: [...reach.geojson.features].sort((a: any, b: any) => Number(b.properties?.contour ?? 0) - Number(a.properties?.contour ?? 0)) };
+    const src = map.getSource("reach") as mapboxgl.GeoJSONSource | undefined;
+    if (src) src.setData(data as any);
+    else {
+      map.addSource("reach", { type: "geojson", data: data as any });
+      map.addLayer({ id: "reach-fill", type: "fill", source: "reach", paint: { "fill-color": ["get", "fillColor"], "fill-opacity": 0.22 } });
+      map.addLayer({ id: "reach-line", type: "line", source: "reach", paint: { "line-color": ["get", "fillColor"], "line-width": 1.5, "line-opacity": 0.9 } });
+    }
+  }, [ready, reach]);
 
   const goTo = (r: { coord: [number, number]; id?: string }) => {
     mapRef.current?.easeTo({ center: r.coord, zoom: 15, duration: 600 });
@@ -731,7 +790,7 @@ function LiveMap() {
             {searchTerm.trim() && (
               <div className="glass absolute left-0 right-0 z-20 mt-1 overflow-hidden" role="listbox">
                 {searchResults.length === 0 ? (
-                  <div className="empty" style={{ padding: "8px 12px" }}>Nothing with a map position matches.</div>
+                  <div className="empty" style={{ padding: "8px 12px" }}>{searchTerm.trim().length < 3 ? "Keep typing to search addresses too." : "Nothing with a map position matches."}</div>
                 ) : (
                   searchResults.map((r, i) => (
                     <button key={`${r.kind}-${i}`} type="button" role="option" aria-selected={false} onClick={() => goTo(r)} className="row g8 w-full text-left hover:bg-ink-3" style={{ padding: "8px 12px" }}>
@@ -833,6 +892,35 @@ function LiveMap() {
         {unplaced > 0 && <span className="t3">{unplaced} without a map position</span>}
       </div>
 
+      {(reach || reachState !== "idle") && (
+        <div className="glass row g8 wrap" style={{ position: "absolute", left: 12, bottom: 104, padding: "6px 10px", zIndex: 2, fontSize: 12 }}>
+          <Timer size={14} strokeWidth={1.75} className="ic" />
+          {reachState === "loading" ? (
+            <span className="row g6"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Working out drive reach…</span>
+          ) : reachState === "failed" ? (
+            <span>Couldn’t get drive reach from Mapbox. Try again.</span>
+          ) : (
+            reach && (
+              <>
+                <b>Drive reach</b>
+                {[...reach.geojson.features]
+                  .sort((a: any, b: any) => Number(a.properties?.contour) - Number(b.properties?.contour))
+                  .map((f: any) => (
+                    <span key={f.properties?.contour} className="row g4">
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: f.properties?.fillColor ?? "#888", display: "inline-block" }} />
+                      {f.properties?.contour} min
+                    </span>
+                  ))}
+                <span className="t3">estimate, without live traffic</span>
+              </>
+            )
+          )}
+          <button type="button" className="ibtn" style={{ width: 22, height: 22 }} aria-label="Hide drive reach" onClick={() => { setReach(null); setReachState("idle"); }}>
+            <X size={12} strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
+
       {tokenData?.token && (
         <BasemapSwitch
           value={basemap}
@@ -904,6 +992,10 @@ function LiveMap() {
           <button type="button" role="menuitem" className="row g8 w-full text-left hover:bg-ink-3" style={{ padding: "8px 10px", borderRadius: 6 }} onClick={() => drawZoneHere(menu.lng, menu.lat)}>
             <Hexagon size={14} strokeWidth={1.75} className="ic lnk" />
             Draw a zone here
+          </button>
+          <button type="button" role="menuitem" className="row g8 w-full text-left hover:bg-ink-3" style={{ padding: "8px 10px", borderRadius: 6 }} onClick={() => showReach(menu.lng, menu.lat)}>
+            <Timer size={14} strokeWidth={1.75} className="ic lnk" />
+            Show 5 / 10 / 15 min drive reach
           </button>
           <span className="mono t3" style={{ fontSize: 11, padding: "4px 10px" }}>{menu.lat.toFixed(5)}, {menu.lng.toFixed(5)}</span>
         </div>

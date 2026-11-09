@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { add3DBuildings, basemapOptions, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { getMapboxToken } from "@/lib/config.functions";
+import { searchPlaces } from "@/lib/maps.functions";
 
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
@@ -26,6 +27,31 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useBasemap();
   const viewRef = useRef<SavedView | null>(null);
+  const placesFn = useServerFn(searchPlaces);
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<{ name: string; address: string; coord: LngLat }[]>([]);
+
+  useEffect(() => {
+    const term = q.trim();
+    if (readOnly || term.length < 3) {
+      setHits([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      const c = mapRef.current?.getCenter();
+      placesFn({ data: { q: term, near: c ? [c.lng, c.lat] : undefined } })
+        .then((r) => setHits(r as typeof hits))
+        .catch(() => setHits([]));
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [q, readOnly, placesFn]);
+
+  const pick = (c: LngLat) => {
+    setQ("");
+    setHits([]);
+    onChangeRef.current?.(c);
+    mapRef.current?.easeTo({ center: c, zoom: Math.max(mapRef.current.getZoom(), 16), duration: 500 });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -87,8 +113,32 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
       <div ref={container} style={{ position: "absolute", inset: 0 }} />
       <BasemapSwitch value={basemap} onChange={setBasemap} style={{ right: 8, bottom: 8 }} />
       {!readOnly && (
-        <div className="glass" style={{ position: "absolute", left: 10, top: 10, padding: "4px 10px", fontSize: 12 }}>
-          Click the map to drop the pin
+        <div style={{ position: "absolute", left: 10, top: 10, right: 10, maxWidth: 340, zIndex: 3 }}>
+          <input
+            className="in glass"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (hits[0]) pick(hits[0].coord);
+              }
+              if (e.key === "Escape") setQ("");
+            }}
+            placeholder="Type an address, or click the map"
+            aria-label="Search for an address"
+            style={{ height: 34, fontSize: 12.5, width: "100%" }}
+          />
+          {hits.length > 0 && (
+            <div className="glass col" role="listbox" style={{ marginTop: 4, overflow: "hidden" }}>
+              {hits.map((h, i) => (
+                <button key={i} type="button" role="option" aria-selected={false} className="col w-full text-left hover:bg-ink-3" style={{ padding: "7px 10px" }} onClick={() => pick(h.coord)}>
+                  <b style={{ fontSize: 12.5 }}>{h.name}</b>
+                  {h.address && <span className="t3 trunc" style={{ fontSize: 11.5 }}>{h.address}</span>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

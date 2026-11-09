@@ -554,25 +554,13 @@ export const calculateRoute = createServerFn({ method: "POST" })
         source: "c4isod-dashboard",
       },
     });
-    if (result) return result;
+    if (result?.geometry?.coordinates?.length) return result;
 
-    const midpoint: [number, number] = [
-      Number((data.start[0] + data.destination[0]) / 2),
-      Number((data.start[1] + data.destination[1]) / 2),
-    ];
-    const routeDistance = Math.hypot(data.destination[0] - data.start[0], data.destination[1] - data.start[1]) * 111;
-    return {
-      geometry: { coordinates: [data.start, midpoint, data.destination] },
-      distance: routeDistance * 1000,
-      duration: Math.max(180, routeDistance * 75),
-      legs: [{
-        steps: [
-          { maneuver: { instruction: "Proceed from the current position." }, distance: routeDistance * 400 },
-          { maneuver: { instruction: "Continue on the safest available path." }, distance: routeDistance * 400 },
-          { maneuver: { instruction: "Arrive at the destination and report to command." }, distance: routeDistance * 200 },
-        ],
-      }],
-    };
+    // Real road route from Mapbox Directions (free up to 100,000 a month). If that fails too,
+    // return nothing: the officer app then shows the straight-line bearing and distance and says
+    // there's no road route, rather than showing directions nobody calculated.
+    const { mapboxDirections } = await import("./mapbox.server");
+    return await mapboxDirections(data.start, data.destination, data.mode ?? "walking");
   });
 
 // New QR secrets for every stop on a route. Old printed (or photographed) codes stop working

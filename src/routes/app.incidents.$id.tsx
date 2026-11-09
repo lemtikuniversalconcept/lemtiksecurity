@@ -264,7 +264,8 @@ function IncidentDetailPage() {
       name: firstString(o.name, o.display_name, o.officer_name, o.full_name, near?.name) || `Officer ${idx + 1}`,
       zone: firstString(o.zone, o.location_zone, near?.zone),
       distance: Number.isFinite(distance) ? distance : null,
-      eta: firstString(o.eta, o.eta_display, o.eta_text),
+      eta: firstString(o.eta, o.eta_display, o.eta_text, near?.eta),
+      byRoad: (o.distance_kind ?? near?.distance_kind) === "road",
       route: firstString(o.route, o.dispatch_route, o.route_summary),
       equipment: listFromValue(o.equipment),
       instructions: firstString(o.instructions, o.guidance, o.note),
@@ -561,7 +562,7 @@ function IncidentDetailPage() {
               <div className="pn-h">
                 <Navigation size={15} strokeWidth={1.75} className="ic" />
                 <h3>Dispatch</h3>
-                <span className="meta">{responders.length ? (responders[0].fromAi ? "AI recommendation" : `Nearest by distance · ${responders.length}`) : "No responders ranked"}</span>
+                <span className="meta">{responders.length ? (responders[0].fromAi ? "AI recommendation" : `${responders[0].eta ? "Nearest by driving time" : "Nearest by distance"} · ${responders.length}`) : "No responders ranked"}</span>
               </div>
               <div className="pn-b col g8">
                 {assignedName && !responders.some((r) => r.name === assignedName) && (
@@ -588,7 +589,7 @@ function IncidentDetailPage() {
                             </div>
                             <div className="row g12 wrap t2" style={{ fontSize: 12 }}>
                               {o.zone && <span className="row g4"><MapPin size={12} strokeWidth={1.75} /> {o.zone}</span>}
-                              {o.distance != null && <span>{Math.round(o.distance)} m away</span>}
+                              {o.distance != null && <span>{o.distance >= 1000 ? `${(o.distance / 1000).toFixed(1)} km` : `${Math.round(o.distance)} m`} {o.byRoad ? "by road" : "away"}</span>}
                             </div>
                           </div>
                           {o.eta && (
