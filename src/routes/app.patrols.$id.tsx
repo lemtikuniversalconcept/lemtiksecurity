@@ -2,8 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import {
   getPatrol, saveWaypoints, rotateCheckpointCodes, updatePatrolDetails, archivePatrol, duplicatePatrol,
@@ -11,7 +11,7 @@ import {
 } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { encodeCheckpoint } from "@/lib/checkpointQr";
-import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
+import { add3DBuildings, basemapOptions, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
@@ -153,8 +153,8 @@ function PatrolDetail() {
 
   // ---------- map ----------
   const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const markersRef = useRef<maplibregl.Marker[]>([]);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const canManageRef = useRef(canManage);
   canManageRef.current = canManage;
@@ -165,15 +165,16 @@ function PatrolDetail() {
     if (!token?.token || !mapEl.current || mapRef.current || !data) return;
     const first = (data.waypoints ?? []).find((w: any) => w.coord_x != null && w.coord_y != null) as any;
     const v = viewRef.current;
-    const m = new maplibregl.Map({
+    mapboxgl.accessToken = token.token;
+    const m = new mapboxgl.Map({
       container: mapEl.current,
-      style: BASEMAP_STYLE[basemap],
+      ...basemapOptions(basemap),
       center: v?.center ?? (first ? [Number(first.coord_x), Number(first.coord_y)] : DEFAULT_CENTER),
       zoom: v?.zoom ?? (first ? 15 : 11),
       pitch: v?.pitch ?? 0,
-      attributionControl: { compact: true },
+      attributionControl: true,
     });
-    m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
     if (canManageRef.current) m.getCanvas().style.cursor = "crosshair";
     m.on("load", () => {
       add3DBuildings(m, basemap);
@@ -223,7 +224,7 @@ function PatrolDetail() {
         e.stopPropagation();
         setActiveWp(i);
       };
-      const mk = new maplibregl.Marker({ element: el, draggable: canManage }).setLngLat([w.coord_x, w.coord_y]).addTo(m);
+      const mk = new mapboxgl.Marker({ element: el, draggable: canManage }).setLngLat([w.coord_x, w.coord_y]).addTo(m);
       mk.on("dragend", () => {
         const ll = mk.getLngLat();
         editWaypoints((prev) => prev.map((p, idx) => (idx === i ? { ...p, coord_x: Number(ll.lng.toFixed(6)), coord_y: Number(ll.lat.toFixed(6)) } : p)));
@@ -233,7 +234,7 @@ function PatrolDetail() {
     });
     const coords = waypoints.filter((w) => w.coord_x != null && w.coord_y != null).map((w) => [w.coord_x!, w.coord_y!]);
     const geo = { type: "FeatureCollection", features: coords.length >= 2 ? [{ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} }] : [] };
-    const src = m.getSource("wp-line") as maplibregl.GeoJSONSource | undefined;
+    const src = m.getSource("wp-line") as mapboxgl.GeoJSONSource | undefined;
     if (src) src.setData(geo as any);
     else {
       m.addSource("wp-line", { type: "geojson", data: geo as any });

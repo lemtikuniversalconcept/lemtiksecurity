@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, Loader2, MapPinned, RefreshCw } from "lucide-react";
 import { getMapboxToken } from "@/lib/config.functions";
+import { basemapOptions } from "@/lib/basemap";
 import { calculateRoute } from "@/lib/patrols.functions";
 import { Notice } from "@/components/nw";
 import { fmtDistance, getPosition, metersBetween, NetPill, useMyDispatch, useOnline } from "@/components/officer/kit";
@@ -41,7 +42,7 @@ function OfficerNavigation() {
   const [routeNote, setRouteNote] = useState<string | null>(null);
   const [arrival, setArrival] = useState<{ state: "idle" | "busy" | "done" | "fail"; text?: string }>({ state: "idle" });
   const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
 
   const inc = dispatch?.incident;
   const dest: Coord | null = inc && inc.coord_x != null && inc.coord_y != null ? [Number(inc.coord_x), Number(inc.coord_y)] : null;
@@ -91,7 +92,8 @@ function OfficerNavigation() {
 
   useEffect(() => {
     if (!token?.token || !mapEl.current || !dest) return;
-    const map = new maplibregl.Map({ container: mapEl.current, style: "https://tiles.openfreemap.org/styles/positron", center: dest, zoom: 15, attributionControl: { compact: true } });
+    mapboxgl.accessToken = token.token;
+    const map = new mapboxgl.Map({ container: mapEl.current, ...basemapOptions("day"), center: dest, zoom: 15, attributionControl: true });
     mapRef.current = map;
     map.on("load", () => {
       const line: Coord[] = plan?.kind === "road" ? plan.coords : here ? [here, dest] : [];
@@ -110,9 +112,9 @@ function OfficerNavigation() {
         el.style.cssText = `width:18px;height:18px;border-radius:9px;background:${bg};box-shadow:0 0 0 3px #0A0C10`;
         return el;
       };
-      new maplibregl.Marker({ element: dot("#F2384B") }).setLngLat(dest).addTo(map);
-      if (here) new maplibregl.Marker({ element: dot("#7A9BFF") }).setLngLat(here).addTo(map);
-      const b = new maplibregl.LngLatBounds();
+      new mapboxgl.Marker({ element: dot("#F2384B") }).setLngLat(dest).addTo(map);
+      if (here) new mapboxgl.Marker({ element: dot("#7A9BFF") }).setLngLat(here).addTo(map);
+      const b = new mapboxgl.LngLatBounds();
       for (const c of line.length ? line : [dest]) b.extend(c);
       map.fitBounds(b, { padding: 50, maxZoom: 17, duration: 0 });
     });

@@ -118,11 +118,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "icon",
         href: "/favicon.ico",
       },
-      // Map tiles come from OpenFreeMap; warming the connection during page load
-      // saves a round trip off the map's cold start.
+      // Mapbox GL only starts its own DNS/TLS handshake once the map component
+      // mounts (Live Map, Patrols, patrol detail, Intelligence, officer nav/patrol
+      // all embed it) — warming the connection during the initial page load
+      // instead saves that round trip off the map's cold-start time.
       {
         rel: "preconnect",
-        href: "https://tiles.openfreemap.org",
+        href: "https://api.mapbox.com",
         crossOrigin: "anonymous",
       },
       {

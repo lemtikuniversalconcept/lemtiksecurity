@@ -2,12 +2,12 @@ import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tan
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { createPatrol, listCheckIns, listPatrols, listPatrolWaypoints, listShifts, scheduleShift } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { listLocations } from "@/lib/orgs.functions";
-import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
+import { add3DBuildings, basemapOptions, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { requireSectionAccess } from "@/lib/rbac";
 import { Archive, CalendarDays, Download, Lock, Map as MapIcon, Pencil, Plus, Loader2, X } from "lucide-react";
@@ -543,7 +543,7 @@ function LivePatrolMap({
   selectedId: string | null;
 }) {
   const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useBasemap();
   const viewRef = useRef<SavedView | null>(null);
@@ -574,8 +574,9 @@ function LivePatrolMap({
     const first = routes[0]?.points[0];
     const center: [number, number] = first ? [Number(first.coord_x), Number(first.coord_y)] : fallbackCenter ?? [3.4219, 6.4281];
     const v = viewRef.current;
-    const map = new maplibregl.Map({ container: mapEl.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? center, zoom: v?.zoom ?? (first || fallbackCenter ? 14 : 10), pitch: v?.pitch ?? 0, attributionControl: { compact: true } });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    mapboxgl.accessToken = token;
+    const map = new mapboxgl.Map({ container: mapEl.current, ...basemapOptions(basemap), center: v?.center ?? center, zoom: v?.zoom ?? (first || fallbackCenter ? 14 : 10), pitch: v?.pitch ?? 0, attributionControl: true });
+    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
     map.on("load", () => {
       add3DBuildings(map, basemap);
       requestAnimationFrame(() => map.resize());
@@ -613,8 +614,8 @@ function LivePatrolMap({
         })),
       ),
     };
-    const lineSrc = map.getSource("patrol-routes") as maplibregl.GeoJSONSource | undefined;
-    const ptSrc = map.getSource("patrol-waypoints") as maplibregl.GeoJSONSource | undefined;
+    const lineSrc = map.getSource("patrol-routes") as mapboxgl.GeoJSONSource | undefined;
+    const ptSrc = map.getSource("patrol-waypoints") as mapboxgl.GeoJSONSource | undefined;
     if (lineSrc && ptSrc) {
       lineSrc.setData(lines as any);
       ptSrc.setData(points as any);
@@ -638,7 +639,7 @@ function LivePatrolMap({
     const focus = routes.find((r) => r.patrol.id === selectedId) ?? (selectedId ? null : undefined);
     const fitTo = focus ? [focus] : focus === null ? [] : routes;
     if (fitTo.length) {
-      const bounds = new maplibregl.LngLatBounds();
+      const bounds = new mapboxgl.LngLatBounds();
       for (const r of fitTo) for (const w of r.points) bounds.extend([Number(w.coord_x), Number(w.coord_y)]);
       map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 400 });
     }

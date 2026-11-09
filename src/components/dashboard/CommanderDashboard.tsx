@@ -1,9 +1,9 @@
-import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
+import { add3DBuildings, basemapOptions, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import "maplibre-gl/dist/maplibre-gl.css";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -37,17 +37,10 @@ import { typeMeta, type IncidentType } from "@/lib/mockData";
 import type { AppAccess } from "@/lib/rbac";
 import { Avatar, Kpi, Lifecycle, PageHeader, Seg, Sev, Tabs, elapsed, timeAgo, toSev, useNow } from "@/components/nw";
 
-/** maplibre-gl ships as a UMD bundle: depending on the bundler the module or its default export is the library. */
-async function loadMaplibre(): Promise<typeof import("maplibre-gl")> {
-  const mod = (await import("maplibre-gl")) as typeof import("maplibre-gl") & { default?: typeof import("maplibre-gl") };
-  return mod.default ?? mod;
-}
-
-
-type MapboxModule = typeof import("maplibre-gl");
-type MapboxMap = import("maplibre-gl").Map;
-type MapboxMarker = import("maplibre-gl").Marker;
-type MapboxGeoJSONSource = import("maplibre-gl").GeoJSONSource;
+type MapboxModule = typeof import("mapbox-gl");
+type MapboxMap = import("mapbox-gl").Map;
+type MapboxMarker = import("mapbox-gl").Marker;
+type MapboxGeoJSONSource = import("mapbox-gl").GeoJSONSource;
 
 type IncidentRow = {
   id: string;
@@ -434,11 +427,12 @@ function OverviewMap({
     let ro: ResizeObserver | null = null;
     (async () => {
       if (!token || !container.current || mapRef.current) return;
-      const maplibregl = mapboxRef.current ?? (await loadMaplibre());
-      mapboxRef.current = maplibregl;
+      const mapboxgl = mapboxRef.current ?? (await import("mapbox-gl"));
+      mapboxRef.current = mapboxgl;
       if (cancelled || !container.current) return;
+      mapboxgl.default.accessToken = token;
       const v = viewRef.current;
-      map = new maplibregl.Map({ container: container.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? LAGOS, zoom: v?.zoom ?? 10.7, pitch: v?.pitch ?? 0, bearing: v?.bearing ?? 0, attributionControl: { compact: true } });
+      map = new mapboxgl.default.Map({ container: container.current, ...basemapOptions(basemap), center: v?.center ?? LAGOS, zoom: v?.zoom ?? 10.7, pitch: v?.pitch ?? 0, bearing: v?.bearing ?? 0, attributionControl: true });
       map.on("load", () => {
         add3DBuildings(map!, basemap);
         map!.addSource("zones", { type: "geojson", data: zones as any });
@@ -481,8 +475,8 @@ function OverviewMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    const maplibregl = mapboxRef.current;
-    if (!map || !maplibregl || !ready) return;
+    const mapboxgl = mapboxRef.current;
+    if (!map || !mapboxgl || !ready) return;
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
     if (layers.patrols) {
@@ -499,7 +493,7 @@ function OverviewMap({
         const ring = patrol.status === "missed" ? "var(--s5)" : patrol.status === "delayed" ? "var(--warn)" : "#0A0C10";
         el.style.cssText = `width:22px;height:22px;box-shadow:0 0 0 2px ${ring};cursor:default`;
         el.title = `${patrol.officer} · ${patrol.code}`;
-        markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(coord).addTo(map));
+        markersRef.current.push(new mapboxgl.default.Marker({ element: el }).setLngLat(coord).addTo(map));
       }
     }
     if (layers.incidents) {
@@ -513,18 +507,18 @@ function OverviewMap({
         el.title = `${incident.code} · ${incidentTitle(incident)}`;
         el.style.cssText = `box-shadow:${selected?.id === incident.id ? "0 0 0 2px #fff" : "0 0 0 2px #0A0C10"}`;
         el.addEventListener("click", () => onSelectRef.current(incident.id));
-        markersRef.current.push(new maplibregl.Marker({ element: el }).setLngLat(coord).addTo(map));
+        markersRef.current.push(new mapboxgl.default.Marker({ element: el }).setLngLat(coord).addTo(map));
       }
     }
   }, [placedIncidents, placedPatrols, layers.incidents, layers.patrols, ready, selected?.id]);
 
   const fitAll = () => {
     const map = mapRef.current;
-    const maplibregl = mapboxRef.current;
-    if (!map || !maplibregl) return;
+    const mapboxgl = mapboxRef.current;
+    if (!map || !mapboxgl) return;
     const points = [...placedIncidents.map((p) => p.coord), ...placedPatrols.map((p) => p.coord)];
     if (!points.length) return map.easeTo({ center: LAGOS, zoom: 10.7 });
-    const bounds = new maplibregl.LngLatBounds(points[0], points[0]);
+    const bounds = new mapboxgl.default.LngLatBounds(points[0], points[0]);
     points.forEach((p) => bounds.extend(p));
     map.fitBounds(bounds, { padding: 80, maxZoom: 16, duration: 500 });
   };

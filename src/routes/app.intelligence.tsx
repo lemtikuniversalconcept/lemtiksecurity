@@ -2,8 +2,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import { getMapboxToken } from "@/lib/config.functions";
 import { getBriefings, generateBriefing, listOsintIntelligence, type BriefEntry, type OsintIntelligenceItem } from "@/lib/intelligence.functions";
@@ -409,15 +409,16 @@ function Stat({ label, value, hint }: { label: string; value: React.ReactNode; h
 
 function SignalMap({ token, signals, total, selectedId, onSelect }: { token: string; signals: Signal[]; total: number; selectedId: string | null; onSelect: (id: string) => void }) {
   const el = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const markers = useRef<maplibregl.Marker[]>([]);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markers = useRef<mapboxgl.Marker[]>([]);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     if (!token || !el.current || mapRef.current) return;
+    mapboxgl.accessToken = token;
     const first = signals[0]?.coord;
-    const m = new maplibregl.Map({ container: el.current, style: "https://tiles.openfreemap.org/styles/dark", center: first ?? [3.4219, 6.4281], zoom: first ? 11 : 9, attributionControl: { compact: true } });
-    m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    const m = new mapboxgl.Map({ container: el.current, style: "mapbox://styles/mapbox/dark-v11", center: first ?? [3.4219, 6.4281], zoom: first ? 11 : 9, attributionControl: true });
+    m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
     m.on("load", () => {
       requestAnimationFrame(() => m.resize());
       setReady(true);
@@ -448,7 +449,7 @@ function SignalMap({ token, signals, total, selectedId, onSelect }: { token: str
         e.stopPropagation();
         onSelect(s.id);
       };
-      markers.current.push(new maplibregl.Marker({ element: b }).setLngLat(s.coord!).addTo(m));
+      markers.current.push(new mapboxgl.Marker({ element: b }).setLngLat(s.coord!).addTo(m));
     }
   }, [signals, ready, selectedId, onSelect]);
 
