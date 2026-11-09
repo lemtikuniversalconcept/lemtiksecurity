@@ -12,3 +12,4 @@ dist
 coverage
 .vite
 .tanstack
+.claude/settings.local.json

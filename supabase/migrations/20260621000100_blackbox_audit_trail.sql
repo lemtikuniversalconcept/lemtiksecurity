@@ -5,18 +5,18 @@ ALTER TABLE public.audit_log
   ADD COLUMN IF NOT EXISTS "timestamp" TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS org_id UUID,
   ADD COLUMN IF NOT EXISTS user_id UUID,
-  ADD COLUMN IF NOT EXISTS user_role VARCHAR(50),
-  ADD COLUMN IF NOT EXISTS user_email VARCHAR(255),
-  ADD COLUMN IF NOT EXISTS action_type VARCHAR(100),
-  ADD COLUMN IF NOT EXISTS resource_type VARCHAR(100),
-  ADD COLUMN IF NOT EXISTS resource_id VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS user_role TEXT,
+  ADD COLUMN IF NOT EXISTS user_email TEXT,
+  ADD COLUMN IF NOT EXISTS action_type TEXT,
+  ADD COLUMN IF NOT EXISTS resource_type TEXT,
+  ADD COLUMN IF NOT EXISTS resource_id TEXT,
   ADD COLUMN IF NOT EXISTS action_detail JSONB,
   ADD COLUMN IF NOT EXISTS old_value JSONB,
   ADD COLUMN IF NOT EXISTS new_value JSONB,
-  ADD COLUMN IF NOT EXISTS ip_address VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS ip_address TEXT,
   ADD COLUMN IF NOT EXISTS user_agent TEXT,
-  ADD COLUMN IF NOT EXISTS session_id VARCHAR(255),
-  ADD COLUMN IF NOT EXISTS request_id VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS session_id TEXT,
+  ADD COLUMN IF NOT EXISTS request_id TEXT,
   ADD COLUMN IF NOT EXISTS success BOOLEAN DEFAULT TRUE,
   ADD COLUMN IF NOT EXISTS error_message TEXT;
 
@@ -39,6 +39,10 @@ WHERE
   OR resource_id IS NULL
   OR action_detail IS NULL
   OR success IS NULL;
+
+-- Deleting an organisation used to SET NULL its audit rows, which the append-only trigger
+-- below would block (so the delete would fail). Audit rows keep the organisation's id instead.
+ALTER TABLE public.audit_log DROP CONSTRAINT IF EXISTS audit_log_organisation_id_fkey;
 
 CREATE OR REPLACE FUNCTION public.block_audit_log_mutation()
 RETURNS trigger
