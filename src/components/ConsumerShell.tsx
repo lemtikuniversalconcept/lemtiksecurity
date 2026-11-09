@@ -4,7 +4,8 @@ import { drainMediaQueue } from "@/lib/consumer-media-queue";
 
 /** The guest app: light, large, calm. White-labelled per property through the session. */
 export function ConsumerShell({ children }: { children?: ReactNode }) {
-  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  // Start online so server and browser render the same HTML; the effect reads the real state.
+  const [online, setOnline] = useState(true);
 
   useEffect(() => {
     // Scoped to /consumer only: this app also serves /app and /officer, which must never be
@@ -17,6 +18,7 @@ export function ConsumerShell({ children }: { children?: ReactNode }) {
       void drainMediaQueue();
     };
     const off = () => setOnline(false);
+    setOnline(navigator.onLine !== false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => {

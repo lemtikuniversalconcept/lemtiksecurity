@@ -110,7 +110,8 @@ function IncidentsList({ appAccess, navigate }: { appAccess: ReturnType<typeof R
   const AUTO_OPEN_TAB_KEY = "lemtik-open-incident-tab";
   const canManage = appAccess.specRole !== "client_admin";
 
-  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  // Start online so server and browser render the same HTML; the effect reads the real state.
+  const [online, setOnline] = useState(true);
   const [pending, setPending] = useState<offline.QueuedIncident[]>([]);
   const refreshPending = () => setPending(offline.list());
   useEffect(() => {
@@ -123,6 +124,7 @@ function IncidentsList({ appAccess, navigate }: { appAccess: ReturnType<typeof R
       refreshPending();
     };
     window.addEventListener("offline", goOffline);
+    setOnline(navigator.onLine !== false);
     window.addEventListener("online", goOnline);
     const unsub = offline.subscribe(refreshPending);
     return () => {

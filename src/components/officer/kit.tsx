@@ -14,10 +14,12 @@ import * as incidentQueue from "@/lib/offlineQueue";
 /* ------------------------------------------------------------------ */
 
 export function useOnline() {
-  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  // Start online so server and browser render the same HTML; the effect reads the real state.
+  const [online, setOnline] = useState(true);
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
+    setOnline(navigator.onLine !== false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => {
