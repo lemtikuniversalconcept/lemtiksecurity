@@ -4,7 +4,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { listPlatformAuditLog } from "@/lib/platform.audit.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import { Download, FileJson, Loader2, Search, ShieldAlert } from "lucide-react";
+import { Download, FileJson, Loader2, Search } from "lucide-react";
+import { Empty, Notice, PageHeader } from "@/components/nw";
 
 export const Route = createFileRoute("/app/admin/audit")({
   head: () => ({ meta: [{ title: "Platform audit · Lemtik Admin" }] }),
@@ -68,98 +69,86 @@ function PlatformAudit() {
   };
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Admin Console</div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Platform audit log</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-300">
-          Complete immutable platform action log. Entries are append-only through the existing audit table and exported directly from live records.
-        </p>
-      </section>
+    <div className="col g16">
+      <PageHeader title="Platform audit log" sub="Every platform action across organisations. Rows can be added but never edited or deleted.">
+        <button type="button" className="b b-sec" onClick={() => download("platform-audit.csv", "text/csv;charset=utf-8", csv)} disabled={!filtered.length}>
+          <Download className="h-4 w-4" /> CSV
+        </button>
+        <button type="button" className="b b-gh" onClick={() => download("platform-audit.json", "application/json", JSON.stringify(filtered, null, 2))} disabled={!filtered.length}>
+          <FileJson className="h-4 w-4" /> JSON
+        </button>
+      </PageHeader>
 
-      <div className="rounded-3xl border border-border bg-card p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Filters</div>
-            <h2 className="text-lg font-semibold">Organisation, user, action, date range</h2>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => download("platform-audit.csv", "text/csv;charset=utf-8", csv)} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2">
-              <Download className="h-3.5 w-3.5" /> CSV
-            </button>
-            <button onClick={() => download("platform-audit.json", "application/json", JSON.stringify(filtered, null, 2))} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2">
-              <FileJson className="h-3.5 w-3.5" /> JSON
-            </button>
-          </div>
+      <section className="pn">
+        <div className="row g8 wrap" style={{ padding: "12px 14px" }}>
+          <select className="in" style={{ width: "auto", maxWidth: 240 }} value={org} onChange={(e) => setOrg(e.target.value)} aria-label="Organisation">
+            {orgs.map((o) => (
+              <option key={o} value={o}>
+                {o === "all" ? "Organisation: all" : o}
+              </option>
+            ))}
+          </select>
+          <label className="in row g8" style={{ width: 220 }}>
+            <Search className="h-4 w-4 t3" />
+            <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="Filter by person" aria-label="Filter by person" className="f1" style={{ background: "transparent", border: 0, outline: "none", color: "inherit", minWidth: 0 }} />
+          </label>
+          <select className="in" style={{ width: "auto", maxWidth: 240 }} value={action} onChange={(e) => setAction(e.target.value)} aria-label="Action">
+            {actions.map((a) => (
+              <option key={a} value={a}>
+                {a === "all" ? "Action: all" : a}
+              </option>
+            ))}
+          </select>
+          <input type="date" className="in mono" style={{ width: "auto" }} aria-label="From" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input type="date" className="in mono" style={{ width: "auto" }} aria-label="To" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-4">
-          <Select value={org} onChange={setOrg} options={orgs} />
-          <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <input value={user} onChange={(e) => setUser(e.target.value)} placeholder="Filter by user" className="bg-transparent text-sm outline-none" />
+        {isLoading ? (
+          <Empty>
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
+          </Empty>
+        ) : error ? (
+          <div className="pn-b">
+            <Notice tone="fail">{(error as Error).message}</Notice>
           </div>
-          <Select value={action} onChange={setAction} options={actions} />
-          <div className="grid grid-cols-2 gap-2">
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm" />
-          </div>
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="rounded-3xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading platform audit log…
-        </div>
-      ) : error ? (
-        <div className="rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">{(error as Error).message}</div>
-      ) : (
-        <div className="overflow-hidden rounded-3xl border border-border bg-card">
-          <table className="min-w-full text-sm">
-            <thead className="bg-surface text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-              <tr>
-                <Th>Timestamp</Th>
-                <Th>Org</Th>
-                <Th>User</Th>
-                <Th>Action</Th>
-                <Th>Resource</Th>
-                <Th>IP address</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((row: any) => (
-                <tr key={row.id}>
-                  <Td>{new Intl.DateTimeFormat("en-NG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(row.created_at))}</Td>
-                  <Td>{row.org_name}</Td>
-                  <Td>{row.user_name}</Td>
-                  <Td>{row.action}</Td>
-                  <Td className="font-mono text-xs">{row.resource}</Td>
-                  <Td className="font-mono text-xs text-muted-foreground">{row.ip_address ?? "—"}</Td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
+        ) : filtered.length === 0 ? (
+          <Empty>No rows match these filters.</Empty>
+        ) : (
+          <div className="scroll">
+            <table className="tbl">
+              <thead>
                 <tr>
-                  <Td colSpan={6}>
-                    <div className="py-10 text-center text-sm text-muted-foreground">
-                      No audit rows matched the current filters.
-                    </div>
-                  </Td>
+                  <th>When</th>
+                  <th>Organisation</th>
+                  <th>Who</th>
+                  <th>Action</th>
+                  <th>Resource</th>
+                  <th>IP</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <div className="rounded-3xl border border-border bg-card p-5 text-sm text-muted-foreground">
-        <div className="flex items-start gap-2">
-          <ShieldAlert className="mt-0.5 h-4 w-4 text-critical" />
-          <div>
-            <div className="font-medium text-foreground">Append-only guarantee</div>
-            <div>The platform audit log is read-only in the UI and backed by the existing append-only audit table. No edit or delete actions are exposed here.</div>
+              </thead>
+              <tbody>
+                {filtered.map((row: any) => (
+                  <tr key={row.id}>
+                    <td className="mono t2" style={{ whiteSpace: "nowrap", fontSize: 12 }}>
+                      {new Date(row.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </td>
+                    <td>{row.org_name}</td>
+                    <td>{row.user_name}</td>
+                    <td className="mono" style={{ fontSize: 12.5 }}>
+                      {row.action}
+                    </td>
+                    <td className="mono t2" style={{ fontSize: 12 }}>
+                      {row.resource}
+                    </td>
+                    <td className="mono t3" style={{ fontSize: 12 }}>
+                      {row.ip_address ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -169,28 +158,3 @@ function csvCell(value: unknown) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
-function Select({
-  value,
-  onChange,
-  options,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-}) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm">
-      {options.map((opt) => (
-        <option key={opt} value={opt}>{opt}</option>
-      ))}
-    </select>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-3 text-left font-medium">{children}</th>;
-}
-
-function Td({ children, colSpan }: { children: React.ReactNode; colSpan?: number }) {
-  return <td colSpan={colSpan} className="px-4 py-3">{children}</td>;
-}
