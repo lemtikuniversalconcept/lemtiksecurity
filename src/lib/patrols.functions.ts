@@ -29,7 +29,13 @@ export const getPatrol = createServerFn({ method: "GET" })
     ]);
     if (p.error) throwSafeError("patrols.get", p.error, "Unable to load patrol.");
     if (!p.data) throwSafeError("patrols.get", new Error("not found"), "Patrol not found.");
-    return { patrol: p.data, waypoints: w.data ?? [] };
+    // Each stop's QR secret is what proves an officer was physically there, so only people who
+    // print the codes (supervisors and above) receive it.
+    const { data: member } = await context.supabase
+      .from("organisation_members").select("role").eq("organisation_id", orgId).eq("user_id", context.userId).maybeSingle();
+    const canSeeQr = !!member && ["supervisor", "manager", "client_admin", "lemtik_admin"].includes(member.role as string);
+    const waypoints = ((w.data ?? []) as any[]).map((row) => (canSeeQr ? row : { ...row, qr_token: undefined }));
+    return { patrol: p.data, waypoints };
   });
 
 // Every waypoint in the org in one read, so the live map can draw real routes without a
@@ -163,24 +169,37 @@ export const saveWaypoints = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
-    // Replace strategy: delete + insert
-    const del = await context.supabase.from("patrol_waypoints" as any).delete().eq("patrol_id", data.patrol_id);
-    if (del.error) throwSafeError("wp.del", del.error, "Unable to update waypoints.");
-    if (data.waypoints.length) {
-      const rows = data.waypoints.map((w, i) => ({
-        patrol_id: data.patrol_id, organisation_id: orgId,
-        ord: i, name: w.name, coord_x: w.coord_x ?? null, coord_y: w.coord_y ?? null,
-        expected_minutes: w.expected_minutes,
-      }));
-      const ins = await context.supabase.from("patrol_waypoints" as any).insert(rows);
-      if (ins.error) throwSafeError("wp.ins", ins.error, "Unable to save waypoints.");
+    // Update stops in place. The old delete-and-reinsert gave every stop a new id and QR secret
+    // on each save and, because check-ins cascade-delete with their stop, erased the route's
+    // check-in history. Only stops the manager actually removed are deleted now.
+    const { data: existingRows, error: readErr } = await context.supabase
+      .from("patrol_waypoints" as any)
+      .select("id")
+      .eq("patrol_id", data.patrol_id);
+    if (readErr) throwSafeError("wp.read", readErr, "Unable to update waypoints.");
+    const existing = new Set(((existingRows ?? []) as unknown as { id: string }[]).map((r) => r.id));
+    const keep = new Set<string>();
+
+    for (const [i, w] of data.waypoints.entries()) {
+      const fields = { ord: i, name: w.name, coord_x: w.coord_x ?? null, coord_y: w.coord_y ?? null, expected_minutes: w.expected_minutes };
+      if (w.id && existing.has(w.id)) {
+        keep.add(w.id);
+        const { error } = await context.supabase.from("patrol_waypoints" as any).update(fields).eq("id", w.id).eq("patrol_id", data.patrol_id);
+        if (error) throwSafeError("wp.update", error, "Unable to save waypoints.");
+      } else {
+        const { error } = await context.supabase.from("patrol_waypoints" as any).insert({ ...fields, patrol_id: data.patrol_id, organisation_id: orgId });
+        if (error) throwSafeError("wp.ins", error, "Unable to save waypoints.");
+      }
     }
-    // sync count on patrol
-    await context.supabase.from("patrols")
-      .update({ waypoints: data.waypoints.length })
-      .eq("id", data.patrol_id);
-    return { ok: true, count: data.waypoints.length };
+    const removed = [...existing].filter((id) => !keep.has(id));
+    if (removed.length) {
+      const { error } = await context.supabase.from("patrol_waypoints" as any).delete().in("id", removed);
+      if (error) throwSafeError("wp.del", error, "Unable to remove waypoints.");
+    }
+    await context.supabase.from("patrols").update({ waypoints: data.waypoints.length }).eq("id", data.patrol_id);
+    return { ok: true, count: data.waypoints.length, removed: removed.length };
   });
+
 
 // ---- Shifts ----
 export const listShifts = createServerFn({ method: "GET" })
@@ -307,8 +326,11 @@ export const recordCheckIn = createServerFn({ method: "POST" })
       distance = approximateMeters([Number(wp.coord_x), Number(wp.coord_y)], [data.coord_x, data.coord_y]);
       if (distance > 50) status = "out_of_zone";
     }
-    if (data.method === "qr" && data.qr_token !== wp.qr_token) {
-      throwSafeError("ci.qr", new Error("bad token"), "QR code does not match this waypoint.");
+    if (wp.patrol_id !== shift.patrol_id) {
+      throwSafeError("ci.route", new Error("waypoint not on shift route"), "That checkpoint isn't on your patrol route.");
+    }
+    if (data.method === "qr" && (!data.qr_token || data.qr_token !== wp.qr_token)) {
+      throwSafeError("ci.qr", new Error("bad token"), "That QR code doesn't match this checkpoint. It may be an old print.");
     }
 
     const expectedAt = new Date(shift.scheduled_start).getTime() + (wp.ord + 1) * wp.expected_minutes * 60_000;
