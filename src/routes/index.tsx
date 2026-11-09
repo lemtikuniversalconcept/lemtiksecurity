@@ -1,168 +1,103 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ShieldHalf, Radar, Map, Bell, BarChart3, ArrowRight, Activity } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { FundingBanner } from "@/components/FundingBanner";
 import { FundingPopup } from "@/components/FundingPopup";
+import { LemtikMark } from "@/components/nw";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Lemtik Security — Lagos Urban Intelligence Platform" },
-      {
-        name: "description",
-        content:
-          "Centralised incident reporting, patrol tracking, and threat intelligence for Lagos estates, hotels, and enterprises.",
-      },
-      { property: "og:title", content: "Lemtik Security — Lagos Urban Intelligence Platform" },
-      {
-        property: "og:description",
-        content:
-          "Replace WhatsApp groups and spreadsheets with a single command and control surface.",
-      },
+      { title: "Lemtik Security" },
+      { name: "description", content: "Incident reporting, patrol check-ins and alerts for estate, hotel and corporate security teams in Lagos." },
+      { property: "og:title", content: "Lemtik Security" },
+      { property: "og:description", content: "Replace WhatsApp groups and paper logs with one shared picture of what's happening on site." },
     ],
   }),
   component: Landing,
 });
 
+const MODULES = [
+  { t: "Live map", d: "Incidents, officers and patrol routes on one map, from the positions they actually report." },
+  { t: "Incident reporting", d: "Structured reports with photos, video and voice notes, tracked from reported to resolved or escalated." },
+  { t: "Patrols", d: "GPS check-ins at each stop, with late and out-of-zone check-ins shown to supervisors." },
+  { t: "Alerts and dispatch", d: "In-app alerts and dispatches to officers. SMS, WhatsApp and email go out where those channels are configured." },
+  { t: "Escalation records", d: "Log escalations to police, LASEMA or NSCDC on the incident, with the brief you sent and who sent it." },
+  { t: "Reports and audit", d: "Printable daily, weekly and monthly reports from live records, and an append-only audit log." },
+];
+
 function Landing() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div style={{ minHeight: "100vh", background: "var(--ink-0)", color: "var(--tx-1)" }}>
       <FundingBanner />
       <FundingPopup />
-      <header className="border-b border-border">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 border border-primary/40">
-              <ShieldHalf className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold tracking-tight">LEMTIK SECURITY</div>
-              <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                Lagos Operations
-              </div>
-            </div>
-          </div>
-          <Link
-            to="/app"
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            Open dashboard <ArrowRight className="h-3.5 w-3.5" />
+      <header style={{ borderBottom: "1px solid var(--line-1)" }}>
+        <div className="row g12" style={{ maxWidth: 1120, margin: "0 auto", padding: "14px 24px" }}>
+          <LemtikMark size={28} />
+          <b style={{ letterSpacing: ".04em" }}>LEMTIK</b>
+          <span className="flex-auto" />
+          <Link to="/login" search={{ redirect: undefined }} className="b b-pri">
+            Sign in <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </header>
 
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 grid-bg opacity-50" />
-        <div className="absolute inset-0" style={{ background: "var(--gradient-radar)" }} />
-        <div className="relative mx-auto max-w-6xl px-6 py-24 lg:py-32">
-          <div className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-[11px] uppercase tracking-wider text-primary">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary pulse-dot" />
-            Onboarding pilot partners in Lagos
+      <section style={{ maxWidth: 1120, margin: "0 auto", padding: "88px 24px 64px" }}>
+        <span className="tg tg-blue">Onboarding pilot partners in Lagos</span>
+        <h1 style={{ fontSize: "clamp(36px, 6vw, 60px)", fontWeight: 700, lineHeight: 1.05, letterSpacing: "-.02em", margin: "20px 0 0", maxWidth: 820, textWrap: "balance" as never }}>
+          Your security team, on one screen.
+        </h1>
+        <p className="t2" style={{ fontSize: 18, lineHeight: 1.55, maxWidth: 640, margin: "20px 0 0" }}>
+          Lemtik replaces WhatsApp groups, paper logs and verbal handovers with one shared picture for estate, hotel and corporate security teams: what's happening, who's on it, and what happened next.
+        </p>
+        <div className="row g10 wrap" style={{ marginTop: 28 }}>
+          <Link to="/login" search={{ redirect: undefined }} className="b b-pri b-lg">
+            Sign in <ArrowRight className="h-4 w-4" />
+          </Link>
+          <a href="#modules" className="b b-sec b-lg">
+            What it does
+          </a>
+        </div>
+      </section>
+
+      <section id="modules" style={{ borderTop: "1px solid var(--line-1)" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto", padding: "56px 24px 72px" }}>
+          <h2 style={{ fontSize: 26, fontWeight: 650, margin: 0 }}>What's in it</h2>
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3" style={{ marginTop: 24 }}>
+            {MODULES.map((m) => (
+              <div key={m.t} className="pn" style={{ padding: 18, gap: 8 }}>
+                <b style={{ fontSize: 15.5 }}>{m.t}</b>
+                <span className="t2" style={{ fontSize: 14, lineHeight: 1.55 }}>
+                  {m.d}
+                </span>
+              </div>
+            ))}
           </div>
-          <h1 className="mt-6 max-w-3xl text-4xl lg:text-6xl font-semibold tracking-tight leading-[1.05]">
-            Lagos urban security,
-            <br />
-            running on one screen.
-          </h1>
-          <p className="mt-6 max-w-2xl text-base lg:text-lg text-muted-foreground leading-relaxed">
-            Lemtik replaces WhatsApp groups, paper logs, and verbal handovers with a single command
-            and control surface for estate, corporate, and hospitality security teams.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link
-              to="/app"
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              See it live <ArrowRight className="h-4 w-4" />
+          <div className="grid gap-3 md:grid-cols-2" style={{ marginTop: 24 }}>
+            <Link to="/officer" className="card row g12" style={{ padding: 18 }}>
+              <span className="col f1">
+                <b>Officer app</b>
+                <span className="t2" style={{ fontSize: 13.5 }}>For officers on patrol. Install it on your phone.</span>
+              </span>
+              <ArrowRight className="h-4 w-4" />
             </Link>
-            <a
-              href="#modules"
-              className="inline-flex items-center rounded-md border border-border bg-surface px-4 py-2.5 text-sm hover:bg-surface-2"
-            >
-              How it works
-            </a>
-          </div>
-
-          <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-px bg-border rounded-lg overflow-hidden border border-border max-w-3xl">
-            {[
-              { v: "MVP", l: "Built & tested" },
-              { v: "6", l: "Platform modules" },
-              { v: "100%", l: "Actions audited" },
-              { v: "Pre-seed", l: "Funding stage" },
-            ].map((s) => (
-              <div key={s.l} className="bg-card p-4">
-                <div className="text-2xl font-semibold tracking-tight">{s.v}</div>
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">
-                  {s.l}
-                </div>
-              </div>
-            ))}
+            <Link to="/consumer/activate" search={{ token: undefined, reason: undefined }} className="card row g12" style={{ padding: 18 }}>
+              <span className="col f1">
+                <b>Guest emergency help</b>
+                <span className="t2" style={{ fontSize: 13.5 }}>For hotel and estate guests with a code from reception.</span>
+              </span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         </div>
       </section>
 
-      <section id="modules" className="border-t border-border">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            The Platform
-          </div>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-            Six modules, one operating picture.
-          </h2>
-          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              {
-                i: Map,
-                t: "Live Incident Map",
-                d: "Spatial awareness across every zone. Pins colour-coded by severity, real-time updates, heatmap overlays.",
-              },
-              {
-                i: Activity,
-                t: "Incident Reporting",
-                d: "Structured forms, evidence attachments, full lifecycle from reported through resolved or escalated.",
-              },
-              {
-                i: Radar,
-                t: "Patrol Management",
-                d: "QR & GPS check-ins kill ghost guarding. Supervisors see exactly which waypoints were missed and by how long.",
-              },
-              {
-                i: Bell,
-                t: "Tiered Alerts",
-                d: "In-app, SMS, WhatsApp, email. One-tap escalation to Nigeria Police and LASAMBUS with a pre-filled incident brief.",
-              },
-              {
-                i: BarChart3,
-                t: "Intelligence Reports",
-                d: "Daily, weekly, monthly briefs — branded and board-ready. Zone risk scoring built in.",
-              },
-              {
-                i: ShieldHalf,
-                t: "Role-based Access",
-                d: "Field officer, supervisor, manager, client admin. Multi-location, multi-client, fully audited.",
-              },
-            ].map((m) => (
-              <div key={m.t} className="rounded-lg border border-border bg-card p-5">
-                <div className="grid h-9 w-9 place-items-center rounded-md bg-primary/10 border border-primary/30 text-primary">
-                  <m.i className="h-4 w-4" />
-                </div>
-                <div className="mt-4 text-base font-semibold">{m.t}</div>
-                <div className="mt-1.5 text-sm text-muted-foreground leading-relaxed">{m.d}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <footer className="border-t border-border">
-        <div className="mx-auto max-w-6xl px-6 py-8 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-          <div>© {new Date().getFullYear()} Lemtik Security · Lagos, Nigeria</div>
-          <a
-            href="https://lemtik.com.ng"
-            className="hover:text-foreground transition-colors"
-          >
+      <footer style={{ borderTop: "1px solid var(--line-1)" }}>
+        <div className="row g12 wrap t3" style={{ maxWidth: 1120, margin: "0 auto", padding: "20px 24px", fontSize: 12.5 }}>
+          <span>© {new Date().getFullYear()} Lemtik Security · Lagos, Nigeria</span>
+          <span className="flex-auto" />
+          <a href="https://lemtik.com.ng" className="lnk">
             lemtik.com.ng
           </a>
-          <div className="font-mono">SOD v1.0</div>
         </div>
       </footer>
     </div>
