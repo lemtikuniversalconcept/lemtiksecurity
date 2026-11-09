@@ -27,6 +27,7 @@ import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
 import { Route as AppInventoryRouteImport } from './routes/app.inventory'
 import { Route as AppLocationsRouteImport } from './routes/app.locations'
 import { Route as AppMapRouteImport } from './routes/app.map'
+import { Route as AppMovementRouteImport } from './routes/app.movement'
 import { Route as AppOrgRouteImport } from './routes/app.org'
 import { Route as AppPatrolsRouteImport } from './routes/app.patrols'
 import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
@@ -50,6 +51,8 @@ import { Route as OfficerNotificationsRouteImport } from './routes/officer.notif
 import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
 import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
+import { Route as TrackTokenRouteImport } from './routes/track.$token'
+import { Route as ApiTrackOsmandRouteImport } from './routes/api.track.osmand'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
 import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
@@ -153,6 +156,11 @@ const AppLocationsRoute = AppLocationsRouteImport.update({
 const AppMapRoute = AppMapRouteImport.update({
   id: '/map',
   path: '/map',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMovementRoute = AppMovementRouteImport.update({
+  id: '/movement',
+  path: '/movement',
   getParentRoute: () => AppRoute,
 } as any)
 const AppOrgRoute = AppOrgRouteImport.update({
@@ -270,6 +278,16 @@ const OfficerSosRoute = OfficerSosRouteImport.update({
   path: '/sos',
   getParentRoute: () => OfficerRoute,
 } as any)
+const TrackTokenRoute = TrackTokenRouteImport.update({
+  id: '/track/$token',
+  path: '/track/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTrackOsmandRoute = ApiTrackOsmandRouteImport.update({
+  id: '/api/track/osmand',
+  path: '/api/track/osmand',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/admin/audit',
   path: '/admin/audit',
@@ -359,6 +377,7 @@ export interface FileRoutesByFullPath {
   '/app/inventory': typeof AppInventoryRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
+  '/app/movement': typeof AppMovementRoute
   '/app/org': typeof AppOrgRoute
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
@@ -379,10 +398,12 @@ export interface FileRoutesByFullPath {
   '/officer/patrol': typeof OfficerPatrolRoute
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
+  '/track/$token': typeof TrackTokenRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
+  '/api/track/osmand': typeof ApiTrackOsmandRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -412,6 +433,7 @@ export interface FileRoutesByTo {
   '/app/inventory': typeof AppInventoryRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
+  '/app/movement': typeof AppMovementRoute
   '/app/org': typeof AppOrgRoute
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
@@ -432,10 +454,12 @@ export interface FileRoutesByTo {
   '/officer/patrol': typeof OfficerPatrolRoute
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
+  '/track/$token': typeof TrackTokenRoute
   '/app': typeof AppIndexRoute
   '/consumer': typeof ConsumerIndexRoute
   '/forensic': typeof ForensicIndexRoute
   '/officer': typeof OfficerIndexRoute
+  '/api/track/osmand': typeof ApiTrackOsmandRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -470,6 +494,7 @@ export interface FileRoutesById {
   '/app/inventory': typeof AppInventoryRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
+  '/app/movement': typeof AppMovementRoute
   '/app/org': typeof AppOrgRoute
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
@@ -490,10 +515,12 @@ export interface FileRoutesById {
   '/officer/patrol': typeof OfficerPatrolRoute
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
+  '/track/$token': typeof TrackTokenRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
+  '/api/track/osmand': typeof ApiTrackOsmandRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -529,6 +556,7 @@ export interface FileRouteTypes {
     | '/app/inventory'
     | '/app/locations'
     | '/app/map'
+    | '/app/movement'
     | '/app/org'
     | '/app/patrols'
     | '/app/report-centre'
@@ -549,10 +577,12 @@ export interface FileRouteTypes {
     | '/officer/patrol'
     | '/officer/schedule'
     | '/officer/sos'
+    | '/track/$token'
     | '/app/'
     | '/consumer/'
     | '/forensic/'
     | '/officer/'
+    | '/api/track/osmand'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -582,6 +612,7 @@ export interface FileRouteTypes {
     | '/app/inventory'
     | '/app/locations'
     | '/app/map'
+    | '/app/movement'
     | '/app/org'
     | '/app/patrols'
     | '/app/report-centre'
@@ -602,10 +633,12 @@ export interface FileRouteTypes {
     | '/officer/patrol'
     | '/officer/schedule'
     | '/officer/sos'
+    | '/track/$token'
     | '/app'
     | '/consumer'
     | '/forensic'
     | '/officer'
+    | '/api/track/osmand'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -639,6 +672,7 @@ export interface FileRouteTypes {
     | '/app/inventory'
     | '/app/locations'
     | '/app/map'
+    | '/app/movement'
     | '/app/org'
     | '/app/patrols'
     | '/app/report-centre'
@@ -659,10 +693,12 @@ export interface FileRouteTypes {
     | '/officer/patrol'
     | '/officer/schedule'
     | '/officer/sos'
+    | '/track/$token'
     | '/app/'
     | '/consumer/'
     | '/forensic/'
     | '/officer/'
+    | '/api/track/osmand'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -689,6 +725,8 @@ export interface RootRouteChildren {
   OfficerRoute: typeof OfficerRouteWithChildren
   OnboardingRoute: typeof OnboardingRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  TrackTokenRoute: typeof TrackTokenRoute
+  ApiTrackOsmandRoute: typeof ApiTrackOsmandRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -817,6 +855,13 @@ declare module '@tanstack/react-router' {
       path: '/map'
       fullPath: '/app/map'
       preLoaderRoute: typeof AppMapRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/movement': {
+      id: '/app/movement'
+      path: '/movement'
+      fullPath: '/app/movement'
+      preLoaderRoute: typeof AppMovementRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/org': {
@@ -980,6 +1025,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OfficerSosRouteImport
       parentRoute: typeof OfficerRoute
     }
+    '/track/$token': {
+      id: '/track/$token'
+      path: '/track/$token'
+      fullPath: '/track/$token'
+      preLoaderRoute: typeof TrackTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/track/osmand': {
+      id: '/api/track/osmand'
+      path: '/api/track/osmand'
+      fullPath: '/api/track/osmand'
+      preLoaderRoute: typeof ApiTrackOsmandRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/admin/audit': {
       id: '/app/admin/audit'
       path: '/admin/audit'
@@ -1139,6 +1198,7 @@ interface AppRouteChildren {
   AppInventoryRoute: typeof AppInventoryRoute
   AppLocationsRoute: typeof AppLocationsRoute
   AppMapRoute: typeof AppMapRoute
+  AppMovementRoute: typeof AppMovementRoute
   AppOrgRoute: typeof AppOrgRoute
   AppPatrolsRoute: typeof AppPatrolsRouteWithChildren
   AppReportCentreRoute: typeof AppReportCentreRoute
@@ -1161,6 +1221,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppInventoryRoute: AppInventoryRoute,
   AppLocationsRoute: AppLocationsRoute,
   AppMapRoute: AppMapRoute,
+  AppMovementRoute: AppMovementRoute,
   AppOrgRoute: AppOrgRoute,
   AppPatrolsRoute: AppPatrolsRouteWithChildren,
   AppReportCentreRoute: AppReportCentreRoute,
@@ -1281,6 +1342,8 @@ const rootRouteChildren: RootRouteChildren = {
   OfficerRoute: OfficerRouteWithChildren,
   OnboardingRoute: OnboardingRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  TrackTokenRoute: TrackTokenRoute,
+  ApiTrackOsmandRoute: ApiTrackOsmandRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

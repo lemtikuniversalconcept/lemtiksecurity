@@ -107,3 +107,20 @@ export async function mapboxGeocode(q: string, near?: LngLat, country = "ng"): P
     coord: f.geometry.coordinates,
   }));
 }
+
+/**
+ * Snap a GPS trail to the road or footpath network (Mapbox Map Matching, free up to 100,000
+ * requests a month). Takes up to 100 points per call, so long trails are thinned first.
+ * Returns null if Mapbox can't match the trail; the caller then shows the raw GPS line.
+ */
+export async function mapboxMatchTrail(points: LngLat[], profile: "driving" | "walking" | "cycling"): Promise<LngLat[] | null> {
+  if (points.length < 2) return null;
+  const step = Math.ceil(points.length / 100);
+  const thinned = points.filter((_, i) => i % step === 0 || i === points.length - 1).slice(0, 100);
+  const r = await get<{ matchings?: Array<{ geometry: { coordinates: LngLat[] }; confidence: number }> }>(
+    `/matching/v5/mapbox/${profile}/${thinned.map(pair).join(";")}`,
+    { geometries: "geojson", overview: "full", tidy: true },
+  );
+  if (!r?.matchings?.length) return null;
+  return r.matchings.flatMap((m) => m.geometry.coordinates);
+}
