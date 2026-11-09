@@ -1,6 +1,7 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { FileSearch, History, ScanSearch } from "lucide-react";
+import { FileSearch, History } from "lucide-react";
+import { LemtikMark, Seg } from "@/components/nw";
 import type { ReactNode } from "react";
 
 const nav = [
@@ -31,11 +32,8 @@ export function ForensicShell({ children }: { children?: ReactNode }) {
   const activeCaseId = caseMatch && caseMatch[1] !== "new" ? caseMatch[1] : null;
 
   return (
-    <div className="min-h-screen bg-[#0a0f1e] text-[#e2e8f0]">
-      {/* Case detail pages render their own printable summary in a print:block
-          element — everything else in the shell (nav, mode toggle, on-screen
-          panels) is dark-themed and pointless on paper, so it's suppressed here
-          rather than in every page that might print. */}
+    <div style={{ minHeight: "100vh", background: "var(--ink-0)", color: "var(--tx-1)" }}>
+      {/* Case pages render their own printable case file; the dark shell is suppressed on paper. */}
       <style>{`
         @media print {
           .forensic-no-print { display: none !important; }
@@ -43,70 +41,38 @@ export function ForensicShell({ children }: { children?: ReactNode }) {
         }
       `}</style>
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px]">
-        <aside className="forensic-no-print hidden w-64 shrink-0 border-r border-[#2d3748] bg-[#111827] px-4 py-5 lg:block">
-          <div className="flex items-center gap-2.5 px-1">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#3b82f6]/15 text-[#3b82f6]">
-              <ScanSearch className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-[#94a3b8]">Forensic</div>
-              <div className="text-sm font-semibold text-white">Case Review</div>
-            </div>
+        <aside className="forensic-no-print hidden w-60 shrink-0 lg:flex" style={{ flexDirection: "column", gap: 18, padding: "18px 12px", borderRight: "1px solid var(--line-1)", background: "var(--ink-1)" }}>
+          <div className="row g10" style={{ padding: "0 6px" }}>
+            <LemtikMark size={28} />
+            <span className="col">
+              <b style={{ fontSize: 14 }}>Lemtik</b>
+              <span className="t3" style={{ fontSize: 11.5 }}>Forensic review</span>
+            </span>
           </div>
-
-          <nav className="mt-6 flex flex-col gap-1">
+          <nav className="nav col g4" aria-label="Forensic">
             {nav.map((item) => {
               const active = pathname === item.to || pathname.startsWith(item.to + "/");
               const Icon = item.icon;
               return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
-                    active ? "bg-[#3b82f6]/15 text-white" : "text-[#94a3b8] hover:bg-white/5 hover:text-[#e2e8f0]"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
+                <Link key={item.to} to={item.to} className={`row g10${active ? " on" : ""}`} aria-current={active ? "page" : undefined} style={{ padding: "8px 10px", borderRadius: 8, background: active ? "var(--ink-3)" : undefined, color: active ? "var(--tx-1)" : "var(--tx-2)", fontSize: 13.5 }}>
+                  <Icon className="h-4 w-4" /> {item.label}
                 </Link>
               );
             })}
           </nav>
-
-          <div className="mt-8 rounded-lg border border-[#2d3748] bg-[#1a2234] px-3 py-2.5 text-[11px] leading-relaxed text-[#94a3b8]">
-            Read-only. Nothing here can be created, edited, or deleted — this view is for case review only.
+          <div className="card t3" style={{ padding: "10px 12px", fontSize: 12, lineHeight: 1.5, marginTop: "auto" }}>
+            Case records are read-only here. You can add analyst notes; they're kept on the case timeline with your name.
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="forensic-no-print flex items-center justify-between gap-3 border-b border-[#2d3748] bg-[#111827] px-4 py-3 sm:px-6">
-            <div className="flex items-center gap-2 text-xs text-[#94a3b8]">
-              {activeCaseId ? (
-                <span className="rounded-full border border-[#2d3748] bg-[#1a2234] px-2.5 py-1 font-mono text-[11px] text-[#e2e8f0]">
-                  Case: {activeCaseId.slice(0, 8).toUpperCase()}
-                </span>
-              ) : (
-                <span>Security Forensic Analyst</span>
-              )}
-            </div>
-            <div className="flex items-center gap-1 rounded-full border border-[#2d3748] bg-[#1a2234] p-1 text-xs">
-              <button
-                type="button"
-                onClick={() => setMode("plain")}
-                className={`rounded-full px-3 py-1 transition-colors ${mode === "plain" ? "bg-[#3b82f6] text-white" : "text-[#94a3b8]"}`}
-              >
-                Plain
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("technical")}
-                className={`rounded-full px-3 py-1 transition-colors ${mode === "technical" ? "bg-[#3b82f6] text-white" : "text-[#94a3b8]"}`}
-              >
-                Technical
-              </button>
-            </div>
+          <header className="forensic-no-print row g12" style={{ padding: "10px 20px", borderBottom: "1px solid var(--line-1)", background: "var(--ink-1)", position: "sticky", top: 0, zIndex: 20 }}>
+            {activeCaseId ? <span className="tg mono">Case {activeCaseId.slice(0, 8).toUpperCase()}</span> : <span className="t3" style={{ fontSize: 13 }}>Security forensic analyst</span>}
+            <span className="flex-auto" />
+            <span className="t3" style={{ fontSize: 12 }}>Explanations</span>
+            <Seg label="Explanation style" value={mode} onChange={setMode} options={[{ value: "plain", label: "Plain" }, { value: "technical", label: "Technical" }]} />
           </header>
-          <main className="flex-1 px-4 py-5 sm:px-6">{children ?? <Outlet />}</main>
+          <main className="flex-1" style={{ padding: "20px 24px" }}>{children ?? <Outlet />}</main>
         </div>
       </div>
     </div>

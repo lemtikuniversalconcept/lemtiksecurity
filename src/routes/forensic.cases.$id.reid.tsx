@@ -35,12 +35,12 @@ function ReidPage() {
   }, [data]);
 
   if (isLoading) {
-    return <div className="flex items-center gap-2 text-sm text-[#94a3b8]"><Loader2 className="h-4 w-4 animate-spin" /> Loading Re-ID telemetry…</div>;
+    return <div className="flex items-center gap-2 text-sm text-[var(--tx-3)]"><Loader2 className="h-4 w-4 animate-spin" /> Loading Re-ID telemetry…</div>;
   }
 
   if (targets.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-[#2d3748] py-14 text-center text-sm text-[#94a3b8]">
+      <div className="rounded-lg border border-dashed border-[var(--line-2)] py-14 text-center text-sm text-[var(--tx-3)]">
         <ScanFace className="mx-auto mb-2 h-6 w-6 opacity-60" />
         No cross-camera Re-ID telemetry correlates to this incident's time and location.
         <div className="mt-1 text-xs">
@@ -60,19 +60,19 @@ function ReidPage() {
         signal, not a verified link to this specific case.
       </div>
 
-      <div className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-        <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Camera-to-camera path — {activeTarget.targetId}</h2>
+      <div className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] p-4">
+        <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Camera-to-camera path — {activeTarget.targetId}</h2>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {activeTarget.cameras.map((cam, i) => (
             <div key={cam} className="flex items-center gap-2">
-              <span className="rounded-md border border-[#2d3748] bg-black/20 px-2.5 py-1.5 text-xs text-[#e2e8f0]">{cam}</span>
-              {i < activeTarget.cameras.length - 1 && <ArrowRight className="h-3.5 w-3.5 text-[#94a3b8]" />}
+              <span className="rounded-md border border-[var(--line-2)] bg-black/20 px-2.5 py-1.5 text-xs text-[var(--tx-1)]">{cam}</span>
+              {i < activeTarget.cameras.length - 1 && <ArrowRight className="h-3.5 w-3.5 text-[var(--tx-3)]" />}
             </div>
           ))}
         </div>
         <div className="mt-3 space-y-1.5">
           {activeTarget.events.map((e: any, i: number) => (
-            <div key={i} className="flex items-center justify-between text-xs text-[#94a3b8]">
+            <div key={i} className="flex items-center justify-between text-xs text-[var(--tx-3)]">
               <span>{e.camera_id}</span>
               <span>{new Date(e.timestamp).toLocaleString()}</span>
               <span>{e.reid_confidence != null ? `${Math.round(e.reid_confidence * 100)}% confidence` : "—"}</span>
@@ -81,9 +81,9 @@ function ReidPage() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-[#2d3748]">
+      <div className="overflow-x-auto rounded-lg border border-[var(--line-2)]">
         <table className="w-full text-sm">
-          <thead className="bg-[#111827] text-[10px] uppercase tracking-wider text-[#94a3b8]">
+          <thead className="bg-[var(--ink-1)] text-[10px] uppercase tracking-wider text-[var(--tx-3)]">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Target</th>
               <th className="px-4 py-3 text-left font-medium">First seen</th>
@@ -92,20 +92,20 @@ function ReidPage() {
               <th className="px-4 py-3 text-left font-medium">Avg. confidence</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#2d3748] bg-[#1a2234]">
+          <tbody className="divide-y divide-[var(--line-2)] bg-[var(--ink-2)]">
             {targets.map((t) => (
               <tr
                 key={t.targetId}
                 onClick={() => setSelected(t.targetId)}
                 className={`cursor-pointer hover:bg-white/5 ${t.targetId === activeTarget.targetId ? "bg-white/5" : ""}`}
               >
-                <td className="px-4 py-3 font-mono text-xs text-[#e2e8f0]">{t.targetId}</td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{t.events[0]?.camera_id} · {new Date(t.events[0]?.timestamp).toLocaleTimeString()}</td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">
+                <td className="px-4 py-3 font-mono text-xs text-[var(--tx-1)]">{t.targetId}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{t.events[0]?.camera_id} · {new Date(t.events[0]?.timestamp).toLocaleTimeString()}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">
                   {t.events[t.events.length - 1]?.camera_id} · {new Date(t.events[t.events.length - 1]?.timestamp).toLocaleTimeString()}
                 </td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{t.cameras.length}</td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{t.avgConfidence != null ? `${Math.round(t.avgConfidence * 100)}%` : "—"}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{t.cameras.length}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{t.avgConfidence != null ? `${Math.round(t.avgConfidence * 100)}%` : "—"}</td>
               </tr>
             ))}
           </tbody>

@@ -10,11 +10,11 @@ export const Route = createFileRoute("/forensic/cases")({
 });
 
 const SEVERITY_COLOR: Record<number, string> = {
-  1: "bg-[#22c55e]/15 text-[#22c55e]",
-  2: "bg-[#22c55e]/15 text-[#22c55e]",
-  3: "bg-[#f59e0b]/15 text-[#f59e0b]",
-  4: "bg-[#ef4444]/15 text-[#ef4444]",
-  5: "bg-[#ef4444]/20 text-[#ef4444]",
+  1: "bg-[color-mix(in_oklab,var(--ok)_16%,transparent)] text-[var(--ok)]",
+  2: "bg-[color-mix(in_oklab,var(--ok)_16%,transparent)] text-[var(--ok)]",
+  3: "bg-[color-mix(in_oklab,var(--warn)_16%,transparent)] text-[var(--warn)]",
+  4: "bg-[color-mix(in_oklab,var(--s5)_16%,transparent)] text-[var(--s5)]",
+  5: "bg-[color-mix(in_oklab,var(--s5)_16%,transparent)] text-[var(--s5)]",
 };
 
 function CasesRoute() {
@@ -52,24 +52,24 @@ function CasesList() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-lg font-semibold text-white">Cases</h1>
-        <p className="text-sm text-[#94a3b8]">Read-only case review. Select a case to open its timeline, evidence, and AI assistant.</p>
+        <h1 className="text-lg font-semibold text-[var(--tx-1)]">Cases</h1>
+        <p className="text-sm text-[var(--tx-3)]">Read-only case review. Select a case to open its timeline, evidence, and AI assistant.</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px]">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94a3b8]" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--tx-3)]" />
           <input
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             placeholder="Search by ID, type, location…"
-            className="w-full rounded-lg border border-[#2d3748] bg-[#1a2234] py-2 pl-9 pr-3 text-sm text-[#e2e8f0] placeholder:text-[#94a3b8] focus:border-[#3b82f6] focus:outline-none"
+            className="w-full rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] py-2 pl-9 pr-3 text-sm text-[var(--tx-1)] placeholder:text-[var(--tx-3)] focus:border-[var(--blue)] focus:outline-none"
           />
         </div>
         <select
           value={severityFilter}
           onChange={(e) => { setSeverityFilter(e.target.value); setPage(0); }}
-          className="rounded-lg border border-[#2d3748] bg-[#1a2234] px-3 py-2 text-sm text-[#e2e8f0]"
+          className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] px-3 py-2 text-sm text-[var(--tx-1)]"
         >
           <option value="">All severities</option>
           {[1, 2, 3, 4, 5].map((s) => <option key={s} value={s}>Severity {s}</option>)}
@@ -77,16 +77,16 @@ function CasesList() {
         <select
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
-          className="rounded-lg border border-[#2d3748] bg-[#1a2234] px-3 py-2 text-sm text-[#e2e8f0]"
+          className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] px-3 py-2 text-sm text-[var(--tx-1)]"
         >
           <option value="">All statuses</option>
           {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-[#2d3748]">
+      <div className="overflow-x-auto rounded-lg border border-[var(--line-2)]">
         <table className="w-full text-sm">
-          <thead className="bg-[#111827] text-[10px] uppercase tracking-wider text-[#94a3b8]">
+          <thead className="bg-[var(--ink-1)] text-[10px] uppercase tracking-wider text-[var(--tx-3)]">
             <tr>
               <th className="px-4 py-3 text-left font-medium">Code</th>
               <th className="px-4 py-3 text-left font-medium">Type</th>
@@ -98,24 +98,24 @@ function CasesList() {
               <th className="px-4 py-3 text-left font-medium"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#2d3748] bg-[#1a2234]">
+          <tbody className="divide-y divide-[var(--line-2)] bg-[var(--ink-2)]">
             {pageRows.map((incident: any) => (
               <tr
                 key={incident.id}
                 onClick={() => navigate({ to: "/forensic/cases/$id", params: { id: incident.id } })}
                 className="cursor-pointer hover:bg-white/5"
               >
-                <td className="px-4 py-3 font-mono text-xs text-[#e2e8f0]">{incident.code}</td>
-                <td className="px-4 py-3 text-[#e2e8f0]">{incident.type}</td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{new Date(incident.reported_at).toLocaleString()}</td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{[incident.zone, incident.location].filter(Boolean).join(" · ")}</td>
+                <td className="px-4 py-3 font-mono text-xs text-[var(--tx-1)]">{incident.code}</td>
+                <td className="px-4 py-3 text-[var(--tx-1)]">{incident.type}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{new Date(incident.reported_at).toLocaleString()}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{[incident.zone, incident.location].filter(Boolean).join(" · ")}</td>
                 <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${SEVERITY_COLOR[incident.severity] || "bg-white/10 text-[#94a3b8]"}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${SEVERITY_COLOR[incident.severity] || "bg-white/10 text-[var(--tx-3)]"}`}>
                     {incident.severity}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{incident.status}</td>
-                <td className="px-4 py-3 text-xs text-[#94a3b8]">{(incident.evidence?.length as number) || 0}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{incident.status}</td>
+                <td className="px-4 py-3 text-xs text-[var(--tx-3)]">{(incident.evidence?.length as number) || 0}</td>
                 <td className="px-4 py-3">
                   <button
                     type="button"
@@ -123,7 +123,7 @@ function CasesList() {
                       e.stopPropagation();
                       navigate({ to: "/forensic/cases/$id/ai", params: { id: incident.id } });
                     }}
-                    className="flex items-center gap-1.5 rounded-full border border-[#3b82f6]/40 bg-[#3b82f6]/10 px-2.5 py-1 text-[11px] font-medium text-[#3b82f6] hover:bg-[#3b82f6]/20"
+                    className="flex items-center gap-1.5 rounded-full border border-[var(--blue-ln)] bg-[var(--blue-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--blue)] hover:bg-[var(--blue-bg)]"
                   >
                     <Sparkles className="h-3 w-3" /> Ask AI
                   </button>
@@ -131,27 +131,27 @@ function CasesList() {
               </tr>
             ))}
             {!isLoading && pageRows.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[#94a3b8]">No cases match these filters.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-[var(--tx-3)]">No cases match these filters.</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       {filtered.length > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-xs text-[#94a3b8]">
+        <div className="flex items-center justify-between text-xs text-[var(--tx-3)]">
           <span>{filtered.length} cases</span>
           <div className="flex gap-2">
             <button
               disabled={page === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="rounded-md border border-[#2d3748] px-3 py-1.5 disabled:opacity-40"
+              className="rounded-md border border-[var(--line-2)] px-3 py-1.5 disabled:opacity-40"
             >
               Previous
             </button>
             <button
               disabled={(page + 1) * PAGE_SIZE >= filtered.length}
               onClick={() => setPage((p) => p + 1)}
-              className="rounded-md border border-[#2d3748] px-3 py-1.5 disabled:opacity-40"
+              className="rounded-md border border-[var(--line-2)] px-3 py-1.5 disabled:opacity-40"
             >
               Next
             </button>

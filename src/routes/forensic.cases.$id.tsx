@@ -28,24 +28,24 @@ function TimelineCard({ event }: { event: any }) {
   const [open, setOpen] = useState(false);
   const hasDetail = event.detail && Object.keys(event.detail).length > 0;
   return (
-    <div className="rounded-lg border border-[#2d3748] bg-[#1a2234] px-4 py-3">
+    <div className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] px-4 py-3">
       <button
         type="button"
         onClick={() => hasDetail && setOpen((o) => !o)}
         className="flex w-full items-start justify-between gap-3 text-left"
       >
         <div>
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-[#94a3b8]">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-[var(--tx-3)]">
             <span>{new Date(event.timestamp).toLocaleString()}</span>
-            <span className="text-[#3b82f6]">{TIMELINE_LABELS[event.type] || event.type}</span>
+            <span className="text-[var(--blue)]">{TIMELINE_LABELS[event.type] || event.type}</span>
           </div>
-          <div className="mt-1 text-sm text-[#e2e8f0]">{event.summary}</div>
-          <div className="mt-0.5 text-xs text-[#94a3b8]">by {event.actor}</div>
+          <div className="mt-1 text-sm text-[var(--tx-1)]">{event.summary}</div>
+          <div className="mt-0.5 text-xs text-[var(--tx-3)]">by {event.actor}</div>
         </div>
-        {hasDetail && (open ? <ChevronDown className="h-4 w-4 shrink-0 text-[#94a3b8]" /> : <ChevronRight className="h-4 w-4 shrink-0 text-[#94a3b8]" />)}
+        {hasDetail && (open ? <ChevronDown className="h-4 w-4 shrink-0 text-[var(--tx-3)]" /> : <ChevronRight className="h-4 w-4 shrink-0 text-[var(--tx-3)]" />)}
       </button>
       {open && hasDetail && (
-        <pre className="mt-3 overflow-x-auto rounded-md bg-black/30 p-3 text-[11px] text-[#94a3b8]">
+        <pre className="mt-3 overflow-x-auto rounded-md bg-black/30 p-3 text-[11px] text-[var(--tx-3)]">
           {JSON.stringify(event.detail, null, 2)}
         </pre>
       )}
@@ -63,7 +63,7 @@ function CaseDetailPage() {
   const queryClient = useQueryClient();
   const [noteText, setNoteText] = useState("");
 
-  const { data: caseData, isLoading: caseLoading } = useQuery({
+  const { data: caseData, isLoading: caseLoading, error: caseError } = useQuery({
     queryKey: ["forensic-case", id],
     queryFn: () => getCase({ data: { incident_id: id } }),
   });
@@ -88,10 +88,13 @@ function CaseDetailPage() {
   });
 
   if (caseLoading) {
-    return <div className="flex items-center gap-2 text-sm text-[#94a3b8]"><Loader2 className="h-4 w-4 animate-spin" /> Loading case…</div>;
+    return <div className="flex items-center gap-2 text-sm text-[var(--tx-3)]"><Loader2 className="h-4 w-4 animate-spin" /> Loading case…</div>;
+  }
+  if (caseError) {
+    return <div className="text-sm text-[var(--tx-3)]">This case couldn't be loaded: {(caseError as Error).message} It may not belong to your organisation, or the forensic service may be unreachable.</div>;
   }
   if (!caseData) {
-    return <div className="text-sm text-[#94a3b8]">Case not found, or it doesn't belong to your organisation.</div>;
+    return <div className="text-sm text-[var(--tx-3)]">Case not found, or it doesn't belong to your organisation.</div>;
   }
 
   const incident = (caseData as any).incident;
@@ -107,26 +110,26 @@ function CaseDetailPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold text-white">{incident.title || incident.code}</h1>
-            <span className="rounded-full bg-[#3b82f6]/15 px-2 py-0.5 text-[11px] text-[#3b82f6]">{incident.status}</span>
+            <h1 className="text-lg font-semibold text-[var(--tx-1)]">{incident.title || incident.code}</h1>
+            <span className="rounded-full bg-[var(--blue-bg)] px-2 py-0.5 text-[11px] text-[var(--blue)]">{incident.status}</span>
           </div>
-          <p className="text-sm text-[#94a3b8]">{incident.code} · {incident.type} · severity {incident.severity}</p>
+          <p className="text-sm text-[var(--tx-3)]">{incident.code} · {incident.type} · severity {incident.severity}</p>
         </div>
         <button
           type="button"
           onClick={() => window.print()}
-          className="forensic-no-print flex shrink-0 items-center gap-1.5 rounded-md border border-[#2d3748] bg-[#1a2234] px-3 py-1.5 text-xs text-[#e2e8f0] hover:bg-white/5"
+          className="forensic-no-print flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--line-2)] bg-[var(--ink-2)] px-3 py-1.5 text-xs text-[var(--tx-1)] hover:bg-white/5"
         >
           <Printer className="h-3.5 w-3.5" /> Print case file
         </button>
       </div>
 
-      <div className="forensic-no-print flex gap-1 border-b border-[#2d3748]">
+      <div className="forensic-no-print flex gap-1 border-b border-[var(--line-2)]">
         <Link
           to="/forensic/cases/$id"
           params={{ id }}
           className={`flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-            isOverview ? "border-b-2 border-[#3b82f6] text-white" : "border-b-2 border-transparent text-[#94a3b8] hover:text-[#e2e8f0]"
+            isOverview ? "border-b-2 border-[var(--blue)] text-[var(--tx-1)]" : "border-b-2 border-transparent text-[var(--tx-3)] hover:text-[var(--tx-1)]"
           }`}
         >
           Overview
@@ -139,7 +142,7 @@ function CaseDetailPage() {
               key={tab.to}
               to={tab.to}
               className={`flex items-center gap-2 rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-                active ? "border-b-2 border-[#3b82f6] text-white" : "border-b-2 border-transparent text-[#94a3b8] hover:text-[#e2e8f0]"
+                active ? "border-b-2 border-[var(--blue)] text-[var(--tx-1)]" : "border-b-2 border-transparent text-[var(--tx-3)] hover:text-[var(--tx-1)]"
               }`}
             >
               <Icon className="h-4 w-4" /> {tab.label}
@@ -151,8 +154,8 @@ function CaseDetailPage() {
       {isOverview ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div className="flex flex-col gap-3 lg:col-span-2">
-            <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Incident</h2>
+            <section className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] p-4">
+              <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Incident</h2>
               <dl className="mt-2 space-y-1.5 text-sm">
                 <Row label="Location" value={[incident.zone, incident.location, incident.floor].filter(Boolean).join(" · ")} />
                 <Row label="Reported" value={new Date(incident.reported_at).toLocaleString()} />
@@ -163,63 +166,63 @@ function CaseDetailPage() {
               </dl>
             </section>
 
-            <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Officers involved</h2>
+            <section className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] p-4">
+              <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Officers involved</h2>
               {(caseData as any).officers_involved?.length ? (
-                <ul className="mt-2 space-y-1 text-sm text-[#e2e8f0]">
+                <ul className="mt-2 space-y-1 text-sm text-[var(--tx-1)]">
                   {(caseData as any).officers_involved.map((o: any, i: number) => (
                     <li key={i}>{typeof o === "string" ? o : o.name || o.officer_id || JSON.stringify(o)}</li>
                   ))}
                 </ul>
               ) : (
-                <p className="mt-2 text-sm text-[#94a3b8]">No officer dispatch recorded for this case.</p>
+                <p className="mt-2 text-sm text-[var(--tx-3)]">No officer dispatch recorded for this case.</p>
               )}
             </section>
 
-            <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Guest emergency report</h2>
+            <section className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] p-4">
+              <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Guest emergency report</h2>
               {(caseData as any).consumer_report ? (
                 <div className="mt-2 rounded-md bg-black/20 p-2 text-sm">
-                  <div className="text-[#e2e8f0]">
+                  <div className="text-[var(--tx-1)]">
                     Reported via the guest emergency app
                     {(caseData as any).consumer_report.guest_reference ? ` · ${(caseData as any).consumer_report.guest_reference}` : ""}
                   </div>
                   {(caseData as any).consumer_report.activated_at && (
-                    <div className="mt-0.5 text-[11px] text-[#94a3b8]">
+                    <div className="mt-0.5 text-[11px] text-[var(--tx-3)]">
                       Session activated {new Date((caseData as any).consumer_report.activated_at).toLocaleString()}
                     </div>
                   )}
                 </div>
               ) : (
-                <p className="mt-2 text-sm text-[#94a3b8]">Not reported via the guest app.</p>
+                <p className="mt-2 text-sm text-[var(--tx-3)]">Not reported via the guest app.</p>
               )}
             </section>
 
-            <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Autonomous actions</h2>
+            <section className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] p-4">
+              <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Autonomous actions</h2>
               {(caseData as any).autonomous_actions?.length ? (
-                <ul className="mt-2 space-y-1 text-sm text-[#e2e8f0]">
+                <ul className="mt-2 space-y-1 text-sm text-[var(--tx-1)]">
                   {(caseData as any).autonomous_actions.map((a: any) => (
                     <li key={a.action_log_id}>{a.action_key} on {a.device_name} — {a.execution_result}</li>
                   ))}
                 </ul>
               ) : (
-                <p className="mt-2 text-sm text-[#94a3b8]">No autonomous actions taken.</p>
+                <p className="mt-2 text-sm text-[var(--tx-3)]">No autonomous actions taken.</p>
               )}
             </section>
 
-            <section className="rounded-lg border border-[#2d3748] bg-[#1a2234] p-4">
-              <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Analyst notes</h2>
+            <section className="rounded-lg border border-[var(--line-2)] bg-[var(--ink-2)] p-4">
+              <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Analyst notes</h2>
               <div className="mt-2 space-y-2">
                 {(timeline as any[]).filter((e) => e.type === "forensic_note").length === 0 && (
-                  <p className="text-sm text-[#94a3b8]">No notes on this case yet.</p>
+                  <p className="text-sm text-[var(--tx-3)]">No notes on this case yet.</p>
                 )}
                 {(timeline as any[])
                   .filter((e) => e.type === "forensic_note")
                   .map((e, i) => (
                     <div key={i} className="rounded-md bg-black/20 p-2 text-sm">
-                      <div className="text-[#e2e8f0]">{e.summary}</div>
-                      <div className="mt-0.5 text-[11px] text-[#94a3b8]">{e.actor} · {new Date(e.timestamp).toLocaleString()}</div>
+                      <div className="text-[var(--tx-1)]">{e.summary}</div>
+                      <div className="mt-0.5 text-[11px] text-[var(--tx-3)]">{e.actor} · {new Date(e.timestamp).toLocaleString()}</div>
                     </div>
                   ))}
               </div>
@@ -229,28 +232,28 @@ function CaseDetailPage() {
                   onChange={(e) => setNoteText(e.target.value)}
                   placeholder="Record a finding for the case record…"
                   rows={2}
-                  className="w-full resize-none rounded-md border border-[#2d3748] bg-[#0a0f1e] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#94a3b8]/60 focus:border-[#3b82f6] focus:outline-none"
+                  className="w-full resize-none rounded-md border border-[var(--line-2)] bg-[var(--ink-0)] px-3 py-2 text-sm text-[var(--tx-1)] placeholder:text-[var(--tx-3)]/60 focus:border-[var(--blue)] focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={() => noteText.trim() && noteMutation.mutate()}
                   disabled={!noteText.trim() || noteMutation.isPending}
-                  className="flex items-center justify-center gap-1.5 self-end rounded-md bg-[#3b82f6] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                  className="flex items-center justify-center gap-1.5 self-end rounded-md bg-[var(--blue)] px-3 py-1.5 text-xs font-medium text-[var(--tx-1)] disabled:opacity-40"
                 >
                   {noteMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                   Add note
                 </button>
                 {noteMutation.isError && (
-                  <p className="text-[11px] text-[#ef4444]">{(noteMutation.error as Error).message}</p>
+                  <p className="text-[11px] text-[var(--s5)]">{(noteMutation.error as Error).message}</p>
                 )}
               </div>
             </section>
           </div>
 
           <div className="flex flex-col gap-2 lg:col-span-3">
-            <h2 className="text-[11px] uppercase tracking-wider text-[#94a3b8]">Timeline</h2>
+            <h2 className="text-[11px] uppercase tracking-wider text-[var(--tx-3)]">Timeline</h2>
             {timelineLoading ? (
-              <div className="flex items-center gap-2 text-sm text-[#94a3b8]"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+              <div className="flex items-center gap-2 text-sm text-[var(--tx-3)]"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
             ) : (
               <div className="flex flex-col gap-2">
                 {(timeline as any[]).map((event, i) => <TimelineCard key={i} event={event} />)}
@@ -373,8 +376,8 @@ function PrintableCaseFile({ caseData, timeline, evidence }: { caseData: any; ti
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <dt className="text-[11px] text-[#94a3b8]">{label}</dt>
-      <dd className="text-[#e2e8f0]">{value}</dd>
+      <dt className="text-[11px] text-[var(--tx-3)]">{label}</dt>
+      <dd className="text-[var(--tx-1)]">{value}</dd>
     </div>
   );
 }
