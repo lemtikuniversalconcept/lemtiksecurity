@@ -202,7 +202,7 @@ function OrganisationDetail() {
       )}
 
       {isLoading ? (
-        <div className="rounded-3xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        <div className="rounded-[10px] border border-border bg-card p-8 text-center text-sm text-muted-foreground">
           <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading organisation…
         </div>
       ) : error ? (
@@ -210,7 +210,7 @@ function OrganisationDetail() {
       ) : (
         <>
           <section className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-            <div className="rounded-3xl border border-border bg-card p-5 space-y-4">
+            <div className="rounded-[10px] border border-border bg-card p-5 space-y-4">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Profile overview</div>
                 <h2 className="text-lg font-semibold">Edit organisation profile</h2>
@@ -234,7 +234,7 @@ function OrganisationDetail() {
               </button>
             </div>
 
-            <div className="rounded-3xl border border-border bg-card p-5 space-y-4">
+            <div className="rounded-[10px] border border-border bg-card p-5 space-y-4">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Subscription</div>
                 <h2 className="text-lg font-semibold">Billing snapshot</h2>
@@ -243,7 +243,7 @@ function OrganisationDetail() {
               <InfoRow label="Status" value={org ? pretty(org.subscription_status) : "—"} />
               <InfoRow label="Billing contact" value={org?.billing_contact_email || "—"} />
               <InfoRow label="Created" value={org?.created_at ? new Intl.DateTimeFormat("en-NG", { dateStyle: "medium" }).format(new Date(org.created_at)) : "—"} />
-              <div className="rounded-2xl border border-border bg-surface p-4">
+              <div className="rounded-[9px] border border-border bg-surface p-4">
                 <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Billing history</div>
                 <div className="mt-3 space-y-3">
                   {(data?.activity ?? []).slice(0, 5).map((entry) => (
@@ -262,7 +262,7 @@ function OrganisationDetail() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
-            <div className="rounded-3xl border border-border bg-card p-5">
+            <div className="rounded-[10px] border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Users</div>
@@ -270,7 +270,7 @@ function OrganisationDetail() {
                 </div>
                 <span className="rounded-full border border-border px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground">{members.length}</span>
               </div>
-              <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+              <div className="mt-4 overflow-hidden rounded-[9px] border border-border">
                 <table className="min-w-full text-sm">
                   <thead className="bg-surface text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                     <tr>
@@ -301,7 +301,7 @@ function OrganisationDetail() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-border bg-card p-5">
+            <div className="rounded-[10px] border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Locations</div>
@@ -311,7 +311,7 @@ function OrganisationDetail() {
               </div>
               <div className="mt-4 space-y-3">
                 {locations.map((location: any) => (
-                  <div key={location.id} className="rounded-2xl border border-border bg-surface p-4">
+                  <div key={location.id} className="rounded-[9px] border border-border bg-surface p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="font-medium">{location.name}</div>
@@ -332,7 +332,7 @@ function OrganisationDetail() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-            <div className="rounded-3xl border border-border bg-card p-5">
+            <div className="rounded-[10px] border border-border bg-card p-5">
               <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Usage metrics</div>
               <h3 className="text-lg font-semibold">Platform usage snapshot</h3>
               <div className="mt-4 space-y-3">
@@ -343,12 +343,12 @@ function OrganisationDetail() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-border bg-card p-5">
+            <div className="rounded-[10px] border border-border bg-card p-5">
               <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Recent activity</div>
               <h3 className="text-lg font-semibold">Organisation timeline</h3>
               <div className="mt-4 space-y-3">
                 {activity.map((entry: any) => (
-                  <div key={entry.id} className="rounded-2xl border border-border bg-surface p-4">
+                  <div key={entry.id} className="rounded-[9px] border border-border bg-surface p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="font-medium">{pretty(entry.label)}</div>
@@ -389,7 +389,7 @@ function Stat({ label, value, icon: Icon, tone = "muted" }: {
 }) {
   const toneClass = tone === "resolved" ? "text-resolved" : tone === "critical" ? "text-critical" : "text-foreground";
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="rounded-[9px] border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
         <Icon className={`h-4 w-4 ${toneClass}`} />
@@ -401,7 +401,7 @@ function Stat({ label, value, icon: Icon, tone = "muted" }: {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+    <div className="flex items-center justify-between gap-3 rounded-[9px] border border-border bg-surface px-4 py-3 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
     </div>

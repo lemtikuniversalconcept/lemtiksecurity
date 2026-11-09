@@ -213,7 +213,7 @@ function OrganisationsList() {
         <Kpi label="Past due" value={data ? totals.overdue : "—"} />
       </div>
 
-      <section className="rounded-3xl border border-border bg-card p-5 space-y-4">
+      <section className="rounded-[10px] border border-border bg-card p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Organisations table</div>
@@ -235,7 +235,7 @@ function OrganisationsList() {
         ) : error ? (
           <div className="rounded-md border border-critical/30 bg-critical/10 px-3 py-2 text-sm text-critical">{(error as Error).message}</div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-border">
+          <div className="overflow-x-auto rounded-[9px] border border-border">
             <table className="min-w-full text-sm">
               <thead className="bg-surface text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                 <tr>
@@ -298,7 +298,7 @@ function OrganisationsList() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-        <div className="rounded-3xl border border-border bg-card p-5">
+        <div className="rounded-[10px] border border-border bg-card p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Create organisation</div>
@@ -365,7 +365,7 @@ function OrganisationsList() {
               </>
             )}
             {step === 5 && (
-              <div className="space-y-3 rounded-2xl border border-border bg-surface p-4 text-sm">
+              <div className="space-y-3 rounded-[9px] border border-border bg-surface p-4 text-sm">
                 <SummaryRow label="Organisation" value={form.name || "—"} />
                 <SummaryRow label="Tier" value={TIER_LABELS[form.subscription_tier]} />
                 <SummaryRow label="Admin invite" value={form.admin_email || "—"} />
@@ -413,12 +413,12 @@ function OrganisationsList() {
           </div>
         </div>
 
-        <div className="rounded-3xl border border-border bg-card p-5 space-y-4">
+        <div className="rounded-[10px] border border-border bg-card p-5 space-y-4">
           <div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Create confirmation</div>
             <h3 className="text-lg font-semibold">What gets provisioned</h3>
           </div>
-          <div className="rounded-2xl border border-border bg-surface p-4 text-sm text-muted-foreground space-y-2">
+          <div className="rounded-[9px] border border-border bg-surface p-4 text-sm text-muted-foreground space-y-2">
             <div className="flex items-start gap-3">
               <MapPin className="mt-0.5 h-4 w-4 text-primary" />
               <div>
@@ -497,7 +497,7 @@ function Stat({ label, value, icon: Icon, tone = "muted" }: {
 }) {
   const toneClass = tone === "resolved" ? "text-resolved" : tone === "critical" ? "text-critical" : "text-foreground";
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="rounded-[9px] border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
         <Icon className={`h-4 w-4 ${toneClass}`} />
