@@ -1,26 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo } from "react";
-import type { ComponentType, ReactNode } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { ArrowUpRight, Loader2, RefreshCw } from "lucide-react";
 import { getPlatformSystemHealth, requestPlatformServiceRestart } from "@/lib/platform.system.functions";
 import { requireSectionAccess } from "@/lib/rbac";
-import {
-  Activity,
-  CircleAlert,
-  Cpu,
-  Database,
-  Loader2,
-  MessageSquareMore,
-  RefreshCw,
-  Zap,
-  ShieldCheck,
-  Wifi,
-  WifiOff,
-  ServerCrash,
-  TriangleAlert,
-} from "lucide-react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Empty, Kpi, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
 
 export const Route = createFileRoute("/app/admin/system")({
   head: () => ({ meta: [{ title: "System health · Lemtik Admin" }] }),
@@ -32,335 +18,206 @@ export const Route = createFileRoute("/app/admin/system")({
   component: SystemHealthPage,
 });
 
+const SERVICE_TONE: Record<string, Tone> = { online: "ok", degraded: "warn", offline: "fail" };
+const num = (v: number | null | undefined, suffix = "") => (v == null ? "not measured" : `${v.toLocaleString("en-GB")}${suffix}`);
+
 function SystemHealthPage() {
   const loadHealth = useServerFn(getPlatformSystemHealth);
   const restartService = useServerFn(requestPlatformServiceRestart);
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["platform-system-health"],
-    queryFn: () => loadHealth(),
-    refetchInterval: 30_000,
-  });
+  const { data, isLoading, error, refetch, isFetching } = useQuery({ queryKey: ["platform-system-health"], queryFn: () => loadHealth(), refetchInterval: 30_000 });
+  const [confirming, setConfirming] = useState<{ slug: string; name: string } | null>(null);
 
   const restartMut = useMutation({
     mutationFn: (service_slug: string) => restartService({ data: { service_slug } }),
-    onSuccess: () => refetch(),
+    onSuccess: () => {
+      toast.success("Restart request recorded in the audit log. Restart the service from its hosting dashboard.");
+      setConfirming(null);
+      void refetch();
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const services = data?.services ?? [];
-  const responseSeries = data?.responseSeries ?? [];
-  const database = data?.database;
+  const db = data?.database;
   const broker = data?.broker;
-  const integrations = data?.integrations ?? [];
-  const recentEvents = data?.recentEvents ?? [];
-
-  const serviceStats = useMemo(() => {
-    const online = services.filter((service) => service.status === "online").length;
-    const degraded = services.filter((service) => service.status === "degraded").length;
-    const offline = services.filter((service) => service.status === "offline").length;
-    const totalErrors = services.reduce((sum, service) => sum + Number(service.error_count_24h ?? 0), 0);
-    return { online, degraded, offline, totalErrors };
-  }, [services]);
-
-  const dbTone = database?.status === "online" ? "resolved" : database?.status === "warning" ? "warning" : "critical";
-  const brokerTone = broker?.emqx.status === "online" ? "resolved" : "critical";
-  const redisTone = broker?.redis.status === "online" ? "resolved" : "critical";
+  const online = services.filter((s: any) => s.status === "online").length;
+  const errors = services.reduce((sum: number, s: any) => sum + Number(s.error_count_24h ?? 0), 0);
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Admin Console</div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">System health</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-300">
-          Live platform infrastructure view for <code className="rounded bg-white/10 px-1 py-0.5 text-[0.95em]">lemtik_admin</code>. Service state comes from platform records, and database health is read from a Supabase health RPC.
-        </p>
-      </section>
+    <div className="col g16">
+      <PageHeader title="System health" sub="Service state from platform records; database figures from the Supabase health check. Refreshes every 30 seconds.">
+        <button type="button" className="b b-sec" onClick={() => void refetch()} disabled={isFetching}>
+          <RefreshCw className={`h-4 w-4${isFetching ? " animate-spin" : ""}`} /> Refresh
+        </button>
+      </PageHeader>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Online services" value={services.length ? serviceStats.online.toString() : "—"} icon={ShieldCheck} tone="resolved" />
-        <Stat label="Degraded/offline" value={services.length ? `${serviceStats.degraded + serviceStats.offline}` : "—"} icon={TriangleAlert} tone="critical" />
-        <Stat label="Service errors 24h" value={services.length ? serviceStats.totalErrors.toString() : "—"} icon={Zap} tone="warning" />
-        <Stat label="DB utilisation" value={database ? `${database.utilisationPct}%` : "—"} icon={Database} tone={dbTone} />
+      {error && <Notice tone="fail">{(error as Error).message}</Notice>}
+
+      <div className="kpis">
+        <Kpi label="Services online" value={services.length ? online : "—"} unit={services.length ? `/ ${services.length}` : undefined} />
+        <Kpi label="Service errors, 24 h" value={services.length ? errors : "—"} />
+        <Kpi label="DB connection pool" value={db ? `${db.utilisationPct}%` : "—"} delta={db ? `${db.activeConnections} of ${db.maxConnections} connections` : undefined} />
+        <Kpi label="Database size" value={db ? db.databaseSizeMb.toLocaleString("en-GB") : "—"} unit={db ? "MB" : undefined} />
       </div>
 
-      <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-3xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Render services</div>
-              <h2 className="text-lg font-semibold">Real-time service health and response trend</h2>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]" style={{ alignItems: "start" }}>
+        <Panel title="Services" meta={`${services.length}`} bodyClassName="">
+          {isLoading ? (
+            <Empty>
+              <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Loading…
+            </Empty>
+          ) : services.length === 0 ? (
+            <Empty>No platform services were returned.</Empty>
+          ) : (
+            <div className="scroll">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Last activity</th>
+                    <th>Last collection</th>
+                    <th>Collected today</th>
+                    <th>Errors 24 h</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {services.map((s: any) => (
+                    <tr key={s.id}>
+                      <td>
+                        <b>{s.name}</b>
+                      </td>
+                      <td>
+                        <Status tone={SERVICE_TONE[s.status] ?? "neutral"}>{s.status}</Status>
+                      </td>
+                      <td className="t2">{s.last_activity_label}</td>
+                      <td className="t2">{s.last_collection_label}</td>
+                      <td className="mono">{s.items_collected_today}</td>
+                      <td className="mono" style={{ color: Number(s.error_count_24h) ? "var(--fail)" : undefined }}>
+                        {s.error_count_24h}
+                      </td>
+                      <td>
+                        <span className="row g6" style={{ justifyContent: "flex-end" }}>
+                          {s.render_url && (
+                            <a href={s.render_url} target="_blank" rel="noreferrer noopener" className="b b-sm b-gh">
+                              Open <ArrowUpRight className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                          <button type="button" className="b b-sm b-gh" onClick={() => setConfirming({ slug: s.slug, name: s.name })}>
+                            Log restart
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <button
-              onClick={() => refetch()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs hover:bg-surface-2"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
-          </div>
+          )}
+        </Panel>
 
-          <div className="mt-4 h-72 rounded-2xl border border-border bg-surface p-3">
-            {isLoading ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading service trend…
+        <div className="col g16">
+          <Panel title="Database" meta={db?.checkedAt ? `checked ${new Date(db.checkedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : undefined}>
+            {db ? (
+              <div className="col g10">
+                <div className="prog" style={{ height: 8 }}>
+                  <i style={{ width: `${Math.min(100, db.utilisationPct)}%`, background: db.utilisationPct > 85 ? "var(--fail)" : db.utilisationPct > 65 ? "var(--warn)" : "var(--ok)" }} />
+                </div>
+                <dl className="kv">
+                  <dt>Active connections</dt>
+                  <dd className="mono">
+                    {db.activeConnections} / {db.maxConnections}
+                  </dd>
+                  <dt>Idle connections</dt>
+                  <dd className="mono">{db.idleConnections}</dd>
+                  <dt>Long-running queries</dt>
+                  <dd className="mono">{db.longRunningQueries}</dd>
+                </dl>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={responseSeries} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.18)" />
-                  <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
-                  <YAxis tickFormatter={(v) => `${v}ms`} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(value) => [`${Number(value).toLocaleString("en-NG")} ms`, "Avg response"]} />
-                  <Line type="monotone" dataKey="response_ms" stroke="var(--primary)" strokeWidth={2.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <Empty>No database health data.</Empty>
             )}
-          </div>
+          </Panel>
 
-          <div className="mt-5 grid gap-3 lg:grid-cols-2">
-            {services.map((service) => (
-              <div key={service.id} className="rounded-2xl border border-border bg-surface p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold">{service.name}</div>
-                    <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{service.status}</div>
-                  </div>
-                  <StatusPill tone={service.statusTone as "resolved" | "warning" | "critical"}>{service.status.toUpperCase()}</StatusPill>
-                </div>
+          <Panel title="Infrastructure" meta="configuration only">
+            <dl className="kv">
+              <dt>EMQX broker</dt>
+              <dd>{broker?.emqx.configured ? "Configured" : "Not configured"}</dd>
+              <dt>Connected devices</dt>
+              <dd className="t2">{num(broker?.emqx.connectedDevices)}</dd>
+              <dt>Upstash Redis</dt>
+              <dd>{broker?.redis.configured ? "Configured" : "Not configured"}</dd>
+              <dt>Redis memory</dt>
+              <dd className="t2">{num(broker?.redis.memoryUsageMb, " MB")}</dd>
+            </dl>
+            <p className="t3" style={{ fontSize: 12, margin: "10px 0 0" }}>
+              Lemtik doesn't yet collect live broker or Redis metrics. "Configured" means credentials are set, not that the service is reachable.
+            </p>
+          </Panel>
 
-                <div className="mt-3 grid gap-1.5 text-xs text-muted-foreground">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Last activity</span>
-                    <span>{service.last_activity_label}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Last collection</span>
-                    <span>{service.last_collection_label}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Collected today</span>
-                    <span>{service.items_collected_today}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Errors 24h</span>
-                    <span className={Number(service.error_count_24h ?? 0) > 0 ? "text-critical" : "text-foreground"}>{service.error_count_24h}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Response estimate</span>
-                    <span>{service.response_ms} ms</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {service.render_url && (
-                    <a
-                      href={service.render_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-background"
-                    >
-                      Render URL <MessageSquareMore className="h-3.5 w-3.5" />
-                    </a>
-                  )}
-                  <button
-                    onClick={() => {
-                      const ok = window.confirm(`Request a restart for ${service.name}? This records the action in the platform audit log.`);
-                      if (!ok) return;
-                      restartMut.mutate(service.slug);
-                    }}
-                    disabled={restartMut.isPending}
-                    className="inline-flex items-center gap-1 rounded-md border border-critical/30 bg-critical/10 px-2.5 py-1 text-xs text-critical hover:bg-critical/15 disabled:opacity-50"
-                  >
-                    <ServerCrash className="h-3.5 w-3.5" />
-                    Restart trigger
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {services.length === 0 && (
-              <div className="rounded-2xl border border-border bg-surface p-6 text-sm text-muted-foreground">
-                No platform services were returned.
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <Card title="Supabase database health" icon={Database} tone={dbTone}>
-            <div className="space-y-3 text-sm">
-              <MetricRow label="Active connections" value={database ? `${database.activeConnections}/${database.maxConnections}` : "—"} />
-              <MetricRow label="Idle connections" value={database ? database.idleConnections.toString() : "—"} />
-              <MetricRow label="Long-running queries" value={database ? database.longRunningQueries.toString() : "—"} />
-              <MetricRow label="Storage usage" value={database ? `${database.databaseSizeMb.toLocaleString("en-NG")} MB` : "—"} />
-              <div className="rounded-2xl border border-border bg-surface p-3">
-                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span>Connection pool usage</span>
-                  <span>{database ? `${database.utilisationPct}%` : "—"}</span>
-                </div>
-                <div className="mt-2 h-2 rounded-full bg-muted">
-                  <div
-                    className={`h-2 rounded-full ${dbTone === "critical" ? "bg-critical" : dbTone === "warning" ? "bg-high" : "bg-resolved"}`}
-                    style={{ width: `${Math.min(100, database?.utilisationPct ?? 0)}%` }}
-                  />
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  Checked {database?.checkedAt ? new Intl.DateTimeFormat("en-NG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(database.checkedAt)) : "—"}
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          <Card title="EMQX MQTT broker" icon={broker?.emqx.status === "online" ? Wifi : WifiOff} tone={brokerTone}>
-            <div className="space-y-3 text-sm">
-              <MetricRow label="Connected devices" value={broker?.emqx.connectedDevices.toLocaleString("en-NG") ?? "—"} />
-              <MetricRow label="Messages / sec" value={broker?.emqx.messagesPerSecond.toLocaleString("en-NG") ?? "—"} />
-              <MetricRow label="Broker health" value={broker?.emqx.status?.toUpperCase() ?? "—"} />
-              <div className="rounded-2xl border border-border bg-surface p-3 text-xs text-muted-foreground">
-                {broker?.emqx.configured ? broker?.emqx.brokerUrl ?? "Broker endpoint configured." : "EMQX is not configured in the current environment."}
-              </div>
-            </div>
-          </Card>
-
-          <Card title="Upstash Redis" icon={Cpu} tone={redisTone}>
-            <div className="space-y-3 text-sm">
-              <MetricRow label="Memory usage" value={broker?.redis.memoryUsageMb.toLocaleString("en-NG") ?? "—"} suffix="MB" />
-              <MetricRow label="Commands / sec" value={broker?.redis.commandsPerSecond.toLocaleString("en-NG") ?? "—"} />
-              <MetricRow label="Cache hit rate" value={broker?.redis.cacheHitRate != null ? `${broker.redis.cacheHitRate}%` : "—"} />
-              <div className="rounded-2xl border border-border bg-surface p-3 text-xs text-muted-foreground">
-                {broker?.redis.configured ? broker?.redis.redisUrl ?? "Redis endpoint configured." : "Upstash Redis is not configured in the current environment."}
-              </div>
-            </div>
-          </Card>
-
-          <Card title="Third-party integrations" icon={Activity} tone="muted">
-            <div className="space-y-3">
-              {integrations.map((integration) => (
-                <div key={integration.key} className="rounded-2xl border border-border bg-surface p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">{integration.name}</div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{integration.status}</div>
-                    </div>
-                    <StatusPill tone={integration.status === "online" ? "resolved" : "critical"}>{integration.status.toUpperCase()}</StatusPill>
-                  </div>
-                  <div className="mt-3 grid gap-1.5 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between gap-3">
-                      <span>{integration.metricLabel}</span>
-                      <span className="font-medium text-foreground">{integration.metricValueLabel} {integration.metricValue == null ? "" : integration.quotaLabel}</span>
-                    </div>
-                    <div>{integration.note}</div>
-                  </div>
+          <Panel title="Integrations" bodyClassName="">
+            <div className="list">
+              {(data?.integrations ?? []).map((i: any) => (
+                <div key={i.key} className="row g10" style={{ padding: "9px 14px" }}>
+                  <span className="f1 col" style={{ minWidth: 0 }}>
+                    <b>{i.name}</b>
+                    <span className="t3 trunc" style={{ fontSize: 12 }}>
+                      {i.metricLabel}: {i.metricValue == null ? "not measured" : `${i.metricValueLabel} ${i.quotaLabel}`}
+                    </span>
+                  </span>
+                  <Status tone={i.configured ? "blue" : "off"}>{i.configured ? "Configured" : "Not configured"}</Status>
                 </div>
               ))}
             </div>
-          </Card>
+          </Panel>
 
-          <Card title="Recent platform events" icon={CircleAlert} tone="muted">
-            <div className="space-y-3">
-              {recentEvents.slice(0, 6).map((event) => (
-                <div key={event.id} className="rounded-2xl border border-border bg-surface p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium">{event.organisation_name}</div>
-                      <div className="text-xs text-muted-foreground">{event.summary}</div>
-                    </div>
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{event.when}</div>
+          <Panel title="Recent platform events" bodyClassName="">
+            {(data?.recentEvents ?? []).length === 0 ? (
+              <Empty>No recent events.</Empty>
+            ) : (
+              <div className="list">
+                {data!.recentEvents.slice(0, 8).map((e: any) => (
+                  <div key={e.id} className="row g10" style={{ padding: "9px 14px" }}>
+                    <span className="f1 col" style={{ minWidth: 0 }}>
+                      <b className="trunc">{e.organisation_name}</b>
+                      <span className="t2 trunc" style={{ fontSize: 12.5 }}>
+                        {e.summary}
+                      </span>
+                    </span>
+                    <span className="t3 mono" style={{ fontSize: 11.5 }}>
+                      {e.when}
+                    </span>
                   </div>
-                </div>
-              ))}
-              {recentEvents.length === 0 && <div className="text-sm text-muted-foreground">No recent platform events.</div>}
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+      </div>
+
+      {confirming && (
+        <div className="fixed inset-0 z-50 grid place-items-center px-4" style={{ background: "rgba(5,7,10,.72)" }} role="dialog" aria-modal="true" aria-label="Log restart">
+          <div className="pn w-full" style={{ maxWidth: 440, borderColor: "var(--line-2)" }}>
+            <div className="pn-h">
+              <h3 style={{ fontSize: 15 }}>Log a restart for {confirming.name}?</h3>
             </div>
-          </Card>
+            <div className="pn-b col g12">
+              <p className="t2" style={{ margin: 0 }}>
+                This records a restart request in the platform audit log and events. It doesn't restart the service itself; do that from its hosting dashboard.
+              </p>
+              <div className="row g8" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="b b-gh" onClick={() => setConfirming(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="b b-pri" disabled={restartMut.isPending} onClick={() => restartMut.mutate(confirming.slug)}>
+                  {restartMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />} Log restart
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </section>
-    </div>
-  );
-}
-
-function Card({
-  title,
-  icon: Icon,
-  tone,
-  children,
-}: {
-  title: string;
-  icon: ComponentType<{ className?: string }>;
-  tone: "resolved" | "warning" | "critical" | "muted";
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-3xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
-        </div>
-        <StatusPill tone={tone}>
-          <Icon className="h-3.5 w-3.5" />
-        </StatusPill>
-      </div>
-      <div className="mt-4">{children}</div>
-    </section>
-  );
-}
-
-function MetricRow({ label, value, suffix }: { label: string; value: string; suffix?: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}{suffix ? ` ${suffix}` : ""}</span>
-    </div>
-  );
-}
-
-function StatusPill({
-  tone,
-  children,
-}: {
-  tone: "resolved" | "warning" | "critical" | "muted";
-  children: ReactNode;
-}) {
-  const toneClass =
-    tone === "resolved"
-      ? "border-resolved/30 bg-resolved/10 text-resolved"
-      : tone === "warning"
-        ? "border-high/30 bg-high/10 text-high"
-        : tone === "critical"
-          ? "border-critical/30 bg-critical/10 text-critical"
-          : "border-border bg-surface text-muted-foreground";
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${toneClass}`}>
-      {children}
-    </span>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  icon: Icon,
-  tone = "muted",
-}: {
-  label: string;
-  value: string;
-  icon: ComponentType<{ className?: string }>;
-  tone?: "resolved" | "warning" | "critical" | "muted";
-}) {
-  const toneClass =
-    tone === "resolved"
-      ? "border-resolved/30 bg-resolved/10 text-resolved"
-      : tone === "warning"
-        ? "border-high/30 bg-high/10 text-high"
-        : tone === "critical"
-          ? "border-critical/30 bg-critical/10 text-critical"
-          : "border-border bg-card";
-  return (
-    <div className={`rounded-3xl border p-4 ${toneClass}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.18em] opacity-80">{label}</div>
-        <Icon className="h-4 w-4 opacity-80" />
-      </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
+      )}
     </div>
   );
 }

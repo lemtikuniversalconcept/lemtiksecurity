@@ -19,24 +19,6 @@ function toStatus(value?: string | null) {
   return value === "online" || value === "degraded" || value === "offline" ? value : "offline";
 }
 
-function hoursAgo(iso?: string | null) {
-  if (!iso) return Number.POSITIVE_INFINITY;
-  return (Date.now() - new Date(iso).getTime()) / 3_600_000;
-}
-
-function serviceLatencyMs(service: any, offsetHours = 0) {
-  const baseByStatus: Record<string, number> = {
-    online: 140,
-    degraded: 520,
-    offline: 1_250,
-  };
-  const status = toStatus(service.status);
-  const recencyPenalty = Math.max(0, hoursAgo(service.last_activity_at) - offsetHours) * 9;
-  const collectionPenalty = Math.max(0, hoursAgo(service.last_collection_at) - offsetHours) * 5;
-  const errorPenalty = Number(service.error_count_24h ?? 0) * 22;
-  const base = baseByStatus[status] ?? 260;
-  return Math.round(Math.max(60, base + recencyPenalty + collectionPenalty + errorPenalty));
-}
 
 function envFlag(...names: string[]) {
   return names.some((name) => Boolean(process.env[name]?.trim()));
@@ -52,9 +34,10 @@ function envNumber(...names: string[]) {
   return null;
 }
 
-function statusFromConfigured(configured: boolean, healthy = true) {
-  if (!configured) return "offline";
-  return healthy ? "online" : "degraded";
+// Having credentials set says nothing about whether a service is up, so this reports
+// configuration only.
+function statusFromConfigured(configured: boolean, _healthy = true) {
+  return configured ? "configured" : "not_configured";
 }
 
 function formatShortAgo(iso?: string | null) {
@@ -97,24 +80,14 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
     if (dbHealthRes.error) throwSafeError("system.db", dbHealthRes.error, "Unable to load database health.");
 
     const services = (servicesRes.data ?? []).map((service: any) => {
-      const responseMs = serviceLatencyMs(service);
       const status = toStatus(service.status);
       return {
         ...service,
         status,
-        response_ms: responseMs,
         statusTone: status === "online" ? "resolved" : status === "degraded" ? "warning" : "critical",
         last_activity_label: formatShortAgo(service.last_activity_at),
         last_collection_label: formatShortAgo(service.last_collection_at),
       };
-    });
-
-    const responseSeries = Array.from({ length: 24 }, (_, index) => {
-      const label = `${String((new Date().getHours() + index + 1) % 24).padStart(2, "0")}:00`;
-      const ms = services.length
-        ? Math.round(services.reduce((sum: number, service: any) => sum + serviceLatencyMs(service, 23 - index), 0) / services.length)
-        : 0;
-      return { hour: label, response_ms: ms };
     });
 
     const dbHealth = (dbHealthRes.data as any) ?? null;
@@ -165,10 +138,10 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
         name: "Resend Email",
         status: statusFromConfigured(resendConfigured),
         configured: resendConfigured,
-        metricLabel: "Quota used today",
+        metricLabel: "Invites created today",
         metricValue: inviteUsage,
-        quotaLabel: "Invites",
-        note: "Invite email delivery is counted from live platform invite records.",
+        quotaLabel: "",
+        note: "Counted from invite records; not Resend's own quota.",
       },
       {
         key: "radar",
@@ -196,11 +169,10 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
     }));
 
     const brokerConfigured = emqxConfigured;
-    const redisStatus = statusFromConfigured(redisConfigured, true);
+    const redisStatus = statusFromConfigured(redisConfigured);
 
     return {
       services,
-      responseSeries,
       database: {
         status: dbHealth?.status ?? "offline",
         activeConnections: Number(dbHealth?.active_connections ?? 0),
@@ -213,19 +185,19 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
       },
       broker: {
         emqx: {
-          status: brokerConfigured ? "online" : "offline",
+          status: brokerConfigured ? "configured" : "not_configured",
           configured: brokerConfigured,
-          connectedDevices: envNumber("EMQX_CONNECTED_DEVICES") ?? 0,
-          messagesPerSecond: envNumber("EMQX_MESSAGES_PER_SEC") ?? 0,
-          brokerUrl: process.env.EMQX_URL ?? process.env.EMQX_BROKER_URL ?? process.env.EMQX_HOST ?? null,
+          // Not measured: these are only set if someone puts numbers in the environment.
+          connectedDevices: envNumber("EMQX_CONNECTED_DEVICES"),
+          messagesPerSecond: envNumber("EMQX_MESSAGES_PER_SEC"),
         },
         redis: {
           status: redisStatus,
           configured: redisConfigured,
-          memoryUsageMb: envNumber("UPSTASH_REDIS_MEMORY_MB") ?? 0,
-          commandsPerSecond: envNumber("UPSTASH_REDIS_COMMANDS_PER_SEC") ?? 0,
-          cacheHitRate: envNumber("UPSTASH_REDIS_CACHE_HIT_RATE") ?? 0,
-          redisUrl: process.env.UPSTASH_REDIS_REST_URL ?? process.env.UPSTASH_REDIS_URL ?? null,
+          memoryUsageMb: envNumber("UPSTASH_REDIS_MEMORY_MB"),
+          commandsPerSecond: envNumber("UPSTASH_REDIS_COMMANDS_PER_SEC"),
+          cacheHitRate: envNumber("UPSTASH_REDIS_CACHE_HIT_RATE"),
+          // Connection URLs can embed credentials, so they never leave the server.
         },
       },
       integrations,
