@@ -238,7 +238,6 @@ function IncidentDetailPage() {
   const aiConfidence = percentOrNull(ai.confidence ?? ai.recommendation_confidence ?? ai.analysis_confidence);
   const aiThreat = firstString(ai.threat_level, ai.threatLevel, ai.threat_assessment, ai.risk_level);
   const aiSuspectStatus = firstString(ai.suspect_status, ai.suspectStatus);
-  const aiModel = firstString(ai.model, ai.model_name, agent.model);
   const aiZoneScore = percentOrNull(ai.area_risk_score ?? ai.zone_score ?? ai.risk_score);
   const aiTrend = firstString(ai.trend, ai.pattern_trend, ai.zone_trend, ai.risk_trend);
   const analysisPending = !hasAi && ["reported", "acknowledged"].includes(String(inc.status));
@@ -537,7 +536,6 @@ function IncidentDetailPage() {
               <section className="ai" style={{ padding: "12px 14px" }}>
                 <div className="row g8 wrap">
                   <span className="ai-h"><Sparkles size={15} strokeWidth={1.75} /> Situation summary</span>
-                  {aiModel && <span className="t3" style={{ fontSize: 11.5 }}>{aiModel}</span>}
                   <span className="flex-auto" />
                   <Confidence value={aiConfidence} />
                 </div>

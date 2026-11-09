@@ -68,7 +68,7 @@ function AiPage() {
           <div key={i} className={`max-w-[75%] rounded-xl px-4 py-2.5 text-sm ${m.role === "user" ? "ml-auto bg-[var(--blue)] text-white" : m.ai ? "ai" : "bg-[var(--ink-2)] text-[var(--tx-1)]"}`}>
             {m.role === "assistant" && !m.failed && (
               <div className={m.ai ? "ai-h" : "text-[11px] text-[var(--tx-3)]"} style={{ marginBottom: 4 }}>
-                {m.ai ? <><Sparkles className="h-3 w-3" /> Model answer{m.model ? ` · ${m.model}` : ""}</> : "Not model-generated: assembled from the case record"}
+                {m.ai ? <><Sparkles className="h-3 w-3" /> AI answer</> : "Assembled from the case record"}
               </div>
             )}
             <span style={{ whiteSpace: "pre-wrap" }}>{m.content}</span>
