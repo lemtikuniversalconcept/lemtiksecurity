@@ -359,7 +359,7 @@ function PatrolDetail() {
         <div className="col g12" style={{ minWidth: 0 }}>
           {token?.token ? (
             <div className="map" style={{ minHeight: 520 }}>
-              <div ref={mapEl} className="absolute inset-0" />
+              <div ref={mapEl} style={{ position: "absolute", inset: 0 }} />
               {canManage && (
                 <div className="glass row g8" style={{ position: "absolute", left: 10, top: 10, padding: "6px 10px", fontSize: 12, maxWidth: "calc(100% - 70px)" }}>
                   Click the map to add a stop. Drag a stop to move it.

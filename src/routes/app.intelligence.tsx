@@ -462,7 +462,7 @@ function SignalMap({ token, signals, total, selectedId, onSelect }: { token: str
   }
   return (
     <div className="map" style={{ minHeight: 560 }}>
-      <div ref={el} className="absolute inset-0" />
+      <div ref={el} style={{ position: "absolute", inset: 0 }} />
       <div className="glass" style={{ position: "absolute", left: 10, bottom: 10, padding: "6px 10px", fontSize: 12 }}>
         {signals.length} of {total} signal{total === 1 ? "" : "s"} have a map position
       </div>

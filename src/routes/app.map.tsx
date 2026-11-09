@@ -688,7 +688,7 @@ function LiveMap() {
       onClick={() => setMenu(null)}
     >
       <div className="map" style={{ position: "absolute", inset: 0, borderRadius: 0, border: 0 }}>
-        <div ref={container} className="absolute inset-0" />
+        <div ref={container} style={{ position: "absolute", inset: 0 }} />
         {(tokenMissing || !tokenData) && (
           <div className="absolute inset-0 grid place-items-center p-6 text-center">
             {tokenMissing ? (

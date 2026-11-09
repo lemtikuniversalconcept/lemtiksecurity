@@ -544,7 +544,7 @@ function OverviewMap({
 
   return (
     <div className="map flex-1" style={{ minHeight: 300 }}>
-      <div ref={container} className="absolute inset-0" />
+      <div ref={container} style={{ position: "absolute", inset: 0 }} />
       {!token && (
         <div className="absolute inset-0 grid place-items-center p-6 text-center">
           <div className="col g6" style={{ maxWidth: 320 }}>

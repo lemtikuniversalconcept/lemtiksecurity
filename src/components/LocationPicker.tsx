@@ -75,7 +75,7 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
   if (!token) return null;
   return (
     <div className="map" style={{ height }}>
-      <div ref={container} className="absolute inset-0" />
+      <div ref={container} style={{ position: "absolute", inset: 0 }} />
       {!readOnly && (
         <div className="glass" style={{ position: "absolute", left: 10, top: 10, padding: "4px 10px", fontSize: 12 }}>
           Click the map to drop the pin

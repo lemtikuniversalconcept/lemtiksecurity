@@ -161,7 +161,7 @@ function OfficerNavigation() {
   return (
     <>
       {header}
-      {token?.token && dest ? <div className="map" style={{ height: 300, borderRadius: 0, borderLeft: 0, borderRight: 0 }}><div ref={mapEl} className="absolute inset-0" /></div> : null}
+      {token?.token && dest ? <div className="map" style={{ height: 300, borderRadius: 0, borderLeft: 0, borderRight: 0 }}><div ref={mapEl} style={{ position: "absolute", inset: 0 }} /></div> : null}
       <div className="o-b">
         {!dest && <Notice tone="warn">This incident has no map pin, so there's no route. Go to "{inc.location}" and ask command if unsure.</Notice>}
         {gpsError && (

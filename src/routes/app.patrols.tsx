@@ -649,7 +649,7 @@ function LivePatrolMap({
 
   return (
     <div className="map" style={{ minHeight: 420 }}>
-      <div ref={mapEl} className="absolute inset-0" />
+      <div ref={mapEl} style={{ position: "absolute", inset: 0 }} />
       <div className="glass row g12 wrap" style={{ position: "absolute", left: 10, bottom: 10, padding: "6px 10px", fontSize: 12 }}>
         {(["on_route", "delayed", "missed"] as const).map((s) => (
           <span key={s} className="row g6">

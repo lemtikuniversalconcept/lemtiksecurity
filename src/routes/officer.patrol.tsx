@@ -331,7 +331,7 @@ function PatrolMap({ token, waypoints, doneIds, nextId, here }: { token: string;
 
   return (
     <div className="map" style={{ height: 240, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
-      <div ref={el} className="absolute inset-0" />
+      <div ref={el} style={{ position: "absolute", inset: 0 }} />
     </div>
   );
 }
