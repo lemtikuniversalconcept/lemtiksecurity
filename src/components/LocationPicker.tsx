@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import "mapbox-gl/dist/mapbox-gl.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { getMapboxToken } from "@/lib/config.functions";
+
+/** maplibre-gl ships as a UMD bundle: depending on the bundler the module or its default export is the library. */
+async function loadMaplibre(): Promise<typeof import("maplibre-gl")> {
+  const mod = (await import("maplibre-gl")) as typeof import("maplibre-gl") & { default?: typeof import("maplibre-gl") };
+  return mod.default ?? mod;
+}
+
 
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
@@ -18,9 +25,9 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
   const { data } = useMapboxToken();
   const token = data?.token ?? "";
   const container = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<import("mapbox-gl").Map | null>(null);
-  const markerRef = useRef<import("mapbox-gl").Marker | null>(null);
-  const mapboxRef = useRef<typeof import("mapbox-gl") | null>(null);
+  const mapRef = useRef<import("maplibre-gl").Map | null>(null);
+  const markerRef = useRef<import("maplibre-gl").Marker | null>(null);
+  const mapboxRef = useRef<typeof import("maplibre-gl") | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [ready, setReady] = useState(false);
@@ -31,18 +38,17 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
     let cancelled = false;
     (async () => {
       if (!token || !container.current || mapRef.current) return;
-      const mapboxgl = await import("mapbox-gl");
+      const maplibregl = await loadMaplibre();
       if (cancelled || !container.current) return;
-      mapboxRef.current = mapboxgl;
-      mapboxgl.default.accessToken = token;
+      mapboxRef.current = maplibregl;
       const v = viewRef.current;
-      const map = new mapboxgl.default.Map({
+      const map = new maplibregl.Map({
         container: container.current,
         style: BASEMAP_STYLE[basemap],
         center: v?.center ?? value ?? center ?? LAGOS,
         zoom: v?.zoom ?? (value || center ? 15 : 11),
         pitch: v?.pitch ?? 0,
-        attributionControl: false,
+        attributionControl: { compact: true },
       });
       if (!readOnly) map.getCanvas().style.cursor = "crosshair";
       map.on("click", (e) => !readOnly && onChangeRef.current?.([Number(e.lngLat.lng.toFixed(6)), Number(e.lngLat.lat.toFixed(6))]));
@@ -66,14 +72,14 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
 
   useEffect(() => {
     const map = mapRef.current;
-    const mapboxgl = mapboxRef.current;
-    if (!map || !mapboxgl || !ready) return;
+    const maplibregl = mapboxRef.current;
+    if (!map || !maplibregl || !ready) return;
     markerRef.current?.remove();
     markerRef.current = null;
     if (!value) return;
     const el = document.createElement("span");
     el.style.cssText = "width:18px;height:18px;border-radius:50%;background:#F2384B;box-shadow:0 0 0 3px #0A0C10,0 0 0 6px rgba(242,56,75,.35)";
-    markerRef.current = new mapboxgl.default.Marker({ element: el }).setLngLat(value).addTo(map);
+    markerRef.current = new maplibregl.Marker({ element: el }).setLngLat(value).addTo(map);
   }, [value, ready]);
 
   useEffect(() => {

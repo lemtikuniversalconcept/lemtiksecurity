@@ -99,7 +99,6 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
     const twilioConfigured = envFlag("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN");
     const resendConfigured = envFlag("RESEND_API_KEY");
     const radarConfigured = envFlag("RADAR_API_KEY");
-    const mapboxConfigured = envFlag("MAPBOX_PUBLIC_TOKEN", "VITE_MAPBOX_PUBLIC_TOKEN");
 
     const inviteUsage = inviteCountRes.count ?? 0;
     const integrations = [
@@ -154,14 +153,14 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
         note: radarConfigured ? "Geofencing API can be wired to live usage later." : "API key not configured.",
       },
       {
-        key: "mapbox",
-        name: "Mapbox",
-        status: statusFromConfigured(mapboxConfigured),
-        configured: mapboxConfigured,
-        metricLabel: "Tile loads today",
-        metricValue: envNumber("MAPBOX_TILE_LOADS_TODAY"),
-        quotaLabel: "Tiles",
-        note: mapboxConfigured ? "Token is available to the map surfaces." : "Token not configured.",
+        key: "maps",
+        name: "Maps (OpenFreeMap)",
+        status: statusFromConfigured(true),
+        configured: true,
+        metricLabel: "Cost",
+        metricValue: null,
+        quotaLabel: "",
+        note: "Free, keyless tiles rendered with MapLibre. No account or card involved.",
       },
     ].map((integration) => ({
       ...integration,

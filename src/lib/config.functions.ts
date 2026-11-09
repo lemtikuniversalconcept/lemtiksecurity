@@ -1,9 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
-// Publishable Mapbox token (pk.*) — safe to expose to authenticated client code.
-// No auth middleware: avoids 401 from token-attacher race; restrict the
-// token via Mapbox URL allowlist in the Mapbox dashboard instead.
-export const getMapboxToken = createServerFn({ method: "GET" })
-  .handler(async () => {
-    return { token: process.env.MAPBOX_PUBLIC_TOKEN ?? "" };
-  });
+// Maps now use MapLibre with OpenFreeMap tiles, which need no key and can't bill anyone.
+// This keeps the old function name so existing callers still get a non-empty value and draw
+// their maps; MAPBOX_PUBLIC_TOKEN is no longer used and can be removed from Vercel.
+export const getMapboxToken = createServerFn({ method: "GET" }).handler(async () => {
+  return { token: "openfreemap" };
+});

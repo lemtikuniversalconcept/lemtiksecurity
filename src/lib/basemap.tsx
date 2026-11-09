@@ -1,32 +1,32 @@
 import { useEffect, useState } from "react";
-import type { Map as MapboxMap } from "mapbox-gl";
+import type { Map as MaplibreMap } from "maplibre-gl";
 
 /**
- * One basemap choice shared by every map in the app. Dark stays the default for the
- * control room; satellite shows real rooftops, gates and car parks. Both are standard
- * Mapbox styles counted the same way against the free map-load allowance.
+ * Basemaps come from OpenFreeMap (https://openfreemap.org): free, no account, no API key and no
+ * card, rendered with the open-source MapLibre engine. Nothing here can bill anyone.
+ * Day (default) is a clean light map like the ones ride-hailing apps use; Night suits a dark control room.
  */
-export type Basemap = "dark" | "satellite";
+export type Basemap = "night" | "day";
 
 export const BASEMAP_STYLE: Record<Basemap, string> = {
-  dark: "mapbox://styles/mapbox/dark-v11",
-  satellite: "mapbox://styles/mapbox/satellite-streets-v12",
+  night: "https://tiles.openfreemap.org/styles/dark",
+  day: "https://tiles.openfreemap.org/styles/positron",
 };
 
-const KEY = "lemtik.basemap";
+const KEY = "lemtik.basemap.v2";
 const EVENT = "lemtik-basemap";
 
 function read(): Basemap {
   try {
-    return window.localStorage.getItem(KEY) === "satellite" ? "satellite" : "dark";
+    return window.localStorage.getItem(KEY) === "night" ? "night" : "day";
   } catch {
-    return "dark";
+    return "day";
   }
 }
 
 export function useBasemap(): [Basemap, (b: Basemap) => void] {
-  // Server and first client render agree on "dark"; the stored choice applies after mount.
-  const [basemap, setLocal] = useState<Basemap>("dark");
+  // Server and first client render agree on "day"; the stored choice applies after mount.
+  const [basemap, setLocal] = useState<Basemap>("day");
   useEffect(() => {
     setLocal(read());
     const on = () => setLocal(read());
@@ -52,47 +52,49 @@ export function useBasemap(): [Basemap, (b: Basemap) => void] {
 /** Camera of a map that is about to be rebuilt for a style change, so the view doesn't jump. */
 export type SavedView = { center: [number, number]; zoom: number; pitch: number; bearing: number };
 
-export function saveView(map: MapboxMap): SavedView {
+export function saveView(map: MaplibreMap): SavedView {
   const c = map.getCenter();
   return { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() };
 }
 
 /**
- * Extruded building shapes from Mapbox's street data, shown from zoom 15. Where the data
- * has no height (common in parts of Lagos) buildings appear as low, flat blocks.
+ * Extruded buildings from OpenStreetMap footprints, from zoom 15. Where OSM has no height
+ * (common in parts of Lagos) a building is drawn as a low block.
  */
-export function add3DBuildings(map: MapboxMap, basemap: Basemap) {
-  if (map.getLayer("lemtik-3d-buildings") || !map.getSource("composite")) return;
-  const labelLayer = map.getStyle().layers?.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-field"])?.id;
+export function add3DBuildings(map: MaplibreMap, basemap: Basemap) {
+  if (map.getLayer("lemtik-3d-buildings") || !map.getSource("openmaptiles")) return;
+  for (const id of ["building", "building-3d"]) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
+  }
+  const labelLayer = map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
   map.addLayer(
     {
       id: "lemtik-3d-buildings",
-      source: "composite",
+      source: "openmaptiles",
       "source-layer": "building",
-      filter: ["==", ["get", "extrude"], "true"],
       type: "fill-extrusion",
-      minzoom: 15,
+      minzoom: 14,
       paint: {
-        "fill-extrusion-color": basemap === "satellite" ? "#d9d4c7" : "#232a37",
-        "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 15, 0, 15.6, ["coalesce", ["get", "height"], 6]],
-        "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 15, 0, 15.6, ["coalesce", ["get", "min_height"], 0]],
-        "fill-extrusion-opacity": basemap === "satellite" ? 0.55 : 0.85,
+        "fill-extrusion-color": basemap === "day" ? "#e4e6ea" : "#1d2330",
+        "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 14, 0, 15, ["coalesce", ["get", "render_height"], 6]],
+        "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+        "fill-extrusion-opacity": 0.9,
       },
     },
     labelLayer,
   );
 }
 
-/** Small on-map control: Map / Satellite, plus tilt for 3D. Place it absolutely inside the map box. */
+/** Small on-map control: Night / Day, plus tilt for 3D. Place it absolutely inside the map box. */
 export function BasemapSwitch({ value, onChange, onTilt, tilted, style }: { value: Basemap; onChange: (b: Basemap) => void; onTilt?: () => void; tilted?: boolean; style?: React.CSSProperties }) {
   return (
     <div className="glass row g4" style={{ position: "absolute", padding: 3, zIndex: 2, ...style }}>
       <div className="seg" role="group" aria-label="Map style" style={{ background: "transparent", border: 0 }}>
-        <button type="button" className={value === "dark" ? "on" : undefined} aria-pressed={value === "dark"} onClick={() => onChange("dark")}>
-          Map
+        <button type="button" className={value === "night" ? "on" : undefined} aria-pressed={value === "night"} onClick={() => onChange("night")}>
+          Night
         </button>
-        <button type="button" className={value === "satellite" ? "on" : undefined} aria-pressed={value === "satellite"} onClick={() => onChange("satellite")}>
-          Satellite
+        <button type="button" className={value === "day" ? "on" : undefined} aria-pressed={value === "day"} onClick={() => onChange("day")}>
+          Day
         </button>
       </div>
       {onTilt && (

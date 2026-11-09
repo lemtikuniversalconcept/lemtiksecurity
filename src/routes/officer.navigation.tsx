@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ChevronLeft, Loader2, MapPinned, RefreshCw } from "lucide-react";
@@ -41,7 +41,7 @@ function OfficerNavigation() {
   const [routeNote, setRouteNote] = useState<string | null>(null);
   const [arrival, setArrival] = useState<{ state: "idle" | "busy" | "done" | "fail"; text?: string }>({ state: "idle" });
   const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
 
   const inc = dispatch?.incident;
   const dest: Coord | null = inc && inc.coord_x != null && inc.coord_y != null ? [Number(inc.coord_x), Number(inc.coord_y)] : null;
@@ -91,8 +91,7 @@ function OfficerNavigation() {
 
   useEffect(() => {
     if (!token?.token || !mapEl.current || !dest) return;
-    mapboxgl.accessToken = token.token;
-    const map = new mapboxgl.Map({ container: mapEl.current, style: "mapbox://styles/mapbox/dark-v11", center: dest, zoom: 15, attributionControl: false });
+    const map = new maplibregl.Map({ container: mapEl.current, style: "https://tiles.openfreemap.org/styles/positron", center: dest, zoom: 15, attributionControl: { compact: true } });
     mapRef.current = map;
     map.on("load", () => {
       const line: Coord[] = plan?.kind === "road" ? plan.coords : here ? [here, dest] : [];
@@ -111,9 +110,9 @@ function OfficerNavigation() {
         el.style.cssText = `width:18px;height:18px;border-radius:9px;background:${bg};box-shadow:0 0 0 3px #0A0C10`;
         return el;
       };
-      new mapboxgl.Marker({ element: dot("#F2384B") }).setLngLat(dest).addTo(map);
-      if (here) new mapboxgl.Marker({ element: dot("#7A9BFF") }).setLngLat(here).addTo(map);
-      const b = new mapboxgl.LngLatBounds();
+      new maplibregl.Marker({ element: dot("#F2384B") }).setLngLat(dest).addTo(map);
+      if (here) new maplibregl.Marker({ element: dot("#7A9BFF") }).setLngLat(here).addTo(map);
+      const b = new maplibregl.LngLatBounds();
       for (const c of line.length ? line : [dest]) b.extend(c);
       map.fitBounds(b, { padding: 50, maxZoom: 17, duration: 0 });
     });

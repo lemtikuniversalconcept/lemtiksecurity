@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import {
   Cpu,
   Flame,
@@ -113,7 +113,7 @@ function distanceKm(a: [number, number], b: [number, number]) {
 }
 
 /** Severity squares drawn once as map images, so pins scale to hundreds of incidents. */
-function addSeverityIcons(map: mapboxgl.Map) {
+function addSeverityIcons(map: maplibregl.Map) {
   const fill: Record<number, string> = { 5: "#F2384B", 4: "#FF8F2E", 3: "#F7D046", 2: "#0C0F14", 1: "#0C0F14" };
   const edge: Record<number, string> = { 5: "#0A0C10", 4: "#0A0C10", 3: "#0A0C10", 2: "#5E708A", 1: "#3F4759" };
   for (const s of [1, 2, 3, 4, 5]) {
@@ -328,9 +328,9 @@ function LiveMap() {
 
   // ---- map ----
   const container = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const pulseMarkers = useRef<mapboxgl.Marker[]>([]);
-  const meMarker = useRef<mapboxgl.Marker | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const pulseMarkers = useRef<maplibregl.Marker[]>([]);
+  const meMarker = useRef<maplibregl.Marker | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useBasemap();
   const [tilted, setTilted] = useState(false);
@@ -341,9 +341,8 @@ function LiveMap() {
   useEffect(() => {
     const token = tokenData?.token;
     if (!token || !container.current || mapRef.current) return;
-    mapboxgl.accessToken = token;
     const v = viewRef.current;
-    const map = new mapboxgl.Map({ container: container.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? LAGOS, zoom: v?.zoom ?? 11, pitch: v?.pitch ?? 0, bearing: v?.bearing ?? 0, attributionControl: false });
+    const map = new maplibregl.Map({ container: container.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? LAGOS, zoom: v?.zoom ?? 11, pitch: v?.pitch ?? 0, bearing: v?.bearing ?? 0, attributionControl: { compact: true } });
     mapRef.current = map;
     map.on("error", (e) => console.error("[mapbox]", e?.error?.message ?? e));
     map.on("load", () => {
@@ -352,7 +351,7 @@ function LiveMap() {
       map.addSource("zones", { type: "geojson", data: fc([]) });
       map.addLayer({ id: "zones-fill", type: "fill", source: "zones", paint: { "fill-color": "#7A9BFF", "fill-opacity": 0.06 } });
       map.addLayer({ id: "zones-line", type: "line", source: "zones", paint: { "line-color": "#7A9BFF", "line-width": 1.2, "line-opacity": 0.6, "line-dasharray": [2, 2] } });
-      map.addLayer({ id: "zones-label", type: "symbol", source: "zones", layout: { "text-field": ["get", "name"], "text-size": 11, "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] }, paint: { "text-color": "#8790A5", "text-halo-color": "#0A0C10", "text-halo-width": 1.2 } });
+      map.addLayer({ id: "zones-label", type: "symbol", source: "zones", layout: { "text-field": ["get", "name"], "text-size": 11, "text-font": ["Noto Sans Regular"] }, paint: { "text-color": "#8790A5", "text-halo-color": "#0A0C10", "text-halo-width": 1.2 } });
 
       map.addSource("routes", { type: "geojson", data: fc([]) });
       map.addLayer({ id: "routes-line", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#7A9BFF", "line-width": 2.5, "line-opacity": 0.9 } });
@@ -403,7 +402,7 @@ function LiveMap() {
         id: "officers-initials",
         type: "symbol",
         source: "officers",
-        layout: { "text-field": ["get", "initials"], "text-size": 9, "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"], "text-allow-overlap": true },
+        layout: { "text-field": ["get", "initials"], "text-size": 9, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true },
         paint: { "text-color": ["case", ["==", ["get", "fresh"], 1], "#FFFFFF", "#7A9BFF"] },
       });
 
@@ -433,7 +432,7 @@ function LiveMap() {
         type: "symbol",
         source: "incidents",
         filter: ["has", "point_count"],
-        layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11, "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"] },
+        layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 11, "text-font": ["Noto Sans Bold"] },
         paint: { "text-color": "#E9EDF5" },
       });
       map.addLayer({
@@ -453,7 +452,7 @@ function LiveMap() {
           "icon-allow-overlap": true,
           "text-field": ["to-string", ["get", "sev"]],
           "text-size": 11,
-          "text-font": ["DIN Pro Bold", "Arial Unicode MS Bold"],
+          "text-font": ["Noto Sans Bold"],
           "text-allow-overlap": true,
         },
         paint: { "text-color": ["match", ["get", "sev"], 2, "#B9C6D8", 1, "#9AA3B5", "#0A0C10"] },
@@ -466,12 +465,12 @@ function LiveMap() {
       map.on("click", "incidents-cluster", (e) => {
         const feature = e.features?.[0];
         const clusterId = feature?.properties?.cluster_id;
-        const src = map.getSource("incidents") as mapboxgl.GeoJSONSource;
+        const src = map.getSource("incidents") as maplibregl.GeoJSONSource;
         if (clusterId == null) return;
-        src.getClusterExpansionZoom(clusterId, (err, zoom) => {
-          if (err || zoom == null) return;
-          map.easeTo({ center: (feature!.geometry as any).coordinates, zoom });
-        });
+        src
+          .getClusterExpansionZoom(clusterId)
+          .then((zoom) => map.easeTo({ center: (feature!.geometry as any).coordinates, zoom }))
+          .catch(() => undefined);
       });
       const bindInfo = (layer: string, build: (p: any) => { title: string; lines: string[] }) =>
         map.on("click", layer, (e) => {
@@ -513,7 +512,7 @@ function LiveMap() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const set = (id: string, data: any) => (map.getSource(id) as mapboxgl.GeoJSONSource | undefined)?.setData(data);
+    const set = (id: string, data: any) => (map.getSource(id) as maplibregl.GeoJSONSource | undefined)?.setData(data);
     set("incidents", incidentGeo);
     set("zones", zoneGeo);
     set("routes", routeGeo);
@@ -551,7 +550,7 @@ function LiveMap() {
       const el = document.createElement("span");
       el.className = "pulse-dot";
       el.style.cssText = "width:22px;height:22px;border-radius:5px;pointer-events:none";
-      pulseMarkers.current.push(new mapboxgl.Marker({ element: el }).setLngLat(coordOf(i.coord_x, i.coord_y)!).addTo(map));
+      pulseMarkers.current.push(new maplibregl.Marker({ element: el }).setLngLat(coordOf(i.coord_x, i.coord_y)!).addTo(map));
     }
   }, [placed, ready, layers.incidents, mode]);
 
@@ -566,7 +565,7 @@ function LiveMap() {
     if (!map) return;
     const points = [...placed.map((i) => coordOf(i.coord_x, i.coord_y)!), ...placedOfficers.map((o) => o.coord)];
     if (!points.length) return map.easeTo({ center: LAGOS, zoom: 11 });
-    const bounds = new mapboxgl.LngLatBounds(points[0], points[0]);
+    const bounds = new maplibregl.LngLatBounds(points[0], points[0]);
     points.forEach((p) => bounds.extend(p));
     map.fitBounds(bounds, { padding: { top: 120, bottom: 80, left: 60, right: panelOpen ? 420 : 60 }, maxZoom: 16, duration: 500 });
   };
@@ -649,7 +648,7 @@ function LiveMap() {
       meMarker.current?.remove();
       const el = document.createElement("span");
       el.style.cssText = "width:14px;height:14px;border-radius:50%;background:#7A9BFF;box-shadow:0 0 0 4px rgba(122,155,255,.3),0 0 0 2px #0A0C10";
-      meMarker.current = new mapboxgl.Marker({ element: el }).setLngLat(c).addTo(map);
+      meMarker.current = new maplibregl.Marker({ element: el }).setLngLat(c).addTo(map);
       map.flyTo({ center: c, zoom: 15, duration: 700 });
     });
   };
