@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
@@ -331,6 +332,9 @@ function LiveMap() {
   const pulseMarkers = useRef<mapboxgl.Marker[]>([]);
   const meMarker = useRef<mapboxgl.Marker | null>(null);
   const [ready, setReady] = useState(false);
+  const [basemap, setBasemap] = useBasemap();
+  const [tilted, setTilted] = useState(false);
+  const viewRef = useRef<SavedView | null>(null);
   const selectRef = useRef(setSelectedId);
   selectRef.current = setSelectedId;
 
@@ -338,10 +342,12 @@ function LiveMap() {
     const token = tokenData?.token;
     if (!token || !container.current || mapRef.current) return;
     mapboxgl.accessToken = token;
-    const map = new mapboxgl.Map({ container: container.current, style: "mapbox://styles/mapbox/dark-v11", center: LAGOS, zoom: 11, attributionControl: false });
+    const v = viewRef.current;
+    const map = new mapboxgl.Map({ container: container.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? LAGOS, zoom: v?.zoom ?? 11, pitch: v?.pitch ?? 0, bearing: v?.bearing ?? 0, attributionControl: false });
     mapRef.current = map;
     map.on("error", (e) => console.error("[mapbox]", e?.error?.message ?? e));
     map.on("load", () => {
+      add3DBuildings(map, basemap);
       addSeverityIcons(map);
       map.addSource("zones", { type: "geojson", data: fc([]) });
       map.addLayer({ id: "zones-fill", type: "fill", source: "zones", paint: { "fill-color": "#7A9BFF", "fill-opacity": 0.06 } });
@@ -497,11 +503,12 @@ function LiveMap() {
       ro.disconnect();
       pulseMarkers.current.forEach((m) => m.remove());
       meMarker.current?.remove();
+      viewRef.current = saveView(map);
       map.remove();
       mapRef.current = null;
       setReady(false);
     };
-  }, [tokenData?.token]);
+  }, [tokenData?.token, basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -825,6 +832,20 @@ function LiveMap() {
         )}
         {unplaced > 0 && <span className="t3">{unplaced} without a map position</span>}
       </div>
+
+      {tokenData?.token && (
+        <BasemapSwitch
+          value={basemap}
+          onChange={setBasemap}
+          tilted={tilted}
+          onTilt={() => {
+            const next = !tilted;
+            setTilted(next);
+            mapRef.current?.easeTo({ pitch: next ? 55 : 0, zoom: next ? Math.max(mapRef.current.getZoom(), 16) : mapRef.current.getZoom(), duration: 600 });
+          }}
+          style={{ left: 12, bottom: 58 }}
+        />
+      )}
 
       <div className="mapctl" style={{ right: panelOpen ? asideWidth + 24 : 12, bottom: 12 }}>
         <button type="button" className="ibtn" aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()} disabled={!ready}>

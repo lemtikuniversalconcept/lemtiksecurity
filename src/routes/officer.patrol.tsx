@@ -4,7 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { CheckCircle2, FileText, Loader2, MapPin } from "lucide-react";
+import { CheckCircle2, FileText, Loader2, MapPin, QrCode } from "lucide-react";
+import { parseCheckpoint } from "@/lib/checkpointQr";
+import { QrScanner } from "@/components/officer/QrScanner";
+import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, useBasemap } from "@/lib/basemap";
 import { getMapboxToken } from "@/lib/config.functions";
 import { getPatrol, listCheckIns, recordCheckIn, updateShift } from "@/lib/patrols.functions";
 import { Notice } from "@/components/nw";
@@ -17,7 +20,7 @@ export const Route = createFileRoute("/officer/patrol")({
 type Coord = [number, number];
 type Waypoint = { id: string; ord: number; name: string; coord_x: number | null; coord_y: number | null; expected_minutes: number };
 type Queued =
-  | { id: string; queuedAt: number; kind: "checkin"; payload: { shift_id: string; waypoint_id: string; method: "gps"; coord_x?: number; coord_y?: number } }
+  | { id: string; queuedAt: number; kind: "checkin"; payload: { shift_id: string; waypoint_id: string; method: "gps" | "qr"; qr_token?: string; coord_x?: number; coord_y?: number } }
   | { id: string; queuedAt: number; kind: "handover"; payload: { id: string; handover_notes: string; end: boolean } };
 
 const CHECKIN_RADIUS_M = 50;
@@ -62,6 +65,7 @@ function OfficerPatrol() {
   const [message, setMessage] = useState<{ tone: "ok" | "warn" | "fail"; text: string } | null>(null);
   const [mismatch, setMismatch] = useState<number | null>(null);
   const [handover, setHandover] = useState("");
+  const [scanning, setScanning] = useState(false);
 
   const waypoints: Waypoint[] = useMemo(() => ((patrol?.waypoints ?? []) as Waypoint[]).slice().sort((a, b) => a.ord - b.ord), [patrol]);
   const doneIds = useMemo(() => {
@@ -116,6 +120,35 @@ function OfficerPatrol() {
   useEffect(() => {
     if (online) void flush();
   }, [online, flush]);
+
+  // QR check-in: proves the officer stood at the stop, which GPS can't do indoors.
+  const onScan = async (text: string) => {
+    setScanning(false);
+    setMessage(null);
+    if (!shift) return;
+    const parsed = parseCheckpoint(text);
+    if (!parsed) return setMessage({ tone: "fail", text: "That isn't a Lemtik checkpoint code." });
+    const stop = waypoints.find((w) => w.id === parsed.waypointId);
+    if (!stop) return setMessage({ tone: "fail", text: "That checkpoint isn't on your route for this shift." });
+    if (doneIds.has(stop.id)) return setMessage({ tone: "warn", text: `${stop.name} is already checked in for this shift.` });
+    const payload = { shift_id: shift.id, waypoint_id: stop.id, method: "qr" as const, qr_token: parsed.token, ...(here ? { coord_x: here[0], coord_y: here[1] } : {}) };
+    if (!online) {
+      saveQueue([...queue, { id: crypto.randomUUID(), queuedAt: Date.now(), kind: "checkin", payload }]);
+      setMessage({ tone: "warn", text: `${stop.name} scanned and saved on this phone. It uploads when you're back online, and command sees the upload time.` });
+      return;
+    }
+    setBusy(true);
+    try {
+      const row = (await recordFn({ data: payload })) as any;
+      const late = row?.status === "late" ? ` (${row.minutes_late} min late)` : "";
+      setMessage({ tone: row?.status === "late" ? "warn" : "ok", text: `Checked in at ${stop.name} by QR${late}.` });
+      qc.invalidateQueries({ queryKey: ["officer-patrol-checkins"] });
+    } catch (e) {
+      setMessage({ tone: "fail", text: (e as Error)?.message || "Check-in didn't save. Try again." });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const checkIn = async (override: boolean) => {
     if (!shift || !next) return;
@@ -240,6 +273,9 @@ function OfficerPatrol() {
                     {busy ? <Loader2 size={18} className="animate-spin" /> : <MapPin size={18} />} Check in at {next.name}
                   </button>
                 )}
+                <button type="button" className={p?.checkin_method === "qr" ? "bigbtn" : "b b-sec"} style={p?.checkin_method === "qr" ? { background: "var(--ink-2)", color: "var(--tx-1)", borderColor: "var(--line-2)" } : { justifyContent: "center" }} onClick={() => setScanning(true)} disabled={busy}>
+                  <QrCode size={18} /> Scan checkpoint QR code
+                </button>
                 <Link to="/officer/incident/new" className="b b-sec" style={{ justifyContent: "center" }}>
                   <FileText size={16} /> Report something
                 </Link>
@@ -279,6 +315,7 @@ function OfficerPatrol() {
           </div>
         </>
       )}
+      {scanning && <QrScanner onResult={(t) => void onScan(t)} onClose={() => setScanning(false)} />}
     </>
   );
 }
@@ -288,14 +325,16 @@ function PatrolMap({ token, waypoints, doneIds, nextId, here }: { token: string;
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markers = useRef<mapboxgl.Marker[]>([]);
   const [ready, setReady] = useState(false);
+  const [basemap, setBasemap] = useBasemap();
   const placed = waypoints.filter((w) => w.coord_x != null && w.coord_y != null);
 
   useEffect(() => {
     if (!el.current || mapRef.current) return;
     mapboxgl.accessToken = token;
     const first = placed[0];
-    const map = new mapboxgl.Map({ container: el.current, style: "mapbox://styles/mapbox/dark-v11", center: [Number(first.coord_x), Number(first.coord_y)], zoom: 16, attributionControl: false });
+    const map = new mapboxgl.Map({ container: el.current, style: BASEMAP_STYLE[basemap], center: [Number(first.coord_x), Number(first.coord_y)], zoom: 16, attributionControl: false });
     map.on("load", () => {
+      add3DBuildings(map, basemap);
       map.addSource("route", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString", coordinates: placed.map((w) => [Number(w.coord_x), Number(w.coord_y)]) }, properties: {} } as any });
       map.addLayer({ id: "route", type: "line", source: "route", layout: { "line-cap": "round" }, paint: { "line-color": "#7A9BFF", "line-width": 3, "line-dasharray": [2, 1.5] } });
       const b = new mapboxgl.LngLatBounds();
@@ -307,9 +346,10 @@ function PatrolMap({ token, waypoints, doneIds, nextId, here }: { token: string;
     return () => {
       map.remove();
       mapRef.current = null;
+      setReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -332,6 +372,7 @@ function PatrolMap({ token, waypoints, doneIds, nextId, here }: { token: string;
   return (
     <div className="map" style={{ height: 240, borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
       <div ref={el} style={{ position: "absolute", inset: 0 }} />
+      <BasemapSwitch value={basemap} onChange={setBasemap} style={{ right: 8, bottom: 8 }} />
     </div>
   );
 }

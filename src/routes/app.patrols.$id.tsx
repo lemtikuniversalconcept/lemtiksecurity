@@ -10,11 +10,14 @@ import {
   listShifts, scheduleShift, updateShift, listCheckIns,
 } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
+import { encodeCheckpoint } from "@/lib/checkpointQr";
+import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { requireSectionAccess } from "@/lib/rbac";
 import {
   ChevronLeft, Plus, Trash2, Save, Copy, Archive, ArchiveRestore, Loader2,
   CalendarPlus, PlayCircle, StopCircle, ArrowUp, ArrowDown, X,
+  QrCode,
 } from "lucide-react";
 import { Avatar, Empty, Kpi, Notice, Panel, Status, Tag, type Tone } from "@/components/nw";
 
@@ -103,6 +106,11 @@ function PatrolDetail() {
   const [wpDirty, setWpDirty] = useState(false);
   const [detailsDirty, setDetailsDirty] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const qrStops = useMemo(
+    () => ((data?.waypoints ?? []) as any[]).filter((w) => w.id && w.qr_token).sort((a, b) => a.ord - b.ord) as { id: string; name: string; ord: number; qr_token: string }[],
+    [data?.waypoints],
+  );
 
   useEffect(() => {
     if (!data) return;
@@ -149,21 +157,26 @@ function PatrolDetail() {
   const [mapReady, setMapReady] = useState(false);
   const canManageRef = useRef(canManage);
   canManageRef.current = canManage;
+  const [basemap, setBasemap] = useBasemap();
+  const viewRef = useRef<SavedView | null>(null);
 
   useEffect(() => {
     if (!token?.token || !mapEl.current || mapRef.current || !data) return;
     mapboxgl.accessToken = token.token;
     const first = (data.waypoints ?? []).find((w: any) => w.coord_x != null && w.coord_y != null) as any;
+    const v = viewRef.current;
     const m = new mapboxgl.Map({
       container: mapEl.current,
-      style: "mapbox://styles/mapbox/dark-v11",
-      center: first ? [Number(first.coord_x), Number(first.coord_y)] : DEFAULT_CENTER,
-      zoom: first ? 15 : 11,
+      style: BASEMAP_STYLE[basemap],
+      center: v?.center ?? (first ? [Number(first.coord_x), Number(first.coord_y)] : DEFAULT_CENTER),
+      zoom: v?.zoom ?? (first ? 15 : 11),
+      pitch: v?.pitch ?? 0,
       attributionControl: false,
     });
     m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
     if (canManageRef.current) m.getCanvas().style.cursor = "crosshair";
     m.on("load", () => {
+      add3DBuildings(m, basemap);
       requestAnimationFrame(() => m.resize());
       setMapReady(true);
     });
@@ -185,12 +198,13 @@ function PatrolDetail() {
     ro.observe(mapEl.current);
     return () => {
       ro.disconnect();
+      viewRef.current = saveView(m);
       m.remove();
       mapRef.current = null;
       setMapReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token?.token, !!data]);
+  }, [token?.token, !!data, basemap]);
 
   useEffect(() => {
     const m = mapRef.current;
@@ -360,6 +374,7 @@ function PatrolDetail() {
           {token?.token ? (
             <div className="map" style={{ minHeight: 520 }}>
               <div ref={mapEl} style={{ position: "absolute", inset: 0 }} />
+              <BasemapSwitch value={basemap} onChange={setBasemap} style={{ right: 10, bottom: 10 }} />
               {canManage && (
                 <div className="glass row g8" style={{ position: "absolute", left: 10, top: 10, padding: "6px 10px", fontSize: 12, maxWidth: "calc(100% - 70px)" }}>
                   Click the map to add a stop. Drag a stop to move it.
@@ -514,9 +529,20 @@ function PatrolDetail() {
             meta={`${waypoints.length}${stats.length ? ` · ${(stats.length / 1000).toFixed(2)} km` : ""}`}
             actions={
               canManage ? (
-                <button type="button" className="b b-sm b-pri" onClick={() => saveWpMut.mutate()} disabled={!wpDirty || saveWpMut.isPending}>
-                  {saveWpMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save route
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="b b-sm b-gh"
+                    onClick={() => setShowQr(true)}
+                    disabled={wpDirty || !qrStops.length}
+                    title={wpDirty ? "Save the route first" : !qrStops.length ? "Add and save stops first" : "Print a QR code for each stop"}
+                  >
+                    <QrCode className="h-3.5 w-3.5" /> QR codes
+                  </button>
+                  <button type="button" className="b b-sm b-pri" onClick={() => saveWpMut.mutate()} disabled={!wpDirty || saveWpMut.isPending}>
+                    {saveWpMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save route
+                  </button>
+                </>
               ) : undefined
             }
             bodyClassName=""
@@ -574,6 +600,11 @@ function PatrolDetail() {
                     <X size={14} />
                   </button>
                 </div>
+                {canManage && active.id && (
+                  <span className="t3" style={{ fontSize: 12 }}>
+                    Removing a saved stop also removes its check-in history and makes its printed QR code stop working.
+                  </span>
+                )}
                 <fieldset disabled={!canManage} className="col g10" style={{ border: 0, padding: 0, margin: 0 }}>
                   <label className="fl">
                     <span className="lbl">Name</span>
@@ -606,6 +637,7 @@ function PatrolDetail() {
           </Panel>
         </aside>
       </div>
+      {showQr && <QrSheet code={p.code} name={details.name || p.name} stops={qrStops} onClose={() => setShowQr(false)} />}
     </div>
   );
 
@@ -762,4 +794,64 @@ function ScheduleShiftForm({
 function toLocalInput(d: Date) {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** A printable sheet with one QR code per saved stop. Only the sheet prints. */
+function QrSheet({ code, name, stops, onClose }: { code: string; name: string; stops: { id: string; name: string; ord: number; qr_token: string }[]; onClose: () => void }) {
+  const [images, setImages] = useState<Record<string, string>>({});
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const QR = (await import("qrcode")).default;
+        const out: Record<string, string> = {};
+        for (const s of stops) out[s.id] = await QR.toDataURL(encodeCheckpoint(s.id, s.qr_token), { width: 360, margin: 1, errorCorrectionLevel: "M" });
+        if (!cancelled) setImages(out);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stops]);
+  const ready = Object.keys(images).length === stops.length;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-auto" style={{ background: "rgba(5,7,10,.8)" }} role="dialog" aria-modal="true" aria-label="Checkpoint QR codes">
+      <style>{`@media print { body * { visibility: hidden !important; } #qr-sheet, #qr-sheet * { visibility: visible !important; } #qr-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; padding: 0 !important; } .qr-card { break-inside: avoid; } }`}</style>
+      <div className="row g8" style={{ position: "sticky", top: 0, padding: 12, justifyContent: "flex-end", background: "var(--ink-1)", borderBottom: "1px solid var(--line-1)" }}>
+        <span className="t2 f1" style={{ fontSize: 13 }}>
+          Print, laminate and fix each code at its stop. Officers scan it with the officer app to check in.
+        </span>
+        <button type="button" className="b b-pri" onClick={() => window.print()} disabled={!ready}>
+          {!ready && !failed && <Loader2 className="h-4 w-4 animate-spin" />} Print
+        </button>
+        <button type="button" className="b b-gh" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div id="qr-sheet" className="paper" style={{ maxWidth: 820, margin: "20px auto", padding: 24, borderRadius: 10 }}>
+        {failed && <p>Couldn't generate the codes. Close this and try again.</p>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {stops.map((s, i) => (
+            <div key={s.id} className="qr-card col" style={{ border: "1px solid var(--paper-2)", borderRadius: 10, padding: 16, alignItems: "center", textAlign: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, letterSpacing: ".08em", fontWeight: 700 }}>LEMTIK CHECKPOINT</span>
+              {images[s.id] ? <img src={images[s.id]} alt={`QR code for ${s.name}`} style={{ width: 200, height: 200 }} /> : <div style={{ width: 200, height: 200 }} />}
+              <b style={{ fontSize: 17 }}>
+                {i + 1}. {s.name}
+              </b>
+              <span className="t2" style={{ fontSize: 12 }}>
+                {code} · {name}
+              </span>
+              <span className="t3" style={{ fontSize: 11 }}>
+                Scan with the Lemtik officer app. Do not move this code.
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }

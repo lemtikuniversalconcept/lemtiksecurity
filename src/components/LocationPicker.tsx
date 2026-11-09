@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import "mapbox-gl/dist/mapbox-gl.css";
+import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { getMapboxToken } from "@/lib/config.functions";
 
 type LngLat = [number, number];
@@ -23,6 +24,8 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [ready, setReady] = useState(false);
+  const [basemap, setBasemap] = useBasemap();
+  const viewRef = useRef<SavedView | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,28 +35,34 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
       if (cancelled || !container.current) return;
       mapboxRef.current = mapboxgl;
       mapboxgl.default.accessToken = token;
+      const v = viewRef.current;
       const map = new mapboxgl.default.Map({
         container: container.current,
-        style: "mapbox://styles/mapbox/dark-v11",
-        center: value ?? center ?? LAGOS,
-        zoom: value || center ? 15 : 11,
+        style: BASEMAP_STYLE[basemap],
+        center: v?.center ?? value ?? center ?? LAGOS,
+        zoom: v?.zoom ?? (value || center ? 15 : 11),
+        pitch: v?.pitch ?? 0,
         attributionControl: false,
       });
       if (!readOnly) map.getCanvas().style.cursor = "crosshair";
       map.on("click", (e) => !readOnly && onChangeRef.current?.([Number(e.lngLat.lng.toFixed(6)), Number(e.lngLat.lat.toFixed(6))]));
-      map.on("load", () => setReady(true));
+      map.on("load", () => {
+        add3DBuildings(map, basemap);
+        setReady(true);
+      });
       mapRef.current = map;
     })();
     return () => {
       cancelled = true;
       markerRef.current?.remove();
+      if (mapRef.current) viewRef.current = saveView(mapRef.current);
       mapRef.current?.remove();
       mapRef.current = null;
       setReady(false);
     };
-    // the map is created once per token; value/center are applied by the effects below
+    // the map is created once per token and style; value/center are applied by the effects below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -76,6 +85,7 @@ export function LocationPicker({ value, center, onChange, height = 240, readOnly
   return (
     <div className="map" style={{ height }}>
       <div ref={container} style={{ position: "absolute", inset: 0 }} />
+      <BasemapSwitch value={basemap} onChange={setBasemap} style={{ right: 8, bottom: 8 }} />
       {!readOnly && (
         <div className="glass" style={{ position: "absolute", left: 10, top: 10, padding: "4px 10px", fontSize: 12 }}>
           Click the map to drop the pin

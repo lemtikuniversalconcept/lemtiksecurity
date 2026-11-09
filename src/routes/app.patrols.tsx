@@ -7,6 +7,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { createPatrol, listCheckIns, listPatrols, listPatrolWaypoints, listShifts, scheduleShift } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { listLocations } from "@/lib/orgs.functions";
+import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { requireSectionAccess } from "@/lib/rbac";
 import { Archive, CalendarDays, Download, Lock, Map as MapIcon, Pencil, Plus, Loader2, X } from "lucide-react";
@@ -544,6 +545,8 @@ function LivePatrolMap({
   const mapEl = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [ready, setReady] = useState(false);
+  const [basemap, setBasemap] = useBasemap();
+  const viewRef = useRef<SavedView | null>(null);
 
   const routes = useMemo(() => {
     const byPatrol = new globalThis.Map<string, WaypointRow[]>();
@@ -571,21 +574,24 @@ function LivePatrolMap({
     mapboxgl.accessToken = token;
     const first = routes[0]?.points[0];
     const center: [number, number] = first ? [Number(first.coord_x), Number(first.coord_y)] : fallbackCenter ?? [3.4219, 6.4281];
-    const map = new mapboxgl.Map({ container: mapEl.current, style: "mapbox://styles/mapbox/dark-v11", center, zoom: first || fallbackCenter ? 14 : 10, attributionControl: false });
+    const v = viewRef.current;
+    const map = new mapboxgl.Map({ container: mapEl.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? center, zoom: v?.zoom ?? (first || fallbackCenter ? 14 : 10), pitch: v?.pitch ?? 0, attributionControl: false });
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
     map.on("load", () => {
+      add3DBuildings(map, basemap);
       requestAnimationFrame(() => map.resize());
       setReady(true);
     });
     mapRef.current = map;
     return () => {
+      viewRef.current = saveView(map);
       map.remove();
       mapRef.current = null;
       setReady(false);
     };
-    // the map is created once per token; data is applied below
+    // the map is created once per token and style; data is applied below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -650,6 +656,7 @@ function LivePatrolMap({
   return (
     <div className="map" style={{ minHeight: 420 }}>
       <div ref={mapEl} style={{ position: "absolute", inset: 0 }} />
+      <BasemapSwitch value={basemap} onChange={setBasemap} style={{ right: 10, bottom: 10 }} />
       <div className="glass row g12 wrap" style={{ position: "absolute", left: 10, bottom: 10, padding: "6px 10px", fontSize: 12 }}>
         {(["on_route", "delayed", "missed"] as const).map((s) => (
           <span key={s} className="row g6">

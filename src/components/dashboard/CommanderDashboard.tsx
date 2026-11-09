@@ -1,3 +1,4 @@
+import { add3DBuildings, BASEMAP_STYLE, BasemapSwitch, saveView, useBasemap, type SavedView } from "@/lib/basemap";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -386,6 +387,8 @@ function OverviewMap({
   const markersRef = useRef<MapboxMarker[]>([]);
   const [ready, setReady] = useState(false);
   const [layers, setLayers] = useState({ incidents: true, patrols: true, zones: true });
+  const [basemap, setBasemap] = useBasemap();
+  const viewRef = useRef<SavedView | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -428,8 +431,10 @@ function OverviewMap({
       mapboxRef.current = mapboxgl;
       if (cancelled || !container.current) return;
       mapboxgl.default.accessToken = token;
-      map = new mapboxgl.default.Map({ container: container.current, style: "mapbox://styles/mapbox/dark-v11", center: LAGOS, zoom: 10.7, attributionControl: false });
+      const v = viewRef.current;
+      map = new mapboxgl.default.Map({ container: container.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? LAGOS, zoom: v?.zoom ?? 10.7, pitch: v?.pitch ?? 0, bearing: v?.bearing ?? 0, attributionControl: false });
       map.on("load", () => {
+        add3DBuildings(map!, basemap);
         map!.addSource("zones", { type: "geojson", data: zones as any });
         map!.addLayer({ id: "zones-fill", type: "fill", source: "zones", paint: { "fill-color": "#7A9BFF", "fill-opacity": 0.06 } });
         map!.addLayer({ id: "zones-line", type: "line", source: "zones", paint: { "line-color": "#7A9BFF", "line-width": 1.2, "line-opacity": 0.6, "line-dasharray": [2, 2] } });
@@ -451,13 +456,14 @@ function OverviewMap({
       ro?.disconnect();
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      if (map) viewRef.current = saveView(map);
       map?.remove();
       mapRef.current = null;
       setReady(false);
     };
     // zones are pushed by the effect below once the style has loaded
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, basemap]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -566,6 +572,7 @@ function OverviewMap({
           {chip("zones", "Zones", Layers)}
         </div>
       </div>
+      {token && <BasemapSwitch value={basemap} onChange={setBasemap} style={{ right: 60, bottom: 12 }} />}
       <div className="mapctl" style={{ right: 12, bottom: 12 }}>
         <button type="button" className="ibtn" aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()} disabled={!ready}>
           <Plus size={15} strokeWidth={1.75} />
