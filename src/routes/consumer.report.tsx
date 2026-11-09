@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
-import { Camera, Mic, Video, CheckCircle2, Loader2, Keyboard, ShieldAlert, Send } from "lucide-react";
+import { Camera, Mic, Video, CheckCircle2, Loader2, Keyboard, Send } from "lucide-react";
+import { GNotice, GUEST_LANGUAGES, useGuestLanguage } from "@/components/guest/kit";
 import { createConsumerReport, sendIntakeTurn } from "@/lib/consumer.functions";
 import { uploadWithRetry } from "@/lib/consumer-media-queue";
 import { getConsumerToken, getCurrentPositionSafe, setLastReportId } from "@/lib/consumer-session";
@@ -9,7 +10,8 @@ import { getConsumerToken, getCurrentPositionSafe, setLastReportId } from "@/lib
 type TranscriptTurn = { speaker: "ai" | "you"; text: string };
 type UploadState = { id: string; label: string; progress: number; done: boolean; failed: boolean };
 
-const OPENING_LINE = "Stay calm, help is on the way. What's your emergency?";
+// Said only after the report has actually reached security.
+const OPENING_LINE = "Security has been told. What is happening?";
 
 // speechLang drives the browser's own speech recognition/synthesis (Web Speech API) —
 // its actual accuracy for anything but English depends entirely on the guest's browser
@@ -19,13 +21,7 @@ const OPENING_LINE = "Stay calm, help is on the way. What's your emergency?";
 // Pidgin has no reliable, widely-supported speech-recognition language code of its own —
 // it stays on en-NG recognition (Pidgin is English-based, so this degrades reasonably)
 // while still getting a Pidgin-language spoken reply.
-const LANGUAGES: { code: string; label: string; speechLang: string; aiName?: string }[] = [
-  { code: "en", label: "English", speechLang: "en-NG" },
-  { code: "pcm", label: "Pidgin", speechLang: "en-NG", aiName: "Nigerian Pidgin English" },
-  { code: "yo", label: "Yoruba", speechLang: "yo-NG", aiName: "Yoruba" },
-  { code: "ha", label: "Hausa", speechLang: "ha-NG", aiName: "Hausa" },
-  { code: "ig", label: "Igbo", speechLang: "ig-NG", aiName: "Igbo" },
-];
+const LANGUAGES = GUEST_LANGUAGES as readonly { code: string; label: string; speechLang: string; aiName?: string }[];
 
 // Speaking and listening are chained through promises rather than fired independently
 // so listening only ever starts once the AI has actually finished talking — starting
@@ -77,7 +73,12 @@ function ReportPage() {
   const [dangerMode, setDangerMode] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [uploads, setUploads] = useState<UploadState[]>([]);
-  const [language, setLanguage] = useState("en");
+  const { language: chosen, choose: setLanguage } = useGuestLanguage();
+  const language = chosen.code;
+  const [sendState, setSendState] = useState<"sending" | "sent" | "failed">(existingReportId ? "sent" : "sending");
+  const [sentAt, setSentAt] = useState<number | null>(null);
+  const [assistantError, setAssistantError] = useState(false);
+  const [recordingKind, setRecordingKind] = useState<"audio" | "video" | null>(null);
   const languageRef = useRef(language);
   useEffect(() => {
     languageRef.current = language;
@@ -159,6 +160,10 @@ function ReportPage() {
         const nextAnswer = await listenOnce();
         if (nextAnswer) void runTurn(nextAnswer);
       }
+    } catch {
+      // Security already has the report; only the assistant failed.
+      setAssistantError(true);
+      setDangerMode(true);
     } finally {
       setAwaitingReply(false);
     }
@@ -167,24 +172,32 @@ function ReportPage() {
   // The three things happening the instant this screen mounts: create the incident,
   // capture GPS (best-effort — an emergency report must never block on location), and
   // start talking to the guest.
-  useEffect(() => {
-    if (existingReportId) return;
-    let cancelled = false;
-    (async () => {
+  const sendReport = async (isCancelled: () => boolean = () => false) => {
+    setSendState("sending");
+    try {
       const position = await getCurrentPositionSafe();
-      const result = await createReport({
-        data: { token: token || "", lat: position.lat, lng: position.lng },
-      });
-      if (cancelled) return;
+      const result = await createReport({ data: { token: token || "", lat: position.lat, lng: position.lng } });
+      if (isCancelled()) return;
       setReportId(result.report_id);
       setLastReportId(result.report_id);
+      setSendState("sent");
+      setSentAt(Date.now());
       setTranscript([{ speaker: "ai", text: OPENING_LINE }]);
       historyRef.current = [{ role: "assistant", content: OPENING_LINE }];
       await speak(OPENING_LINE, currentLanguage().speechLang);
-      if (cancelled) return;
+      if (isCancelled()) return;
       const firstAnswer = await listenOnce();
-      if (firstAnswer && !cancelled) void runTurn(firstAnswer);
-    })();
+      if (firstAnswer && !isCancelled()) void runTurn(firstAnswer);
+    } catch {
+      if (!isCancelled()) setSendState("failed");
+    }
+  };
+
+  // The instant this screen opens: send the alert (location is best effort and never blocks it).
+  useEffect(() => {
+    if (existingReportId) return;
+    let cancelled = false;
+    void sendReport(() => cancelled);
     return () => {
       cancelled = true;
     };
@@ -215,6 +228,7 @@ function ReportPage() {
     if (recorderRef.current && recorderRef.current.state === "recording") {
       recorderRef.current.stop();
       recorderRef.current = null;
+      setRecordingKind(null);
       return;
     }
     try {
@@ -242,145 +256,124 @@ function ReportPage() {
       };
       recorderRef.current = recorder;
       recorder.start(3000);
+      setRecordingKind(kind);
     } catch {
-      // Camera/mic permission denied or unavailable — silently no-op, the guest can still submit text/photos.
+      addUpload(`${kind}-denied-${Date.now()}`, kind === "audio" ? "Audio (no microphone access)" : "Video (no camera access)");
     }
   };
 
+  const banner =
+    sendState === "sending"
+      ? { bg: "#FFF6DB", fg: "#7A5A00", title: "Sending your alert…", sub: "Hold on. This takes a few seconds." }
+      : sendState === "failed"
+        ? { bg: "#FDE8EA", fg: "#9B1C2C", title: "Your alert did not go through", sub: "Try again below. If you can, call the front desk or a staff member now." }
+        : { bg: "#D9233A", fg: "#fff", title: "Security has been told", sub: sentAt ? `Alert sent ${new Date(sentAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Your report is open." };
+
+  const media = (kind: "audio" | "video", label: string, Icon: typeof Mic) => (
+    <button type="button" className="g-btn" onClick={() => void toggleRecording(kind)} disabled={!reportId} style={{ justifyContent: "center", flexDirection: "column", gap: 4, minHeight: 64, fontSize: 13.5, borderColor: recordingKind === kind ? "#D9233A" : undefined, color: recordingKind === kind ? "#D9233A" : undefined, opacity: reportId ? 1 : 0.5 }}>
+      <Icon size={20} /> {recordingKind === kind ? "Stop" : label}
+    </button>
+  );
+
   return (
-    <div className="flex flex-1 flex-col gap-4 px-4 py-6">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 rounded-xl bg-red-600/15 px-4 py-3 text-sm font-medium text-red-300">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-          Emergency — sending now
-        </div>
-        <select
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          aria-label="Language"
-          className="shrink-0 rounded-lg border border-white/15 bg-white/5 px-2 py-2 text-xs text-white"
-        >
-          {LANGUAGES.map((l) => (
-            <option key={l.code} value={l.code} className="bg-[#0a0f1e]">
-              {l.label}
-            </option>
-          ))}
-        </select>
+    <div className="col f1">
+      <div className="col g4" style={{ background: banner.bg, color: banner.fg, padding: "18px 18px 16px" }}>
+        <span className="row g8" style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em" }}>
+          {sendState === "sending" ? <Loader2 size={14} className="animate-spin" /> : null} EMERGENCY
+        </span>
+        <b style={{ fontSize: 21, lineHeight: 1.25 }}>{banner.title}</b>
+        <span style={{ fontSize: 14, opacity: 0.92 }}>{banner.sub}</span>
+        {sendState === "failed" && (
+          <button type="button" onClick={() => void sendReport()} style={{ marginTop: 8, height: 48, borderRadius: 12, border: 0, background: "#9B1C2C", color: "#fff", fontWeight: 700, fontSize: 16 }}>
+            Try again
+          </button>
+        )}
       </div>
 
-      {dangerMode && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-          <ShieldAlert className="h-4 w-4 shrink-0" />
-          Switched to silent mode — type instead of speaking. Security has been notified.
+      <div className="col g10" style={{ padding: "14px 16px 20px", flex: 1 }}>
+        <div className="row g6 wrap" role="group" aria-label="Language">
+          {LANGUAGES.map((l) => (
+            <button key={l.code} type="button" aria-pressed={language === l.code} onClick={() => setLanguage(l.code)} style={{ height: 32, padding: "0 11px", borderRadius: 16, fontSize: 13, fontWeight: 600, border: `1px solid ${language === l.code ? "var(--g-brand)" : "var(--g-line)"}`, background: language === l.code ? "var(--g-brand)" : "#fff", color: language === l.code ? "#fff" : "var(--g-ink)" }}>
+              {l.label}
+            </button>
+          ))}
         </div>
-      )}
 
-      <div className="flex flex-col gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
-        {transcript.map((turn, i) => (
-          <div key={i} className={turn.speaker === "ai" ? "text-slate-300" : "text-white"}>
-            <span className="text-xs uppercase tracking-wider text-slate-500">{turn.speaker === "ai" ? "AI" : "You"}: </span>
-            {turn.text}
-          </div>
-        ))}
-        {awaitingReply && (
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> …
-          </div>
+        {dangerMode && (
+          <GNotice tone={assistantError ? "warn" : "info"}>
+            {assistantError ? "The assistant isn't answering right now, but security already has your alert. You can still add photos, video or audio below, or try typing again." : "Silent mode: type instead of speaking. Replies appear only on screen."}
+          </GNotice>
         )}
+
+        <div className="col g8" aria-live="polite">
+          {transcript.map((turn, i) => (
+            <div key={i} className="bub" style={{ alignSelf: turn.speaker === "you" ? "flex-end" : "flex-start", background: turn.speaker === "you" ? "var(--g-brand)" : "#fff", color: turn.speaker === "you" ? "#fff" : "var(--g-ink)", border: turn.speaker === "you" ? 0 : "1px solid var(--g-line)" }}>
+              {turn.text}
+            </div>
+          ))}
+          {awaitingReply && (
+            <div className="bub" style={{ background: "#fff", border: "1px solid var(--g-line)", color: "var(--g-tx3)" }}>
+              <Loader2 size={14} className="mr-1 inline animate-spin" /> …
+            </div>
+          )}
+        </div>
 
         {!conversationDone && reportId && !awaitingReply && (
           dangerMode ? (
-            <div className="mt-1 flex items-center gap-2">
-              <input
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submitTyped()}
-                placeholder="Type here…"
-                autoFocus
-                className="flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-500 focus:outline-none"
-              />
-              <button type="button" onClick={submitTyped} disabled={!textInput.trim()} className="rounded-lg bg-amber-600 p-2 text-white disabled:opacity-40">
-                <Send className="h-4 w-4" />
+            <div className="row g8">
+              <input value={textInput} onChange={(e) => setTextInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitTyped()} placeholder="Type here" autoFocus aria-label="Type a message" style={{ flex: 1, height: 52, borderRadius: 14, border: "1px solid var(--g-line)", background: "#fff", padding: "0 14px", fontSize: 16, color: "var(--g-ink)" }} />
+              <button type="button" onClick={submitTyped} disabled={!textInput.trim()} aria-label="Send" style={{ width: 52, height: 52, borderRadius: 14, border: 0, background: "var(--g-brand)", color: "#fff", display: "grid", placeItems: "center", opacity: textInput.trim() ? 1 : 0.45 }}>
+                <Send size={20} />
               </button>
             </div>
           ) : (
-            <div className="mt-1 flex items-center gap-2">
+            <div className="row g8">
               <button
                 type="button"
+                className="g-btn"
                 onClick={async () => {
                   const text = await listenOnce();
                   if (text) void runTurn(text);
                 }}
                 disabled={listening}
-                className="flex items-center justify-center gap-2 self-start rounded-lg border border-white/15 px-3 py-2 text-xs disabled:opacity-50"
+                style={{ justifyContent: "center" }}
               >
-                <Mic className="h-3.5 w-3.5" /> {listening ? "Listening…" : "Tap to answer"}
+                <Mic size={20} /> {listening ? "Listening… speak normally" : "Tap and speak"}
               </button>
-              <button
-                type="button"
-                onClick={() => setDangerMode(true)}
-                className="flex items-center justify-center gap-1.5 self-start rounded-lg border border-white/10 px-2.5 py-2 text-[11px] text-slate-400"
-              >
-                <Keyboard className="h-3 w-3" /> Type instead
+              <button type="button" className="g-btn" onClick={() => setDangerMode(true)} style={{ width: "auto", justifyContent: "center" }}>
+                <Keyboard size={20} /> Type
               </button>
             </div>
           )
         )}
-      </div>
 
-      <div className="flex gap-2">
-        <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/15 py-3 text-xs">
-          <Camera className="h-4 w-4" /> Photo
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handlePhoto(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => void toggleRecording("video")}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/15 py-3 text-xs"
-        >
-          <Video className="h-4 w-4" /> Video
-        </button>
-        <button
-          type="button"
-          onClick={() => void toggleRecording("audio")}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/15 py-3 text-xs"
-        >
-          <Mic className="h-4 w-4" /> Audio
-        </button>
-      </div>
-
-      {uploads.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {uploads.map((u) => (
-            <div key={u.id} className="flex items-center gap-2 text-xs text-slate-400">
-              <span className="w-14">{u.label}</span>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-                <div className={`h-full ${u.failed ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${u.progress}%` }} />
-              </div>
-              {u.done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            </div>
-          ))}
+        <div className="grid grid-cols-3 gap-2">
+          <label className="g-btn" style={{ justifyContent: "center", flexDirection: "column", gap: 4, minHeight: 64, fontSize: 13.5, cursor: reportId ? "pointer" : "not-allowed", opacity: reportId ? 1 : 0.5 }}>
+            <Camera size={20} /> Photo
+            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={!reportId} onChange={(e) => { const f = e.target.files?.[0]; if (f) void handlePhoto(f); e.target.value = ""; }} />
+          </label>
+          {media("video", "Video", Video)}
+          {media("audio", "Audio", Mic)}
         </div>
-      )}
 
-      <button
-        type="button"
-        disabled={!reportId}
-        onClick={() => reportId && navigate({ to: "/consumer/status", search: { report_id: reportId } })}
-        className="mt-auto w-full rounded-xl bg-emerald-600 px-4 py-4 text-sm font-semibold text-white disabled:opacity-40"
-      >
-        I'm done / add more
-      </button>
+        {uploads.length > 0 && (
+          <div className="col g6">
+            {uploads.map((u) => (
+              <div key={u.id} className="row g8" style={{ fontSize: 13.5, color: "var(--g-tx2)" }}>
+                <span style={{ width: 120 }} className="trunc">{u.label}</span>
+                <div className="f1" style={{ height: 6, borderRadius: 3, background: "var(--g-line)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${u.progress}%`, background: u.failed ? "#C98A00" : "#1E8E50" }} />
+                </div>
+                {u.failed ? <span>waiting</span> : u.done ? <CheckCircle2 size={16} color="#1E8E50" /> : <Loader2 size={16} className="animate-spin" />}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button type="button" disabled={!reportId} onClick={() => reportId && navigate({ to: "/consumer/status", search: { report_id: reportId } })} style={{ marginTop: "auto", height: 54, borderRadius: 14, border: "1px solid var(--g-line)", background: "#fff", color: "var(--g-ink)", fontSize: 16, fontWeight: 700, opacity: reportId ? 1 : 0.45 }}>
+          I'm done for now
+        </button>
+      </div>
     </div>
   );
 }

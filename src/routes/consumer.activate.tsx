@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { GNotice, LanguagePicker, OrgBadge, useGuestLanguage } from "@/components/guest/kit";
 import { activateConsumerSession } from "@/lib/consumer.functions";
 import { setConsumerSession, clearConsumerSession, getCurrentPositionSafe } from "@/lib/consumer-session";
 
@@ -34,6 +35,7 @@ function ActivatePage() {
   const [tokenInput, setTokenInput] = useState(tokenFromUrl || "");
   const [status, setStatus] = useState<"idle" | "activating" | "error">("idle");
   const [error, setError] = useState<string | null>(reason ? REASON_MESSAGES[reason] || null : null);
+  const { language, choose } = useGuestLanguage();
 
   useEffect(() => {
     if (reason && reason !== "outside_premises") clearConsumerSession();
@@ -81,47 +83,52 @@ function ActivatePage() {
   }, [tokenFromUrl]);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-10 text-center">
-      <div className="grid h-16 w-16 place-items-center rounded-full bg-red-600/15 text-red-500">
-        <ShieldAlert className="h-8 w-8" />
-      </div>
-      <div>
-        <h1 className="text-xl font-semibold">Emergency reporting</h1>
-        <p className="mt-1 text-sm text-slate-400">Enter the code given to you at check-in.</p>
-      </div>
-
-      {status === "activating" ? (
-        <div className="flex items-center gap-2 text-sm text-slate-300">
-          <Loader2 className="h-4 w-4 animate-spin" /> Connecting…
+    <div className="col f1">
+      <OrgBadge />
+      <div className="col g20" style={{ padding: "8px 20px 32px", gap: 20 }}>
+        <div className="col g8">
+          <h1 style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2, margin: 0 }}>Reach security in an emergency</h1>
+          <p style={{ margin: 0, color: "var(--g-tx2)", fontSize: 16, lineHeight: 1.5 }}>
+            Enter the code you were given at check-in. Nothing is shared until you ask for help.
+          </p>
         </div>
-      ) : (
-        <form
-          className="flex w-full max-w-xs flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void doActivate(tokenInput);
-          }}
-        >
-          <input
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value.toUpperCase())}
-            placeholder="LMT-XXXXXXXXXX"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-4 text-center text-lg font-mono tracking-wider text-white placeholder:text-slate-500 focus:border-red-500 focus:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!tokenInput.trim()}
-            className="w-full rounded-xl bg-red-600 px-4 py-4 text-base font-semibold text-white transition-colors hover:bg-red-500 disabled:opacity-40"
+        {status === "activating" ? (
+          <div className="row g8" style={{ color: "var(--g-tx2)", fontSize: 16 }}>
+            <Loader2 size={18} className="animate-spin" /> Checking your code…
+          </div>
+        ) : (
+          <form
+            className="col g12"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void doActivate(tokenInput);
+            }}
           >
-            Continue
-          </button>
-        </form>
-      )}
-
-      {error && <p className="max-w-xs text-sm text-red-400">{error}</p>}
+            <label className="col g8">
+              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--g-tx2)" }}>Your code</span>
+              <input
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value.toUpperCase())}
+                placeholder="LMT-XXXXXXXXXX"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="text"
+                style={{ height: 56, borderRadius: 14, border: "1px solid var(--g-line)", background: "#fff", padding: "0 16px", fontSize: 20, fontFamily: "var(--m)", letterSpacing: ".06em", color: "var(--g-ink)", textAlign: "center" }}
+              />
+            </label>
+            <div className="col g8">
+              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--g-tx2)" }}>Language</span>
+              <LanguagePicker value={language.code} onChange={choose} />
+            </div>
+            <button type="submit" disabled={!tokenInput.trim()} style={{ height: 56, borderRadius: 14, border: 0, background: "var(--g-brand)", color: "#fff", fontSize: 17, fontWeight: 700, opacity: tokenInput.trim() ? 1 : 0.45 }}>
+              Continue
+            </button>
+          </form>
+        )}
+        {error && <GNotice tone="fail">{error}</GNotice>}
+        <p style={{ margin: 0, color: "var(--g-tx3)", fontSize: 13 }}>The code works on these premises for your stay only. We check your location once to confirm you're on site.</p>
+      </div>
     </div>
   );
 }

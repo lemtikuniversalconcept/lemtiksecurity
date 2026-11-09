@@ -1,9 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
-import { MessageCircle, ClipboardList } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronRight, ClipboardList, MessageCircle } from "lucide-react";
 import { getLastReportId } from "@/lib/consumer-session";
+import { OrgBadge } from "@/components/guest/kit";
 
-const HOLD_DURATION_MS = 2000;
+const HOLD_MS = 2000;
 
 export const Route = createFileRoute("/consumer/home")({
   component: HomePage,
@@ -11,92 +12,69 @@ export const Route = createFileRoute("/consumer/home")({
 
 function HomePage() {
   const navigate = useNavigate();
-  const [holding, setHolding] = useState(false);
   const [progress, setProgress] = useState(0);
-  const timerRef = useRef<number | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const startRef = useRef(0);
+  const [lastReportId, setLastReport] = useState<string | null>(null);
+  const timer = useRef<number | null>(null);
+  const raf = useRef<number | null>(null);
+  const start = useRef(0);
 
-  const cancelHold = () => {
-    setHolding(false);
+  useEffect(() => setLastReport(getLastReportId()), []);
+
+  const cancel = () => {
     setProgress(0);
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
+    if (timer.current) window.clearTimeout(timer.current);
+    if (raf.current) window.cancelAnimationFrame(raf.current);
   };
-
   const tick = () => {
-    const elapsed = Date.now() - startRef.current;
-    setProgress(Math.min(1, elapsed / HOLD_DURATION_MS));
-    if (elapsed < HOLD_DURATION_MS) {
-      rafRef.current = window.requestAnimationFrame(tick);
-    }
+    const p = Math.min(1, (Date.now() - start.current) / HOLD_MS);
+    setProgress(p);
+    if (p < 1) raf.current = window.requestAnimationFrame(tick);
   };
-
-  const startHold = () => {
-    setHolding(true);
-    startRef.current = Date.now();
-    rafRef.current = window.requestAnimationFrame(tick);
-    timerRef.current = window.setTimeout(() => {
-      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([80, 40, 80]);
+  const begin = () => {
+    start.current = Date.now();
+    raf.current = window.requestAnimationFrame(tick);
+    timer.current = window.setTimeout(() => {
+      navigator.vibrate?.([80, 40, 80]);
       navigate({ to: "/consumer/report", search: { report_id: undefined } });
-    }, HOLD_DURATION_MS);
+    }, HOLD_MS);
   };
-
-  const lastReportId = getLastReportId();
+  useEffect(() => () => cancel(), []);
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-between px-6 py-10">
-      <div />
-      <div className="flex flex-col items-center gap-6">
+    <div className="col f1">
+      <OrgBadge />
+      <div className="col f1" style={{ padding: "8px 20px 28px", alignItems: "center", gap: 18 }}>
+        <p style={{ margin: "12px 0 0", fontSize: 17, fontWeight: 600, textAlign: "center" }}>If you are in danger or need urgent help</p>
         <button
           type="button"
-          onPointerDown={startHold}
-          onPointerUp={cancelHold}
-          onPointerLeave={cancelHold}
+          aria-label="Hold for 2 seconds to call security"
+          onPointerDown={begin}
+          onPointerUp={cancel}
+          onPointerLeave={cancel}
+          onPointerCancel={cancel}
+          onKeyDown={(e) => (e.key === " " || e.key === "Enter") && !e.repeat && begin()}
+          onKeyUp={cancel}
           onContextMenu={(e) => e.preventDefault()}
-          className="relative grid h-56 w-56 select-none place-items-center rounded-full bg-red-600 text-white shadow-[0_0_60px_-10px_rgba(220,38,38,0.6)] active:scale-[0.98]"
-          style={{ touchAction: "none" }}
+          style={{ width: 220, height: 220, borderRadius: 110, border: 0, padding: 8, background: `conic-gradient(#fff ${progress * 360}deg, transparent 0) border-box, #D9233A`, boxShadow: "0 18px 40px -12px rgba(217,35,58,.55)", touchAction: "none", userSelect: "none", color: "#fff" }}
         >
-          <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100" aria-hidden>
-            <circle
-              cx="50"
-              cy="50"
-              r="46"
-              fill="none"
-              stroke="rgba(255,255,255,0.85)"
-              strokeWidth="4"
-              strokeDasharray={2 * Math.PI * 46}
-              strokeDashoffset={2 * Math.PI * 46 * (1 - progress)}
-              style={{ transition: holding ? "none" : "stroke-dashoffset 150ms ease-out" }}
-            />
-          </svg>
-          <div className="text-center">
-            <div className="text-3xl font-bold tracking-tight">SOS</div>
-            <div className="mt-1 text-xs font-medium uppercase tracking-widest text-red-100">Emergency</div>
-          </div>
+          <span className="col" style={{ width: "100%", height: "100%", borderRadius: "50%", background: "#D9233A", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <b style={{ fontSize: 44, letterSpacing: ".04em" }}>SOS</b>
+            <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: ".12em" }}>{progress > 0 ? "KEEP HOLDING" : "HOLD 2 SECONDS"}</span>
+          </span>
         </button>
-        <p className="text-sm text-slate-400">Hold for 2 seconds to activate</p>
-      </div>
-
-      <div className="flex w-full max-w-xs flex-col gap-2">
-        <button
-          type="button"
-          onClick={() => navigate({ to: "/consumer/ai" })}
-          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm hover:bg-white/10"
-        >
-          <MessageCircle className="h-4 w-4 text-slate-300" />
-          Ask a question or get help
-        </button>
-        {lastReportId && (
-          <button
-            type="button"
-            onClick={() => navigate({ to: "/consumer/status", search: { report_id: lastReportId } })}
-            className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm hover:bg-white/10"
-          >
-            <ClipboardList className="h-4 w-4 text-slate-300" />
-            Check my report status
+        <p style={{ margin: 0, color: "var(--g-tx2)", fontSize: 15, textAlign: "center", maxWidth: 320, lineHeight: 1.5 }}>
+          Security is alerted straight away. You can then speak or type in your language.
+        </p>
+        <div className="col g10" style={{ width: "100%", marginTop: "auto" }}>
+          <button type="button" className="g-btn" onClick={() => navigate({ to: "/consumer/ai" })}>
+            <MessageCircle size={20} /> <span className="f1 text-left">Ask a question or get help</span> <ChevronRight size={18} />
           </button>
-        )}
+          {lastReportId && (
+            <button type="button" className="g-btn" onClick={() => navigate({ to: "/consumer/status", search: { report_id: lastReportId } })}>
+              <ClipboardList size={20} /> <span className="f1 text-left">Check my report</span> <ChevronRight size={18} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
