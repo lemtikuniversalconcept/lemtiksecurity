@@ -2,8 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { CheckCircle2, FileText, Loader2, MapPin, QrCode } from "lucide-react";
 import { parseCheckpoint } from "@/lib/checkpointQr";
 import { QrScanner } from "@/components/officer/QrScanner";
@@ -140,8 +140,16 @@ function OfficerPatrol() {
     setBusy(true);
     try {
       const row = (await recordFn({ data: payload })) as any;
-      const late = row?.status === "late" ? ` (${row.minutes_late} min late)` : "";
-      setMessage({ tone: row?.status === "late" ? "warn" : "ok", text: `Checked in at ${stop.name} by QR${late}.` });
+      const st = row?.status as string | undefined;
+      const text =
+        st === "out_of_zone"
+          ? `${stop.name} scanned, but your phone is ${row?.distance_m != null ? `${Math.round(row.distance_m)} m` : "far"} from it. It's saved and flagged for command.`
+          : st === "no_location"
+            ? `${stop.name} scanned without your location, so it's flagged for command. Turn on location for check-ins.`
+            : st === "too_fast"
+              ? `${stop.name} scanned too soon after your last stop to have walked there. It's saved and flagged for command.`
+              : `Checked in at ${stop.name} by QR${st === "late" ? ` (${row.minutes_late} min late)` : ""}.`;
+      setMessage({ tone: st === "on_time" ? "ok" : st === "late" ? "warn" : "fail", text });
       qc.invalidateQueries({ queryKey: ["officer-patrol-checkins"] });
     } catch (e) {
       setMessage({ tone: "fail", text: (e as Error)?.message || "Check-in didn't save. Try again." });
@@ -322,22 +330,21 @@ function OfficerPatrol() {
 
 function PatrolMap({ token, waypoints, doneIds, nextId, here }: { token: string; waypoints: Waypoint[]; doneIds: Set<string>; nextId: string | null; here: Coord | null }) {
   const el = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markers = useRef<mapboxgl.Marker[]>([]);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markers = useRef<maplibregl.Marker[]>([]);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useBasemap();
   const placed = waypoints.filter((w) => w.coord_x != null && w.coord_y != null);
 
   useEffect(() => {
     if (!el.current || mapRef.current) return;
-    mapboxgl.accessToken = token;
     const first = placed[0];
-    const map = new mapboxgl.Map({ container: el.current, style: BASEMAP_STYLE[basemap], center: [Number(first.coord_x), Number(first.coord_y)], zoom: 16, attributionControl: false });
+    const map = new maplibregl.Map({ container: el.current, style: BASEMAP_STYLE[basemap], center: [Number(first.coord_x), Number(first.coord_y)], zoom: 16, attributionControl: { compact: true } });
     map.on("load", () => {
       add3DBuildings(map, basemap);
       map.addSource("route", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString", coordinates: placed.map((w) => [Number(w.coord_x), Number(w.coord_y)]) }, properties: {} } as any });
       map.addLayer({ id: "route", type: "line", source: "route", layout: { "line-cap": "round" }, paint: { "line-color": "#7A9BFF", "line-width": 3, "line-dasharray": [2, 1.5] } });
-      const b = new mapboxgl.LngLatBounds();
+      const b = new maplibregl.LngLatBounds();
       for (const w of placed) b.extend([Number(w.coord_x), Number(w.coord_y)]);
       map.fitBounds(b, { padding: 40, maxZoom: 17, duration: 0 });
       setReady(true);
@@ -360,12 +367,12 @@ function PatrolMap({ token, waypoints, doneIds, nextId, here }: { token: string;
       const done = doneIds.has(w.id);
       const s = document.createElement("span");
       s.style.cssText = `width:${w.id === nextId ? 18 : 12}px;height:${w.id === nextId ? 18 : 12}px;border-radius:50%;background:${done ? "#35C77B" : w.id === nextId ? "#7A9BFF" : "#2A3140"};box-shadow:0 0 0 2px #0A0C10`;
-      markers.current.push(new mapboxgl.Marker({ element: s }).setLngLat([Number(w.coord_x), Number(w.coord_y)]).addTo(map));
+      markers.current.push(new maplibregl.Marker({ element: s }).setLngLat([Number(w.coord_x), Number(w.coord_y)]).addTo(map));
     });
     if (here) {
       const me = document.createElement("span");
       me.style.cssText = "width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px #3462F0,0 0 0 10px rgba(52,98,240,.25)";
-      markers.current.push(new mapboxgl.Marker({ element: me }).setLngLat(here).addTo(map));
+      markers.current.push(new maplibregl.Marker({ element: me }).setLngLat(here).addTo(map));
     }
   }, [ready, placed, doneIds, nextId, here]);
 

@@ -508,7 +508,7 @@ function PatrolsView({ patrols, checkins }: { patrols: PatrolRow[]; checkins: Ch
         ...p,
         completion: Math.round((Number(p.checked_in ?? 0) / Math.max(Number(p.waypoints ?? 1), 1)) * 100),
         total: mine.length,
-        exceptions: mine.filter((c) => c.status === "late" || c.status === "out_of_zone").length,
+        exceptions: mine.filter((c) => !!c.status && c.status !== "on_time").length,
       };
     })
     .sort((a, b) => b.completion - a.completion);

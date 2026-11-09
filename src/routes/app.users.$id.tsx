@@ -28,7 +28,7 @@ const DUTY: Record<string, { tone: Tone; label: string }> = {
   break: { tone: "warn", label: "On break" },
   "off-duty": { tone: "off", label: "Off duty" },
 };
-const CHECKIN_TONE: Record<string, "ok" | "warn" | "fail"> = { on_time: "ok", late: "warn", out_of_zone: "fail" };
+const CHECKIN_TONE: Record<string, "ok" | "warn" | "fail"> = { on_time: "ok", late: "warn", out_of_zone: "fail", too_fast: "fail", no_location: "warn" };
 
 function MemberPage() {
   const { id } = Route.useParams();

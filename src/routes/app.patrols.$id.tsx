@@ -2,11 +2,11 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { toast } from "sonner";
 import {
-  getPatrol, saveWaypoints, updatePatrolDetails, archivePatrol, duplicatePatrol,
+  getPatrol, saveWaypoints, rotateCheckpointCodes, updatePatrolDetails, archivePatrol, duplicatePatrol,
   listShifts, scheduleShift, updateShift, listCheckIns,
 } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/app/patrols/$id")({
 const DEFAULT_CENTER: [number, number] = [3.4219, 6.4281];
 const STATUS_TONE: Record<string, Tone> = { on_route: "ok", delayed: "warn", missed: "fail", complete: "off" };
 const SHIFT_TONE: Record<string, Tone> = { active: "ok", scheduled: "blue", completed: "off", cancelled: "fail" };
-const CHECKIN_TONE: Record<string, "ok" | "warn" | "fail"> = { on_time: "ok", late: "warn", out_of_zone: "fail" };
+const CHECKIN_TONE: Record<string, "ok" | "warn" | "fail"> = { on_time: "ok", late: "warn", out_of_zone: "fail", too_fast: "fail", no_location: "warn" };
 const METHODS = [
   { value: "gps", label: "GPS · 50 m" },
   { value: "qr", label: "QR code" },
@@ -90,6 +90,7 @@ function PatrolDetail() {
   const updSh = useServerFn(updateShift);
   const listCi = useServerFn(listCheckIns);
   const tokenFn = useServerFn(getMapboxToken);
+  const rotateCodes = useServerFn(rotateCheckpointCodes);
 
   const { data, isLoading, error } = useQuery({ queryKey: ["patrol", id], queryFn: () => getP({ data: { id } }) });
   const { data: shifts = [] } = useQuery({ queryKey: ["shifts", id], queryFn: () => listSh({ data: { patrol_id: id } }) });
@@ -152,8 +153,8 @@ function PatrolDetail() {
 
   // ---------- map ----------
   const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const canManageRef = useRef(canManage);
   canManageRef.current = canManage;
@@ -162,18 +163,17 @@ function PatrolDetail() {
 
   useEffect(() => {
     if (!token?.token || !mapEl.current || mapRef.current || !data) return;
-    mapboxgl.accessToken = token.token;
     const first = (data.waypoints ?? []).find((w: any) => w.coord_x != null && w.coord_y != null) as any;
     const v = viewRef.current;
-    const m = new mapboxgl.Map({
+    const m = new maplibregl.Map({
       container: mapEl.current,
       style: BASEMAP_STYLE[basemap],
       center: v?.center ?? (first ? [Number(first.coord_x), Number(first.coord_y)] : DEFAULT_CENTER),
       zoom: v?.zoom ?? (first ? 15 : 11),
       pitch: v?.pitch ?? 0,
-      attributionControl: false,
+      attributionControl: { compact: true },
     });
-    m.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     if (canManageRef.current) m.getCanvas().style.cursor = "crosshair";
     m.on("load", () => {
       add3DBuildings(m, basemap);
@@ -223,7 +223,7 @@ function PatrolDetail() {
         e.stopPropagation();
         setActiveWp(i);
       };
-      const mk = new mapboxgl.Marker({ element: el, draggable: canManage }).setLngLat([w.coord_x, w.coord_y]).addTo(m);
+      const mk = new maplibregl.Marker({ element: el, draggable: canManage }).setLngLat([w.coord_x, w.coord_y]).addTo(m);
       mk.on("dragend", () => {
         const ll = mk.getLngLat();
         editWaypoints((prev) => prev.map((p, idx) => (idx === i ? { ...p, coord_x: Number(ll.lng.toFixed(6)), coord_y: Number(ll.lat.toFixed(6)) } : p)));
@@ -233,7 +233,7 @@ function PatrolDetail() {
     });
     const coords = waypoints.filter((w) => w.coord_x != null && w.coord_y != null).map((w) => [w.coord_x!, w.coord_y!]);
     const geo = { type: "FeatureCollection", features: coords.length >= 2 ? [{ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} }] : [] };
-    const src = m.getSource("wp-line") as mapboxgl.GeoJSONSource | undefined;
+    const src = m.getSource("wp-line") as maplibregl.GeoJSONSource | undefined;
     if (src) src.setData(geo as any);
     else {
       m.addSource("wp-line", { type: "geojson", data: geo as any });
@@ -300,7 +300,7 @@ function PatrolDetail() {
     const p = data?.patrol as any;
     const total = Math.max(Number(p?.waypoints ?? 0), waypoints.length);
     const checked = Number(p?.checked_in ?? 0);
-    const exceptions = (checkins as any[]).filter((c) => c.status === "late" || c.status === "out_of_zone").length;
+    const exceptions = (checkins as any[]).filter((c) => !!c.status && c.status !== "on_time").length;
     const lateRows = (checkins as any[]).filter((c) => Number(c.minutes_late ?? 0) > 0);
     const avgLate = lateRows.length ? Math.round(lateRows.reduce((a, c) => a + Number(c.minutes_late), 0) / lateRows.length) : null;
     const plannedMinutes = waypoints.reduce((a, w) => a + Number(w.expected_minutes || 0), 0);
@@ -637,7 +637,18 @@ function PatrolDetail() {
           </Panel>
         </aside>
       </div>
-      {showQr && <QrSheet code={p.code} name={details.name || p.name} stops={qrStops} onClose={() => setShowQr(false)} />}
+      {showQr && (
+        <QrSheet
+          code={p.code}
+          name={details.name || p.name}
+          stops={qrStops}
+          onClose={() => setShowQr(false)}
+          onRotate={async () => {
+            await rotateCodes({ data: { patrol_id: id } });
+            await qc.invalidateQueries({ queryKey: ["patrol", id] });
+          }}
+        />
+      )}
     </div>
   );
 
@@ -797,9 +808,11 @@ function toLocalInput(d: Date) {
 }
 
 /** A printable sheet with one QR code per saved stop. Only the sheet prints. */
-function QrSheet({ code, name, stops, onClose }: { code: string; name: string; stops: { id: string; name: string; ord: number; qr_token: string }[]; onClose: () => void }) {
+function QrSheet({ code, name, stops, onClose, onRotate }: { code: string; name: string; stops: { id: string; name: string; ord: number; qr_token: string }[]; onClose: () => void; onRotate: () => Promise<void> }) {
   const [images, setImages] = useState<Record<string, string>>({});
   const [failed, setFailed] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [rotating, setRotating] = useState(false);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -823,8 +836,41 @@ function QrSheet({ code, name, stops, onClose }: { code: string; name: string; s
       <style>{`@media print { body * { visibility: hidden !important; } #qr-sheet, #qr-sheet * { visibility: visible !important; } #qr-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; padding: 0 !important; } .qr-card { break-inside: avoid; } }`}</style>
       <div className="row g8" style={{ position: "sticky", top: 0, padding: 12, justifyContent: "flex-end", background: "var(--ink-1)", borderBottom: "1px solid var(--line-1)" }}>
         <span className="t2 f1" style={{ fontSize: 13 }}>
-          Print, laminate and fix each code at its stop. Officers scan it with the officer app to check in.
+          Print, laminate and fix each code at its stop. A scan only counts as on-site if the officer's phone is also near the stop.
         </span>
+        {confirmRotate ? (
+          <>
+            <span className="t2" style={{ fontSize: 12.5 }}>
+              All {stops.length} printed codes stop working. Reprint and replace them.
+            </span>
+            <button type="button" className="b b-gh" onClick={() => setConfirmRotate(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="b b-red"
+              disabled={rotating}
+              onClick={async () => {
+                setRotating(true);
+                try {
+                  await onRotate();
+                  toast.success("New codes made. Print and replace the old ones.");
+                  setConfirmRotate(false);
+                } catch (e) {
+                  toast.error((e as Error)?.message || "Couldn't make new codes.");
+                } finally {
+                  setRotating(false);
+                }
+              }}
+            >
+              {rotating && <Loader2 className="h-4 w-4 animate-spin" />} Make new codes
+            </button>
+          </>
+        ) : (
+          <button type="button" className="b b-gh" onClick={() => setConfirmRotate(true)} title="Use this if you think someone photographed the codes">
+            Make new codes
+          </button>
+        )}
         <button type="button" className="b b-pri" onClick={() => window.print()} disabled={!ready}>
           {!ready && !failed && <Loader2 className="h-4 w-4 animate-spin" />} Print
         </button>

@@ -2,8 +2,8 @@ import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tan
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { createPatrol, listCheckIns, listPatrols, listPatrolWaypoints, listShifts, scheduleShift } from "@/lib/patrols.functions";
 import { getMapboxToken } from "@/lib/config.functions";
 import { listLocations } from "@/lib/orgs.functions";
@@ -114,7 +114,7 @@ function PatrolsList({ appAccess }: { appAccess: ReturnType<typeof Route.useRout
   const completeCount = patrols.filter((p) => p.status === "complete").length;
   const avgCompletion = patrols.length ? Math.round(patrols.reduce((acc, p) => acc + completionOf(p), 0) / patrols.length) : null;
   const exceptions = useMemo(
-    () => (checkins as any[]).filter((c) => c.status === "late" || c.status === "out_of_zone"),
+    () => (checkins as any[]).filter((c) => !!c.status && c.status !== "on_time"),
     [checkins],
   );
 
@@ -207,7 +207,7 @@ function PatrolsList({ appAccess }: { appAccess: ReturnType<typeof Route.useRout
         <Kpi label="Avg completion" value={avgCompletion ?? "—"} unit={avgCompletion !== null ? "%" : undefined} title="Checked-in waypoints ÷ total waypoints, averaged across visible routes" />
         <Kpi label="Delayed" value={isLoading ? "—" : delayedCount} />
         <Kpi label="Missed" value={isLoading ? "—" : missedCount} />
-        <Kpi label="Check-in exceptions" value={isLoading ? "—" : exceptions.length} title="Check-ins logged late or out of zone" />
+        <Kpi label="Check-in exceptions" value={isLoading ? "—" : exceptions.length} title="Check-ins that were late, outside the stop's zone, too fast between stops, or without a location" />
         <Kpi label="Complete" value={isLoading ? "—" : completeCount} />
       </div>
 
@@ -480,7 +480,7 @@ function PatrolsList({ appAccess }: { appAccess: ReturnType<typeof Route.useRout
                         {c.created_at ? ` · ${new Date(c.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
                       </span>
                     </span>
-                    <Tag tone={c.status === "late" ? "warn" : "fail"}>{statusLabel(c.status)}</Tag>
+                    <Tag tone={c.status === "late" || c.status === "no_location" ? "warn" : "fail"}>{statusLabel(c.status)}</Tag>
                   </div>
                 ))}
               </div>
@@ -543,7 +543,7 @@ function LivePatrolMap({
   selectedId: string | null;
 }) {
   const mapEl = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
   const [basemap, setBasemap] = useBasemap();
   const viewRef = useRef<SavedView | null>(null);
@@ -571,12 +571,11 @@ function LivePatrolMap({
 
   useEffect(() => {
     if (!token || !mapEl.current || mapRef.current) return;
-    mapboxgl.accessToken = token;
     const first = routes[0]?.points[0];
     const center: [number, number] = first ? [Number(first.coord_x), Number(first.coord_y)] : fallbackCenter ?? [3.4219, 6.4281];
     const v = viewRef.current;
-    const map = new mapboxgl.Map({ container: mapEl.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? center, zoom: v?.zoom ?? (first || fallbackCenter ? 14 : 10), pitch: v?.pitch ?? 0, attributionControl: false });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+    const map = new maplibregl.Map({ container: mapEl.current, style: BASEMAP_STYLE[basemap], center: v?.center ?? center, zoom: v?.zoom ?? (first || fallbackCenter ? 14 : 10), pitch: v?.pitch ?? 0, attributionControl: { compact: true } });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.on("load", () => {
       add3DBuildings(map, basemap);
       requestAnimationFrame(() => map.resize());
@@ -614,8 +613,8 @@ function LivePatrolMap({
         })),
       ),
     };
-    const lineSrc = map.getSource("patrol-routes") as mapboxgl.GeoJSONSource | undefined;
-    const ptSrc = map.getSource("patrol-waypoints") as mapboxgl.GeoJSONSource | undefined;
+    const lineSrc = map.getSource("patrol-routes") as maplibregl.GeoJSONSource | undefined;
+    const ptSrc = map.getSource("patrol-waypoints") as maplibregl.GeoJSONSource | undefined;
     if (lineSrc && ptSrc) {
       lineSrc.setData(lines as any);
       ptSrc.setData(points as any);
@@ -639,7 +638,7 @@ function LivePatrolMap({
     const focus = routes.find((r) => r.patrol.id === selectedId) ?? (selectedId ? null : undefined);
     const fitTo = focus ? [focus] : focus === null ? [] : routes;
     if (fitTo.length) {
-      const bounds = new mapboxgl.LngLatBounds();
+      const bounds = new maplibregl.LngLatBounds();
       for (const r of fitTo) for (const w of r.points) bounds.extend([Number(w.coord_x), Number(w.coord_y)]);
       map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 400 });
     }

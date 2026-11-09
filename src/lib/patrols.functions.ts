@@ -333,6 +333,41 @@ export const recordCheckIn = createServerFn({ method: "POST" })
       throwSafeError("ci.qr", new Error("bad token"), "That QR code doesn't match this checkpoint. It may be an old print.");
     }
 
+    // A QR code can be photographed and scanned later from somewhere else, so a QR check-in
+    // only counts as on-site if the phone also says it's near the stop.
+    const QR_RADIUS_M = 150;
+    if (data.method === "qr") {
+      if (data.coord_x == null || data.coord_y == null) {
+        status = "no_location";
+      } else if (wp.coord_x != null && wp.coord_y != null) {
+        distance = approximateMeters([Number(wp.coord_x), Number(wp.coord_y)], [data.coord_x, data.coord_y]);
+        if (distance > QR_RADIUS_M) status = "out_of_zone";
+      }
+    }
+
+    // Two stops checked faster than a person can walk between them points to scanning copies.
+    if (status === "on_time" && wp.coord_x != null && wp.coord_y != null) {
+      const { data: prev } = await context.supabase
+        .from("patrol_check_ins" as any)
+        .select("waypoint_id, created_at")
+        .eq("shift_id", data.shift_id)
+        .neq("waypoint_id", data.waypoint_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const last = prev as unknown as { waypoint_id: string; created_at: string } | null;
+      if (last) {
+        const { data: prevWp } = await context.supabase.from("patrol_waypoints" as any).select("coord_x, coord_y").eq("id", last.waypoint_id).maybeSingle();
+        const pw = prevWp as unknown as { coord_x: number | null; coord_y: number | null } | null;
+        if (pw?.coord_x != null && pw?.coord_y != null) {
+          const gap = approximateMeters([Number(pw.coord_x), Number(pw.coord_y)], [Number(wp.coord_x), Number(wp.coord_y)]);
+          const seconds = (Date.now() - new Date(last.created_at).getTime()) / 1000;
+          const FASTEST_WALK_M_PER_S = 3; // a brisk jog; officers on foot rarely sustain more
+          if (gap > 40 && seconds < gap / FASTEST_WALK_M_PER_S) status = "too_fast";
+        }
+      }
+    }
+
     const expectedAt = new Date(shift.scheduled_start).getTime() + (wp.ord + 1) * wp.expected_minutes * 60_000;
     const minutesLate = Math.max(0, Math.round((Date.now() - expectedAt) / 60_000));
     if (status === "on_time" && minutesLate > 0) status = "late";
@@ -538,4 +573,21 @@ export const calculateRoute = createServerFn({ method: "POST" })
         ],
       }],
     };
+  });
+
+// New QR secrets for every stop on a route. Old printed (or photographed) codes stop working
+// immediately; the manager reprints the sheet. Only leadership can update waypoints (RLS).
+export const rotateCheckpointCodes = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ patrol_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: rows, error } = await context.supabase.from("patrol_waypoints" as any).select("id").eq("patrol_id", data.patrol_id);
+    if (error) throwSafeError("wp.rotate.read", error, "Unable to load the route's stops.");
+    const ids = ((rows ?? []) as unknown as { id: string }[]).map((r) => r.id);
+    for (const id of ids) {
+      const token = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
+      const { error: upErr } = await context.supabase.from("patrol_waypoints" as any).update({ qr_token: token }).eq("id", id).eq("patrol_id", data.patrol_id);
+      if (upErr) throwSafeError("wp.rotate", upErr, "Unable to make new codes. Only supervisors and managers can do this.");
+    }
+    return { ok: true, count: ids.length };
   });
