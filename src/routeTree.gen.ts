@@ -52,7 +52,7 @@ import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
 import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as TrackTokenRouteImport } from './routes/track.$token'
-import { Route as ApiTrackOsmandRouteImport } from './routes/api.track.osmand'
+import { Route as TrackerOsmandRouteImport } from './routes/tracker.osmand'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
 import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
@@ -283,9 +283,9 @@ const TrackTokenRoute = TrackTokenRouteImport.update({
   path: '/track/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTrackOsmandRoute = ApiTrackOsmandRouteImport.update({
-  id: '/api/track/osmand',
-  path: '/api/track/osmand',
+const TrackerOsmandRoute = TrackerOsmandRouteImport.update({
+  id: '/tracker/osmand',
+  path: '/tracker/osmand',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
@@ -399,11 +399,11 @@ export interface FileRoutesByFullPath {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/track/$token': typeof TrackTokenRoute
+  '/tracker/osmand': typeof TrackerOsmandRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
-  '/api/track/osmand': typeof ApiTrackOsmandRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -455,11 +455,11 @@ export interface FileRoutesByTo {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/track/$token': typeof TrackTokenRoute
+  '/tracker/osmand': typeof TrackerOsmandRoute
   '/app': typeof AppIndexRoute
   '/consumer': typeof ConsumerIndexRoute
   '/forensic': typeof ForensicIndexRoute
   '/officer': typeof OfficerIndexRoute
-  '/api/track/osmand': typeof ApiTrackOsmandRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -516,11 +516,11 @@ export interface FileRoutesById {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/track/$token': typeof TrackTokenRoute
+  '/tracker/osmand': typeof TrackerOsmandRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
-  '/api/track/osmand': typeof ApiTrackOsmandRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -578,11 +578,11 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/track/$token'
+    | '/tracker/osmand'
     | '/app/'
     | '/consumer/'
     | '/forensic/'
     | '/officer/'
-    | '/api/track/osmand'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -634,11 +634,11 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/track/$token'
+    | '/tracker/osmand'
     | '/app'
     | '/consumer'
     | '/forensic'
     | '/officer'
-    | '/api/track/osmand'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -694,11 +694,11 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/track/$token'
+    | '/tracker/osmand'
     | '/app/'
     | '/consumer/'
     | '/forensic/'
     | '/officer/'
-    | '/api/track/osmand'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -726,7 +726,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   TrackTokenRoute: typeof TrackTokenRoute
-  ApiTrackOsmandRoute: typeof ApiTrackOsmandRoute
+  TrackerOsmandRoute: typeof TrackerOsmandRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1032,11 +1032,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TrackTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/track/osmand': {
-      id: '/api/track/osmand'
-      path: '/api/track/osmand'
-      fullPath: '/api/track/osmand'
-      preLoaderRoute: typeof ApiTrackOsmandRouteImport
+    '/tracker/osmand': {
+      id: '/tracker/osmand'
+      path: '/tracker/osmand'
+      fullPath: '/tracker/osmand'
+      preLoaderRoute: typeof TrackerOsmandRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/admin/audit': {
@@ -1343,7 +1343,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   TrackTokenRoute: TrackTokenRoute,
-  ApiTrackOsmandRoute: ApiTrackOsmandRoute,
+  TrackerOsmandRoute: TrackerOsmandRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

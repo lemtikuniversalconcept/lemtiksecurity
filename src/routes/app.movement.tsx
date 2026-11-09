@@ -486,7 +486,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
   const refresh = () => qc.invalidateQueries({ queryKey: ["movement-subjects"] });
   const origin = typeof window === "undefined" ? "https://app.lemtik.com.ng" : window.location.origin;
   const link = `${origin}/track/${s.tracker_token}`;
-  const deviceUrl = `${origin}/api/track/osmand`;
+  const deviceUrl = `${origin}/tracker/osmand`;
 
   useEffect(() => {
     let live = true;

@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
  * Position input for trackers that speak the OsmAnd protocol: the free Traccar Client app
  * (Android/iOS), and a Traccar server forwarding hardware GPS trackers.
  *
- *   https://app.lemtik.com.ng/api/track/osmand?id=<ID>&lat=..&lon=..&timestamp=..&speed=..&bearing=..&batt=..&accuracy=..
+ *   https://app.lemtik.com.ng/tracker/osmand?id=<ID>&lat=..&lon=..&timestamp=..&speed=..&bearing=..&batt=..&accuracy=..
  *
  * <ID> is the subject's tracker secret (shown on the subject's page). A Traccar server can
  * send the device's own unique id instead, but only together with key=<MOVEMENT_FORWARD_KEY>.
@@ -86,7 +86,7 @@ async function handle(request: Request) {
   return new Response(result.ok ? "ok" : result.reason ?? "rejected", { status: result.ok ? 200 : 403 });
 }
 
-export const Route = createFileRoute("/api/track/osmand")({
+export const Route = createFileRoute("/tracker/osmand")({
   server: {
     handlers: {
       GET: ({ request }) => handle(request),
