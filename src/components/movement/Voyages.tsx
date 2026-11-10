@@ -9,6 +9,7 @@ import { basemapOptions, useBasemap } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
 import { Empty, Notice, Panel, Status, type Tone } from "@/components/nw";
 import type { MovementSubject } from "@/lib/movement.functions";
+import { useMovementPerms } from "./perms";
 import { cancelVoyage, finishVoyage, saveVoyage, startVoyage, type CrewMember, type Voyage } from "@/lib/voyages.functions";
 
 type LngLat = [number, number];
@@ -70,6 +71,7 @@ export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects
   const [form, setForm] = useState<Form | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const open = voyages.find((v) => v.id === openId) ?? null;
+  const { canOperate } = useMovementPerms();
   const movers = subjects.filter((s) => s.kind !== "person");
   const name = (id: string) => subjects.find((s) => s.id === id)?.name ?? "Removed asset";
   const order = ["underway", "planned", "completed", "cancelled"];
@@ -83,9 +85,11 @@ export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects
         title="Voyages"
         meta={voyages.length}
         actions={
-          <button type="button" className="b b-sm b-pri" disabled={!movers.length} onClick={() => { setOpenId(null); setForm(newForm()); }}>
-            <Plus size={14} /> Plan voyage
-          </button>
+          canOperate ? (
+            <button type="button" className="b b-sm b-pri" disabled={!movers.length} onClick={() => { setOpenId(null); setForm(newForm()); }}>
+              <Plus size={14} /> Plan voyage
+            </button>
+          ) : undefined
         }
       >
         {!movers.length ? (
@@ -214,6 +218,7 @@ function VoyageEditor({ form, setForm, movers, onSaved }: { form: Form; setForm:
 
 function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectName: string; onClose: () => void; onEdit: () => void }) {
   const qc = useQueryClient();
+  const { canOperate } = useMovementPerms();
   const startFn = useServerFn(startVoyage);
   const finishFn = useServerFn(finishVoyage);
   const cancelFn = useServerFn(cancelVoyage);
@@ -249,7 +254,7 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
       title={v.name}
       actions={
         <>
-          {(v.status === "planned" || v.status === "underway") && <button type="button" className="b b-sm b-gh" onClick={onEdit}>Edit</button>}
+          {canOperate && (v.status === "planned" || v.status === "underway") && <button type="button" className="b b-sm b-gh" onClick={onEdit}>Edit</button>}
           <button type="button" className="ibtn" aria-label="Close" onClick={onClose}><X size={14} /></button>
         </>
       }
@@ -282,7 +287,7 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
           </section>
         )}
 
-        {(v.status === "planned" || v.status === "underway") && (
+        {canOperate && (v.status === "planned" || v.status === "underway") && (
           <section className="col g8">
             <span className="o-lbl">{v.status === "planned" ? "DEPARTURE HEAD COUNT" : "ARRIVAL HEAD COUNT"}</span>
             <span className="t3" style={{ fontSize: 12.5 }}>
@@ -308,7 +313,7 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
           <Link to="/app/movement/voyages/$id" params={{ id: v.id }} className="b b-sm b-sec">
             <FileText size={13} /> Voyage report
           </Link>
-          {(v.status === "planned" || v.status === "underway") &&
+          {canOperate && (v.status === "planned" || v.status === "underway") &&
             (confirmCancel ? (
               <>
                 <span className="t2" style={{ fontSize: 12.5 }}>Cancel this voyage?</span>

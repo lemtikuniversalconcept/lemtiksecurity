@@ -277,7 +277,11 @@ export const acknowledgeMovementAlert = createServerFn({ method: "POST" })
     // Clearing the last open SOS takes the subject out of SOS state.
     if (row?.kind === "sos" || row?.kind === "man_overboard") {
       const { count } = await sb(context).from("movement_alerts").select("id", { count: "exact", head: true }).eq("subject_id", row.subject_id).in("kind", ["sos", "man_overboard"]).is("acknowledged_at", null);
-      if (!count) await sb(context).from("movement_subjects").update({ state: "stopped" }).eq("id", row.subject_id).eq("state", "sos");
+      if (!count) {
+        // Operators may acknowledge but not edit subjects, so the state reset runs as the system.
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        await (supabaseAdmin as any).from("movement_subjects").update({ state: "stopped" }).eq("id", row.subject_id).eq("organisation_id", orgId).eq("state", "sos");
+      }
     }
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_alert", resourceId: data.id, actionType: "acknowledge", actionDetail: {} });
     return { ok: true };

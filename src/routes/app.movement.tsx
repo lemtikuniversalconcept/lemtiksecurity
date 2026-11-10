@@ -30,11 +30,13 @@ import {
 } from "@/lib/movement.functions";
 import { getNearbyShips, listVoyages, type NearbyShip, type Voyage } from "@/lib/voyages.functions";
 import { VoyagesView } from "@/components/movement/Voyages";
+import { MovementPermsContext, movementPerms, useMovementPerms } from "@/components/movement/perms";
 
 export const Route = createFileRoute("/app/movement")({
   head: () => ({ meta: [{ title: "Protected movement · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin"]);
+    return { appAccess: context.appAccess };
   },
   component: Movement,
 });
@@ -93,6 +95,8 @@ function circle(lat: number, lng: number, radius: number, steps = 64): LngLat[] 
 }
 
 function Movement() {
+  const { appAccess } = Route.useRouteContext();
+  const perms = movementPerms(appAccess?.specRole);
   const [tab, setTab] = useState<Tab>("live");
   const listSubjects = useServerFn(listMovementSubjects);
   const listZones = useServerFn(listMovementGeofences);
@@ -118,8 +122,10 @@ function Movement() {
   if (subjectsQ.error) return <Notice tone="fail">{(subjectsQ.error as Error).message || "Couldn't load protected movement."}</Notice>;
 
   return (
+    <MovementPermsContext.Provider value={perms}>
     <div className="col g16">
       <PageHeader title="Protected movement" sub="Students, principals, vehicles and boats on the move — tracked only with recorded consent." />
+      {!perms.canOperate && <Notice tone="blue">You can view everything here. Changes are made by your security manager and operators.</Notice>}
       <div className="kpis">
         <Kpi label="Tracking now" value={subjectsQ.isLoading ? "—" : tracked.length} unit={`of ${subjects.length}`} />
         <Kpi label="SOS" value={subjects.filter((s) => stateOf(s) === "sos").length} deltaClass="fail" />
@@ -146,6 +152,7 @@ function Movement() {
       {tab === "zones" && <ZonesView zones={zones} subjects={subjects} />}
       {tab === "alerts" && <AlertsView alerts={alerts} subjects={subjects} />}
     </div>
+    </MovementPermsContext.Provider>
   );
 }
 
@@ -377,6 +384,7 @@ function LiveView({ subjects, zones, alerts, voyages }: { subjects: MovementSubj
 
 function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?: MovementSubject; onFocus?: (s: MovementSubject) => void; compact?: boolean }) {
   const ack = useServerFn(acknowledgeMovementAlert);
+  const { canOperate } = useMovementPerms();
   const qc = useQueryClient();
   const m = useMutation({
     mutationFn: () => ack({ data: { id: a.id } }),
@@ -396,6 +404,8 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
       </button>
       {a.acknowledged_at ? (
         <span className="tg tg-ok"><Check size={12} /> Seen</span>
+      ) : !canOperate ? (
+        <span className="tg tg-warn">Open</span>
       ) : (
         <button type="button" className="b b-sm b-sec" onClick={() => m.mutate()} disabled={m.isPending}>
           {m.isPending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Acknowledge
@@ -441,6 +451,7 @@ function SubjectsView({ subjects, loading }: { subjects: MovementSubject[]; load
   const [form, setForm] = useState<SubjectForm | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const open = subjects.find((s) => s.id === openId) ?? null;
+  const { canManage } = useMovementPerms();
 
   return (
     <div className="grid g16" style={{ gridTemplateColumns: open || form ? "minmax(0,1fr) 420px" : "minmax(0,1fr)" }}>
@@ -448,9 +459,11 @@ function SubjectsView({ subjects, loading }: { subjects: MovementSubject[]; load
         title="People & assets"
         meta={subjects.length}
         actions={
-          <button type="button" className="b b-sm b-pri" onClick={() => { setOpenId(null); setForm({ ...NEW_SUBJECT }); }}>
-            <Plus size={14} /> Add
-          </button>
+          canManage ? (
+            <button type="button" className="b b-sm b-pri" onClick={() => { setOpenId(null); setForm({ ...NEW_SUBJECT }); }}>
+              <Plus size={14} /> Add
+            </button>
+          ) : undefined
         }
       >
         {loading ? (
@@ -594,6 +607,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
   const [note, setNote] = useState("");
   const [qr, setQr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { canManage } = useMovementPerms();
   const refresh = () => qc.invalidateQueries({ queryKey: ["movement-subjects"] });
   const origin = typeof window === "undefined" ? "https://app.lemtik.com.ng" : window.location.origin;
   const link = `${origin}/track/${s.tracker_token}`;
@@ -630,7 +644,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
   const copy = (text: string) => navigator.clipboard?.writeText(text).then(() => toast.success("Copied")).catch(() => toast.error("Couldn't copy"));
 
   return (
-    <Panel title={s.name} icon={<KindIcon kind={s.kind} size={15} />} actions={<><button type="button" className="b b-sm b-gh" onClick={onEdit}>Edit</button><button type="button" className="ibtn" aria-label="Close" onClick={onClose}><X size={14} /></button></>}>
+    <Panel title={s.name} icon={<KindIcon kind={s.kind} size={15} />} actions={<>{canManage && <button type="button" className="b b-sm b-gh" onClick={onEdit}>Edit</button>}<button type="button" className="ibtn" aria-label="Close" onClick={onClose}><X size={14} /></button></>}>
       <div className="col g14">
         <section className="col g8">
           <span className="o-lbl">CONSENT</span>
@@ -641,6 +655,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
           ) : (
             <Notice tone="warn">{s.consent_status === "withdrawn" ? "Consent was withdrawn. Tracking stays off until it's recorded again." : "Tracking can't start until consent is recorded. For a minor, record the parent's or guardian's consent."}</Notice>
           )}
+          {canManage && <>
           <input className="in" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder={s.consent_status === "granted" ? "Reason for withdrawal" : "How consent was given, e.g. signed form 12 Nov, parent: Mrs Okafor"} />
           <div className="row g8">
             {s.consent_status !== "granted" ? (
@@ -649,6 +664,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
               <button type="button" className="b b-sm b-sec" disabled={note.trim().length < 3 || consent.isPending} onClick={() => consent.mutate("withdrawn")}>Record withdrawal</button>
             )}
           </div>
+          </>}
         </section>
 
         <section className="row g10">
@@ -665,10 +681,10 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
               </span>
             )}
           </span>
-          <Switch label="Tracking" on={s.tracking_enabled} disabled={s.consent_status !== "granted" || tracking.isPending} onChange={(v) => tracking.mutate(v)} />
+          <Switch label="Tracking" on={s.tracking_enabled} disabled={!canManage || s.consent_status !== "granted" || tracking.isPending} onChange={(v) => tracking.mutate(v)} />
         </section>
 
-        <section className="col g8">
+        {canManage && <section className="col g8">
           <span className="o-lbl">{s.device_kind === "phone" ? "TRACKER LINK FOR THEIR PHONE" : "TRACKER SETUP"}</span>
           {s.device_kind === "phone" ? (
             <>
@@ -694,7 +710,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
           <button type="button" className="b b-sm b-gh" style={{ alignSelf: "flex-start" }} onClick={() => rotate.mutate()} disabled={rotate.isPending}>
             <RefreshCw size={13} /> Make a new link (old one stops working)
           </button>
-        </section>
+        </section>}
 
         <section className="col g4 t3" style={{ fontSize: 12.5 }}>
           {s.reference && <span>Reference: {s.reference}</span>}
@@ -704,7 +720,7 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
           {s.last_seen_at && <span>Last position: {new Date(s.last_seen_at).toLocaleString("en-GB")}{s.last_battery != null ? ` · battery ${s.last_battery}%` : ""}</span>}
         </section>
 
-        {confirmDelete ? (
+        {!canManage ? null : confirmDelete ? (
           <div className="row g8">
             <span className="t2 f1" style={{ fontSize: 12.5 }}>Remove {s.name} and delete all their location history?</span>
             <button type="button" className="b b-sm b-sec" onClick={() => setConfirmDelete(false)}>Cancel</button>
@@ -732,6 +748,7 @@ const ZONE_HELP: Record<MovementGeofence["kind"], string> = {
 
 function ZonesView({ zones, subjects }: { zones: MovementGeofence[]; subjects: MovementSubject[] }) {
   const [form, setForm] = useState<ZoneForm | null>(null);
+  const { canManage } = useMovementPerms();
   const save = useServerFn(saveMovementGeofence);
   const del = useServerFn(deleteMovementGeofence);
   const qc = useQueryClient();
@@ -750,13 +767,13 @@ function ZonesView({ zones, subjects }: { zones: MovementGeofence[]; subjects: M
 
   return (
     <div className="grid g16" style={{ gridTemplateColumns: form ? "minmax(0,1fr) 440px" : "minmax(0,1fr)" }}>
-      <Panel title="Zones" meta={zones.length} actions={<button type="button" className="b b-sm b-pri" onClick={() => setForm({ ...NEW_ZONE })}><Plus size={14} /> Add zone</button>}>
+      <Panel title="Zones" meta={zones.length} actions={canManage ? <button type="button" className="b b-sm b-pri" onClick={() => setForm({ ...NEW_ZONE })}><Plus size={14} /> Add zone</button> : undefined}>
         {zones.length === 0 ? (
           <Empty>No zones yet. Add a campus or home as a safe zone, or a platform's perimeter as an exclusion zone.</Empty>
         ) : (
           <div className="col g4">
             {zones.map((z) => (
-              <button key={z.id} type="button" className="row g10 w-full text-left hover:bg-ink-3" style={{ padding: "9px 8px", borderRadius: 8 }} onClick={() => setForm({ id: z.id, name: z.name, kind: z.kind, center: [z.center_lng, z.center_lat], radius_m: z.radius_m, alert_on: z.alert_on, subject_ids: z.subject_ids, active: z.active })}>
+              <button key={z.id} type="button" className="row g10 w-full text-left hover:bg-ink-3" style={{ padding: "9px 8px", borderRadius: 8 }} disabled={!canManage} onClick={() => setForm({ id: z.id, name: z.name, kind: z.kind, center: [z.center_lng, z.center_lat], radius_m: z.radius_m, alert_on: z.alert_on, subject_ids: z.subject_ids, active: z.active })}>
                 <span style={{ width: 10, height: 10, borderRadius: 3, background: ZONE_COLOR[z.kind] }} />
                 <span className="col f1">
                   <b>{z.name}</b>
