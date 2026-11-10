@@ -34,7 +34,7 @@ export type CaseManifest = {
   generated_at: string;
   generated_by: string;
   organisation: string;
-  kind: "incident" | "voyage";
+  kind: "incident" | "voyage" | "consignment";
   reference: string;
   title: string;
   record: Record<string, string | number | boolean | null>;
@@ -44,7 +44,7 @@ export type CaseManifest = {
 };
 export type CaseFileRow = {
   id: string;
-  kind: "incident" | "voyage";
+  kind: "incident" | "voyage" | "consignment";
   record_id: string;
   reference: string;
   manifest_text: string;
@@ -174,14 +174,77 @@ async function voyageParts(supabase: any, orgId: string, id: string) {
   };
 }
 
+async function consignmentParts(supabase: any, orgId: string, id: string) {
+  const { data: c, error } = await supabase.from("cargo_consignments").select("*").eq("id", id).eq("organisation_id", orgId).maybeSingle();
+  if (error || !c) throwSafeError("casefile.consignment", error ?? new Error("not found"), "Consignment not found.");
+  const { data: ev } = await supabase.from("cargo_custody_events").select("*").eq("consignment_id", id).order("seq", { ascending: true }).limit(2000);
+  const events: any[] = ev ?? [];
+  const { verifyChain, hashCustodyFile } = await import("./cargo.server");
+  const chain = verifyChain(events);
+  const cps: { name: string }[] = Array.isArray(c.checkpoints) ? c.checkpoints : [];
+  const label = (e: any) => `${String(e.kind).replace(/_/g, " ")}${e.checkpoint_index != null && cps[e.checkpoint_index] ? ` at ${cps[e.checkpoint_index].name}` : ""}`;
+  const media = events.flatMap((e) => (e.media ?? []).map((m: any) => ({ ...m, seq: e.seq, at: e.recorded_at, by: e.recorded_by_name, what: label(e) })));
+  const evidence: CaseEvidence[] = await Promise.all(
+    media.map(async (m: any, i: number): Promise<CaseEvidence> => {
+      const now = await hashCustodyFile(m.path);
+      return {
+        file: `evidence/${String(i + 1).padStart(2, "0")}-${safeName(m.name ?? "file")}`,
+        name: String(m.name ?? "file"),
+        kind: String(m.type ?? "").startsWith("video/") ? "video" : "photo",
+        size: now?.size ?? m.size ?? null,
+        sha256: now?.sha256 ?? null,
+        sha256_on_receipt: m.sha256 ?? null,
+        integrity: !now ? "unreadable" : !m.sha256 ? "no_receipt_fingerprint" : m.sha256 === now.sha256 ? "matches_receipt" : "changed_since_receipt",
+        added_at: m.at,
+        added_by: m.by,
+        legal_hold: false,
+        custody: [{ at: m.at, by: m.by, action: `attached to custody record ${m.seq} (${m.what})`, note: null }],
+      };
+    }),
+  );
+  const cell = (x: unknown) => (x == null ? "" : String(Array.isArray(x) ? x.join(" ") : x).replace(/[",\n]/g, " "));
+  const head = "seq,recorded_at,device_at,kind,checkpoint,lat,lng,accuracy_m,off_checkpoint_m,seals_observed,seals_ok,seal_issue,from_party,to_party,note,files,recorded_via,recorded_by,prev_hash,event_hash";
+  const csv = [head, ...events.map((e) => [e.seq, e.recorded_at, e.device_at, e.kind, e.checkpoint_index != null ? cps[e.checkpoint_index]?.name ?? e.checkpoint_index : "", e.lat, e.lng, e.accuracy_m, e.off_checkpoint_m, e.seals_observed, e.seals_ok, e.seal_issue, e.from_party, e.to_party, e.note, (e.media ?? []).length, e.recorded_via, e.recorded_by_name, e.prev_hash, e.event_hash].map(cell).join(","))].join("\n") + "\n";
+  const timeline: CaseTimelineEntry[] = events.map((e) => ({
+    at: e.recorded_at,
+    by: e.recorded_by_name,
+    kind: e.kind,
+    text: [label(e), e.from_party || e.to_party ? `from ${e.from_party ?? "?"} to ${e.to_party ?? "?"}` : "", e.seals_ok === false ? `SEAL MISMATCH: ${e.seal_issue}` : e.seals_ok ? "seals match" : "", e.off_checkpoint_m ? `${e.off_checkpoint_m} m from the checkpoint` : "", e.note ?? ""].filter(Boolean).join(" · "),
+  }));
+  const record = {
+    Reference: c.reference,
+    Cargo: c.description,
+    Quantity: c.quantity ?? null,
+    Containers: (c.container_numbers ?? []).join(", ") || null,
+    "Seals on record": (c.seal_numbers ?? []).join(", ") || null,
+    From: c.origin,
+    To: c.destination,
+    Consignee: c.consignee ?? null,
+    Carrier: c.carrier ?? null,
+    Status: c.status,
+    "Delivered at": c.delivered_at ?? null,
+    "Custody records": events.length,
+    "Hash chain": chain.intact ? `Intact: all ${chain.count} records link to the one before and are unchanged` : `BROKEN at record ${chain.broken_at}: ${chain.reason}`,
+    "Last record hash": events.length ? events[events.length - 1].event_hash : null,
+  };
+  return {
+    reference: String(c.reference),
+    title: `Chain of custody: ${c.reference} (${c.description})`,
+    record,
+    timeline,
+    evidence,
+    data_files: [{ file: "data/custody.csv", description: "Every custody record in order, with each record's hash and the hash of the one before it", content: csv, rows: events.length }],
+  };
+}
+
 export const createCaseFile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ kind: z.enum(["incident", "voyage"]), id: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ kind: z.enum(["incident", "voyage", "consignment"]), id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const supabase = sb(context);
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const { sha256Hex } = await import("./casefile.server");
-    const parts = data.kind === "incident" ? await incidentParts(supabase, orgId, data.id) : await voyageParts(supabase, orgId, data.id);
+    const parts = data.kind === "incident" ? await incidentParts(supabase, orgId, data.id) : data.kind === "voyage" ? await voyageParts(supabase, orgId, data.id) : await consignmentParts(supabase, orgId, data.id);
     const [{ data: org }, who] = await Promise.all([supabase.from("organisations").select("name").eq("id", orgId).maybeSingle(), displayName(supabase, context.userId)]);
 
     const id = crypto.randomUUID();
@@ -244,6 +307,13 @@ export const getCaseFile = createServerFn({ method: "POST" })
         }),
       );
       links = Object.fromEntries(signed);
+    } else if (row.kind === "consignment") {
+      const { data: ev } = await supabase.from("cargo_custody_events").select("media").eq("consignment_id", row.record_id).order("seq", { ascending: true }).limit(2000);
+      const paths: string[] = (ev ?? []).flatMap((e: any) => (e.media ?? []).map((m: any) => m.path));
+      const { CUSTODY_BUCKET } = await import("./cargo.server");
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: signed } = paths.length ? await (supabaseAdmin as any).storage.from(CUSTODY_BUCKET).createSignedUrls(paths, 3600) : { data: [] };
+      links = Object.fromEntries(manifest.evidence.map((e, i) => [e.file, (signed ?? [])[i]?.signedUrl ?? null]));
     }
     return {
       row: row as CaseFileRow,
@@ -255,7 +325,7 @@ export const getCaseFile = createServerFn({ method: "POST" })
 
 export const listCaseFiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ kind: z.enum(["incident", "voyage"]), record_id: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ kind: z.enum(["incident", "voyage", "consignment"]), record_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { data: rows } = await sb(context)
       .from("case_files")
@@ -283,7 +353,7 @@ export const verifyCaseFile = createServerFn({ method: "POST" })
     return {
       found: true as const,
       id: row.id as string,
-      kind: row.kind as "incident" | "voyage",
+      kind: row.kind as "incident" | "voyage" | "consignment",
       reference: row.reference as string,
       organisation: (org?.name as string) ?? "",
       generated_at: row.created_at as string,
@@ -291,7 +361,7 @@ export const verifyCaseFile = createServerFn({ method: "POST" })
       // Fingerprints only: no names, content or personal details.
       files: [
         ...m.evidence.map((e, i) => ({ label: `Evidence ${i + 1}`, sha256: e.sha256 })),
-        ...m.data_files.map((f, i) => ({ label: m.kind === "voyage" ? "Position log" : `Data file ${i + 1}`, sha256: f.sha256 })),
+        ...m.data_files.map((f, i) => ({ label: m.kind === "voyage" ? "Position log" : m.kind === "consignment" ? "Chain of custody log" : `Data file ${i + 1}`, sha256: f.sha256 })),
       ],
     };
   });

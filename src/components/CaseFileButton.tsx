@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import { FileCheck2, Loader2 } from "lucide-react";
 import { createCaseFile } from "@/lib/casefile.functions";
 
-/** Freezes an incident or voyage into a court-ready case file and opens it. */
-export function CaseFileButton({ kind, id, className = "b b-sm b-sec" }: { kind: "incident" | "voyage"; id: string; className?: string }) {
+/** Freezes an incident, voyage or consignment into a court-ready case file and opens it. */
+export function CaseFileButton({ kind, id, className = "b b-sm b-sec" }: { kind: "incident" | "voyage" | "consignment"; id: string; className?: string }) {
   const fn = useServerFn(createCaseFile);
   const navigate = useNavigate();
   const m = useMutation({

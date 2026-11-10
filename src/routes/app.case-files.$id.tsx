@@ -51,7 +51,7 @@ function CaseFilePage() {
   if (q.isLoading) return <span className="row g8 t3"><Loader2 className="h-4 w-4 animate-spin" /> Loading the case file…</span>;
   if (q.error || !q.data) return <Notice tone="fail">{(q.error as Error)?.message || "Couldn't load this case file."}</Notice>;
   const { row, manifest: m, extra_files, links } = q.data;
-  const back = m.kind === "incident" ? { to: "/app/incidents/$id" as const, label: "Incident" } : { to: "/app/movement/voyages/$id" as const, label: "Voyage report" };
+  const back = m.kind === "incident" ? { to: "/app/incidents/$id" as const, label: "Incident" } : m.kind === "consignment" ? { to: "/app/cargo/$id" as const, label: "Consignment" } : { to: "/app/movement/voyages/$id" as const, label: "Voyage report" };
   const problems = m.evidence.filter((e) => e.integrity === "changed_since_receipt" || e.integrity === "unreadable").length;
 
   async function downloadBundle() {
@@ -107,7 +107,7 @@ function CaseFilePage() {
       {zip.note && <div className="no-print"><Notice tone={zip.tone}>{zip.note}</Notice></div>}
 
       <header className="col g6" style={{ borderBottom: "1px solid var(--line-2)", paddingBottom: 14 }}>
-        <span className="o-lbl">CASE FILE · {m.kind === "incident" ? "INCIDENT" : "VOYAGE"}</span>
+        <span className="o-lbl">CASE FILE · {m.kind === "incident" ? "INCIDENT" : m.kind === "consignment" ? "CHAIN OF CUSTODY" : "VOYAGE"}</span>
         <h1 className="ph1" style={{ fontSize: 24, textWrap: "balance" }}>{m.title}</h1>
         <span className="t2" style={{ fontSize: 13 }}>
           {m.organisation} · Reference <b className="mono">{m.reference}</b> · Generated {when(m.generated_at)} by {m.generated_by}
@@ -130,7 +130,7 @@ function CaseFilePage() {
         </div>
       </Panel>
 
-      <Panel title={m.kind === "incident" ? "The incident" : "The voyage"}>
+      <Panel title={m.kind === "incident" ? "The incident" : m.kind === "consignment" ? "The consignment" : "The voyage"}>
         <div className="col g6" style={{ fontSize: 13 }}>
           {Object.entries(m.record).filter(([, v]) => v !== null && v !== "").map(([k, v]) => (
             <KV key={k} k={k} v={isIso(v) ? when(v as string) : String(v)} />
@@ -140,7 +140,7 @@ function CaseFilePage() {
 
       <Panel title="Evidence" meta={m.evidence.length}>
         {m.evidence.length === 0 ? (
-          <Empty>{m.kind === "voyage" ? "The voyage's evidence is its position log, listed under Data files." : "No evidence files were attached."}</Empty>
+          <Empty>{m.kind === "voyage" ? "The voyage's evidence is its position log, listed under Data files." : m.kind === "consignment" ? "No photos or clips were attached to the custody records." : "No evidence files were attached."}</Empty>
         ) : (
           <div className="col g12">
             {m.evidence.map((e, i) => {

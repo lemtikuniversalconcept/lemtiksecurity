@@ -70,7 +70,7 @@ function VerifyPage() {
               <div className="pn-b col g8" style={{ fontSize: 13.5 }}>
                 <span className="row g8" style={{ color: "var(--ok, #2BD576)", fontWeight: 600 }}><ShieldCheck size={16} /> Genuine Lemtik case file</span>
                 <Row k="Issued to" v={r.organisation || "—"} />
-                <Row k="Type" v={r.kind === "incident" ? "Incident" : "Voyage"} />
+                <Row k="Type" v={r.kind === "incident" ? "Incident" : r.kind === "consignment" ? "Cargo chain of custody" : "Voyage"} />
                 <Row k="Reference" v={r.reference} />
                 <Row k="Generated" v={new Date(r.generated_at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "medium" })} />
                 <Row k="Manifest SHA-256" v={<span className="mono" style={{ wordBreak: "break-all", fontSize: 12 }}>{r.manifest_sha256}</span>} />

@@ -295,6 +295,14 @@ export async function sweepOrg(orgId: string) {
       if (subj) await alert(subj, "curfew", 4, `${subj.name} is still on "${v.name}" during the ${c.name} curfew (${String(c.curfew_start).slice(0, 5)}–${String(c.curfew_end).slice(0, 5)})`, subj.last_lat != null ? { lat: subj.last_lat, lng: subj.last_lng } : null, { voyageId: v.id });
     }
   }
+
+  // Cargo in transit with no custody record for too long. Ignored until the cargo tables exist.
+  try {
+    const { sweepCargo } = await import("./cargo.server");
+    await sweepCargo(orgId);
+  } catch {
+    /* cargo custody not set up */
+  }
 }
 
 /** Kept for callers of the old name. */

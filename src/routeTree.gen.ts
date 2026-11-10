@@ -21,6 +21,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAlertsRouteImport } from './routes/app.alerts'
 import { Route as AppAuditRouteImport } from './routes/app.audit'
+import { Route as AppCargoRouteImport } from './routes/app.cargo'
 import { Route as AppDevicesRouteImport } from './routes/app.devices'
 import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
 import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
@@ -43,6 +44,7 @@ import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
 import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
 import { Route as ConsumerReportRouteImport } from './routes/consumer.report'
 import { Route as ConsumerStatusRouteImport } from './routes/consumer.status'
+import { Route as CustodyTokenRouteImport } from './routes/custody.$token'
 import { Route as DosTokenRouteImport } from './routes/dos.$token'
 import { Route as ForensicIndexRouteImport } from './routes/forensic.index'
 import { Route as ForensicCasesRouteImport } from './routes/forensic.cases'
@@ -62,6 +64,7 @@ import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
 import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
 import { Route as AppAdminSystemRouteImport } from './routes/app.admin.system'
+import { Route as AppCargoIdRouteImport } from './routes/app.cargo_.$id'
 import { Route as AppCaseFilesIdRouteImport } from './routes/app.case-files.$id'
 import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
 import { Route as AppLinksIdRouteImport } from './routes/app.links_.$id'
@@ -136,6 +139,11 @@ const AppAlertsRoute = AppAlertsRouteImport.update({
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCargoRoute = AppCargoRouteImport.update({
+  id: '/cargo',
+  path: '/cargo',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDevicesRoute = AppDevicesRouteImport.update({
@@ -248,6 +256,11 @@ const ConsumerStatusRoute = ConsumerStatusRouteImport.update({
   path: '/status',
   getParentRoute: () => ConsumerRoute,
 } as any)
+const CustodyTokenRoute = CustodyTokenRouteImport.update({
+  id: '/custody/$token',
+  path: '/custody/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DosTokenRoute = DosTokenRouteImport.update({
   id: '/dos/$token',
   path: '/dos/$token',
@@ -343,6 +356,11 @@ const AppAdminSystemRoute = AppAdminSystemRouteImport.update({
   path: '/admin/system',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCargoIdRoute = AppCargoIdRouteImport.update({
+  id: '/cargo_/$id',
+  path: '/cargo/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCaseFilesIdRoute = AppCaseFilesIdRouteImport.update({
   id: '/case-files/$id',
   path: '/case-files/$id',
@@ -431,6 +449,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/cargo': typeof AppCargoRoute
   '/app/devices': typeof AppDevicesRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
@@ -452,6 +471,7 @@ export interface FileRoutesByFullPath {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/custody/$token': typeof CustodyTokenRoute
   '/dos/$token': typeof DosTokenRoute
   '/forensic/cases': typeof ForensicCasesRouteWithChildren
   '/forensic/queries': typeof ForensicQueriesRoute
@@ -473,6 +493,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
   '/app/admin/system': typeof AppAdminSystemRoute
+  '/app/cargo/$id': typeof AppCargoIdRoute
   '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links/$id': typeof AppLinksIdRoute
@@ -497,6 +518,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/cargo': typeof AppCargoRoute
   '/app/devices': typeof AppDevicesRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
@@ -518,6 +540,7 @@ export interface FileRoutesByTo {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/custody/$token': typeof CustodyTokenRoute
   '/dos/$token': typeof DosTokenRoute
   '/forensic/cases': typeof ForensicCasesRouteWithChildren
   '/forensic/queries': typeof ForensicQueriesRoute
@@ -539,6 +562,7 @@ export interface FileRoutesByTo {
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
   '/app/admin/system': typeof AppAdminSystemRoute
+  '/app/cargo/$id': typeof AppCargoIdRoute
   '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links/$id': typeof AppLinksIdRoute
@@ -568,6 +592,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/cargo': typeof AppCargoRoute
   '/app/devices': typeof AppDevicesRoute
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
@@ -589,6 +614,7 @@ export interface FileRoutesById {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/custody/$token': typeof CustodyTokenRoute
   '/dos/$token': typeof DosTokenRoute
   '/forensic/cases': typeof ForensicCasesRouteWithChildren
   '/forensic/queries': typeof ForensicQueriesRoute
@@ -610,6 +636,7 @@ export interface FileRoutesById {
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
   '/app/admin/system': typeof AppAdminSystemRoute
+  '/app/cargo_/$id': typeof AppCargoIdRoute
   '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links_/$id': typeof AppLinksIdRoute
@@ -640,6 +667,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
+    | '/app/cargo'
     | '/app/devices'
     | '/app/incidents'
     | '/app/intelligence'
@@ -661,6 +689,7 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/custody/$token'
     | '/dos/$token'
     | '/forensic/cases'
     | '/forensic/queries'
@@ -682,6 +711,7 @@ export interface FileRouteTypes {
     | '/app/admin/billing'
     | '/app/admin/organisations'
     | '/app/admin/system'
+    | '/app/cargo/$id'
     | '/app/case-files/$id'
     | '/app/incidents/$id'
     | '/app/links/$id'
@@ -706,6 +736,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
+    | '/app/cargo'
     | '/app/devices'
     | '/app/incidents'
     | '/app/intelligence'
@@ -727,6 +758,7 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/custody/$token'
     | '/dos/$token'
     | '/forensic/cases'
     | '/forensic/queries'
@@ -748,6 +780,7 @@ export interface FileRouteTypes {
     | '/app/admin/billing'
     | '/app/admin/organisations'
     | '/app/admin/system'
+    | '/app/cargo/$id'
     | '/app/case-files/$id'
     | '/app/incidents/$id'
     | '/app/links/$id'
@@ -776,6 +809,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/app/alerts'
     | '/app/audit'
+    | '/app/cargo'
     | '/app/devices'
     | '/app/incidents'
     | '/app/intelligence'
@@ -797,6 +831,7 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/custody/$token'
     | '/dos/$token'
     | '/forensic/cases'
     | '/forensic/queries'
@@ -818,6 +853,7 @@ export interface FileRouteTypes {
     | '/app/admin/billing'
     | '/app/admin/organisations'
     | '/app/admin/system'
+    | '/app/cargo_/$id'
     | '/app/case-files/$id'
     | '/app/incidents/$id'
     | '/app/links_/$id'
@@ -846,6 +882,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   BoardTokenRoute: typeof BoardTokenRoute
+  CustodyTokenRoute: typeof CustodyTokenRoute
   DosTokenRoute: typeof DosTokenRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
@@ -936,6 +973,13 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/app/audit'
       preLoaderRoute: typeof AppAuditRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/cargo': {
+      id: '/app/cargo'
+      path: '/cargo'
+      fullPath: '/app/cargo'
+      preLoaderRoute: typeof AppCargoRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/devices': {
@@ -1092,6 +1136,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsumerStatusRouteImport
       parentRoute: typeof ConsumerRoute
     }
+    '/custody/$token': {
+      id: '/custody/$token'
+      path: '/custody/$token'
+      fullPath: '/custody/$token'
+      preLoaderRoute: typeof CustodyTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dos/$token': {
       id: '/dos/$token'
       path: '/dos/$token'
@@ -1223,6 +1274,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/system'
       fullPath: '/app/admin/system'
       preLoaderRoute: typeof AppAdminSystemRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/cargo_/$id': {
+      id: '/app/cargo_/$id'
+      path: '/cargo/$id'
+      fullPath: '/app/cargo/$id'
+      preLoaderRoute: typeof AppCargoIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/case-files/$id': {
@@ -1385,6 +1443,7 @@ const AppAdminOrganisationsRouteWithChildren =
 interface AppRouteChildren {
   AppAlertsRoute: typeof AppAlertsRoute
   AppAuditRoute: typeof AppAuditRoute
+  AppCargoRoute: typeof AppCargoRoute
   AppDevicesRoute: typeof AppDevicesRoute
   AppIncidentsRoute: typeof AppIncidentsRouteWithChildren
   AppIntelligenceRoute: typeof AppIntelligenceRoute
@@ -1405,6 +1464,7 @@ interface AppRouteChildren {
   AppAdminBillingRoute: typeof AppAdminBillingRoute
   AppAdminOrganisationsRoute: typeof AppAdminOrganisationsRouteWithChildren
   AppAdminSystemRoute: typeof AppAdminSystemRoute
+  AppCargoIdRoute: typeof AppCargoIdRoute
   AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
   AppLinksIdRoute: typeof AppLinksIdRoute
   AppIspsDosIdRoute: typeof AppIspsDosIdRoute
@@ -1415,6 +1475,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAlertsRoute: AppAlertsRoute,
   AppAuditRoute: AppAuditRoute,
+  AppCargoRoute: AppCargoRoute,
   AppDevicesRoute: AppDevicesRoute,
   AppIncidentsRoute: AppIncidentsRouteWithChildren,
   AppIntelligenceRoute: AppIntelligenceRoute,
@@ -1435,6 +1496,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminBillingRoute: AppAdminBillingRoute,
   AppAdminOrganisationsRoute: AppAdminOrganisationsRouteWithChildren,
   AppAdminSystemRoute: AppAdminSystemRoute,
+  AppCargoIdRoute: AppCargoIdRoute,
   AppCaseFilesIdRoute: AppCaseFilesIdRoute,
   AppLinksIdRoute: AppLinksIdRoute,
   AppIspsDosIdRoute: AppIspsDosIdRoute,
@@ -1550,6 +1612,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   BoardTokenRoute: BoardTokenRoute,
+  CustodyTokenRoute: CustodyTokenRoute,
   DosTokenRoute: DosTokenRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
