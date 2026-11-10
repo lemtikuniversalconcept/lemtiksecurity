@@ -11,6 +11,7 @@ import { useMapboxToken } from "@/components/LocationPicker";
 import { Empty, Notice, PageHeader, Panel, Status } from "@/components/nw";
 import { getVoyageReport, type VoyageReport } from "@/lib/voyages.functions";
 import { routeLengthM, VOYAGE_STATUS } from "@/components/movement/Voyages";
+import { CaseFileButton } from "@/components/CaseFileButton";
 
 export const Route = createFileRoute("/app/movement_/voyages/$id")({
   head: () => ({ meta: [{ title: "Voyage report · Lemtik SOD" }] }),
@@ -76,6 +77,7 @@ function VoyageReportPage() {
       <div className="row g8 no-print">
         <Link to="/app/movement" className="b b-sm b-gh"><ArrowLeft size={14} /> Protected movement</Link>
         <span className="f1" />
+        <CaseFileButton kind="voyage" id={id} />
         <button type="button" className="b b-sm b-pri" onClick={() => window.print()}><Printer size={14} /> Print or save as PDF</button>
       </div>
       <PageHeader title={v.name} sub={`Voyage report${r.organisation ? ` · ${r.organisation}` : ""} · generated ${when(r.generated_at)}`} />

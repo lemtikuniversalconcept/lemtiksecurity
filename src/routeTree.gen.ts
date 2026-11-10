@@ -53,10 +53,12 @@ import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as TrackTokenRouteImport } from './routes/track.$token'
 import { Route as TrackerOsmandRouteImport } from './routes/tracker.osmand'
+import { Route as VerifyIdRouteImport } from './routes/verify.$id'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
 import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
 import { Route as AppAdminSystemRouteImport } from './routes/app.admin.system'
+import { Route as AppCaseFilesIdRouteImport } from './routes/app.case-files.$id'
 import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
 import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
 import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
@@ -289,6 +291,11 @@ const TrackerOsmandRoute = TrackerOsmandRouteImport.update({
   path: '/tracker/osmand',
   getParentRoute: () => rootRouteImport,
 } as any)
+const VerifyIdRoute = VerifyIdRouteImport.update({
+  id: '/verify/$id',
+  path: '/verify/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/admin/audit',
   path: '/admin/audit',
@@ -307,6 +314,11 @@ const AppAdminOrganisationsRoute = AppAdminOrganisationsRouteImport.update({
 const AppAdminSystemRoute = AppAdminSystemRouteImport.update({
   id: '/admin/system',
   path: '/admin/system',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCaseFilesIdRoute = AppCaseFilesIdRouteImport.update({
+  id: '/case-files/$id',
+  path: '/case-files/$id',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIncidentsIdRoute = AppIncidentsIdRouteImport.update({
@@ -406,6 +418,7 @@ export interface FileRoutesByFullPath {
   '/officer/sos': typeof OfficerSosRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
+  '/verify/$id': typeof VerifyIdRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
@@ -414,6 +427,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
   '/app/admin/system': typeof AppAdminSystemRoute
+  '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
@@ -463,6 +477,7 @@ export interface FileRoutesByTo {
   '/officer/sos': typeof OfficerSosRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
+  '/verify/$id': typeof VerifyIdRoute
   '/app': typeof AppIndexRoute
   '/consumer': typeof ConsumerIndexRoute
   '/forensic': typeof ForensicIndexRoute
@@ -471,6 +486,7 @@ export interface FileRoutesByTo {
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
   '/app/admin/system': typeof AppAdminSystemRoute
+  '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
@@ -525,6 +541,7 @@ export interface FileRoutesById {
   '/officer/sos': typeof OfficerSosRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
+  '/verify/$id': typeof VerifyIdRoute
   '/app/': typeof AppIndexRoute
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
@@ -533,6 +550,7 @@ export interface FileRoutesById {
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
   '/app/admin/system': typeof AppAdminSystemRoute
+  '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
@@ -588,6 +606,7 @@ export interface FileRouteTypes {
     | '/officer/sos'
     | '/track/$token'
     | '/tracker/osmand'
+    | '/verify/$id'
     | '/app/'
     | '/consumer/'
     | '/forensic/'
@@ -596,6 +615,7 @@ export interface FileRouteTypes {
     | '/app/admin/billing'
     | '/app/admin/organisations'
     | '/app/admin/system'
+    | '/app/case-files/$id'
     | '/app/incidents/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
@@ -645,6 +665,7 @@ export interface FileRouteTypes {
     | '/officer/sos'
     | '/track/$token'
     | '/tracker/osmand'
+    | '/verify/$id'
     | '/app'
     | '/consumer'
     | '/forensic'
@@ -653,6 +674,7 @@ export interface FileRouteTypes {
     | '/app/admin/billing'
     | '/app/admin/organisations'
     | '/app/admin/system'
+    | '/app/case-files/$id'
     | '/app/incidents/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
@@ -706,6 +728,7 @@ export interface FileRouteTypes {
     | '/officer/sos'
     | '/track/$token'
     | '/tracker/osmand'
+    | '/verify/$id'
     | '/app/'
     | '/consumer/'
     | '/forensic/'
@@ -714,6 +737,7 @@ export interface FileRouteTypes {
     | '/app/admin/billing'
     | '/app/admin/organisations'
     | '/app/admin/system'
+    | '/app/case-files/$id'
     | '/app/incidents/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
@@ -739,6 +763,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
+  VerifyIdRoute: typeof VerifyIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1051,6 +1076,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TrackerOsmandRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/verify/$id': {
+      id: '/verify/$id'
+      path: '/verify/$id'
+      fullPath: '/verify/$id'
+      preLoaderRoute: typeof VerifyIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/admin/audit': {
       id: '/app/admin/audit'
       path: '/admin/audit'
@@ -1077,6 +1109,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/system'
       fullPath: '/app/admin/system'
       preLoaderRoute: typeof AppAdminSystemRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/case-files/$id': {
+      id: '/app/case-files/$id'
+      path: '/case-files/$id'
+      fullPath: '/app/case-files/$id'
+      preLoaderRoute: typeof AppCaseFilesIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/incidents/$id': {
@@ -1229,6 +1268,7 @@ interface AppRouteChildren {
   AppAdminBillingRoute: typeof AppAdminBillingRoute
   AppAdminOrganisationsRoute: typeof AppAdminOrganisationsRouteWithChildren
   AppAdminSystemRoute: typeof AppAdminSystemRoute
+  AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
   AppMovementVoyagesIdRoute: typeof AppMovementVoyagesIdRoute
 }
 
@@ -1253,6 +1293,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminBillingRoute: AppAdminBillingRoute,
   AppAdminOrganisationsRoute: AppAdminOrganisationsRouteWithChildren,
   AppAdminSystemRoute: AppAdminSystemRoute,
+  AppCaseFilesIdRoute: AppCaseFilesIdRoute,
   AppMovementVoyagesIdRoute: AppMovementVoyagesIdRoute,
 }
 
@@ -1365,6 +1406,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
+  VerifyIdRoute: VerifyIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

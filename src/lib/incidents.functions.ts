@@ -128,9 +128,13 @@ export const createIncident = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => incidentInput.parse(d))
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    if (data.evidence?.length) {
+      const { withIntakeHashes } = await import("./casefile.server");
+      (data as any).evidence = await withIntakeHashes(context.supabase, data.evidence);
+    }
     const { error, data: row } = await context.supabase
       .from("incidents")
-      .insert({ ...data, reported_by: context.userId, organisation_id: orgId })
+      .insert({ ...data, reported_by: context.userId, organisation_id: orgId } as any)
       .select().single();
     if (error) throwSafeError("incidents.create", error, "Unable to create incident.");
     const orchestration = await orchestrateIncident(row as Record<string, any>, orgId, context.userId);

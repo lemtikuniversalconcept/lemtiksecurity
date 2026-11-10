@@ -284,9 +284,11 @@ export const addIncidentEvidence = createServerFn({ method: "POST" })
     const current = Array.isArray(inc.evidence) ? inc.evidence : [];
     const name = await actorName(supabase, userId);
     const stamped = new Date().toISOString();
+    const { withIntakeHashes } = await import("./casefile.server");
+    const hashed = await withIntakeHashes(supabase, data.items);
     const merged = [
       ...current,
-      ...data.items.map((item) => ({
+      ...hashed.map((item) => ({
         ...item,
         added_at: stamped,
         added_by: userId,

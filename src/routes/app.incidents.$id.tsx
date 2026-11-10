@@ -25,6 +25,7 @@ import { requireSectionAccess } from "@/lib/rbac";
 import { Avatar, Confidence, Notice, Sev, elapsed, timeAgo, useNow } from "@/components/nw";
 import { IncidentProposals } from "@/components/AiProposals";
 import { LocationPicker } from "@/components/LocationPicker";
+import { CaseFileButton } from "@/components/CaseFileButton";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -119,6 +120,7 @@ function percentOrNull(value: unknown) {
 
 function IncidentDetailPage() {
   const { id } = Route.useParams();
+  const canCaseFile = Route.useRouteContext().appAccess?.specRole !== "field_officer";
   const { appAccess } = Route.useRouteContext();
   const qc = useQueryClient();
   const now = useNow(1000);
@@ -383,6 +385,8 @@ function IncidentDetailPage() {
         </Link>
         <span>/</span>
         <span className="mono">{inc.code}</span>
+        <span className="f1" />
+        {canCaseFile && <CaseFileButton kind="incident" id={id} />}
       </div>
 
       <div className="row g16 wrap" style={{ alignItems: "center" }}>
