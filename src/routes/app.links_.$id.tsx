@@ -64,6 +64,7 @@ function SharedPage() {
       </div>
       <PageHeader title={`Shared by ${v.link.owner_name}`} sub={`“${v.link.purpose}” · access until ${when(v.link.expires_at)}`} />
       <Notice tone="blue">{v.link.owner_name} can see that you opened this, and when. It's read-only.</Notice>
+      {has("isps") && <Notice tone="blue">ISPS records (security levels, drills, declarations, breaches) are under <Link to="/app/isps" className="b b-sm b-gh">ISPS Watch</Link>.</Notice>}
 
       <Panel title="Map">
         <SharedMap view={v} />

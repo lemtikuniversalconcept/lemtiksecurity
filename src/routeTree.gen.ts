@@ -25,6 +25,7 @@ import { Route as AppDevicesRouteImport } from './routes/app.devices'
 import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
 import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
 import { Route as AppInventoryRouteImport } from './routes/app.inventory'
+import { Route as AppIspsRouteImport } from './routes/app.isps'
 import { Route as AppLinksRouteImport } from './routes/app.links'
 import { Route as AppLocationsRouteImport } from './routes/app.locations'
 import { Route as AppMapRouteImport } from './routes/app.map'
@@ -42,6 +43,7 @@ import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
 import { Route as ConsumerHomeRouteImport } from './routes/consumer.home'
 import { Route as ConsumerReportRouteImport } from './routes/consumer.report'
 import { Route as ConsumerStatusRouteImport } from './routes/consumer.status'
+import { Route as DosTokenRouteImport } from './routes/dos.$token'
 import { Route as ForensicIndexRouteImport } from './routes/forensic.index'
 import { Route as ForensicCasesRouteImport } from './routes/forensic.cases'
 import { Route as ForensicQueriesRouteImport } from './routes/forensic.queries'
@@ -69,6 +71,7 @@ import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id
 import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
 import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
 import { Route as AppAdminOrganisationsIdRouteImport } from './routes/app.admin.organisations.$id'
+import { Route as AppIspsDosIdRouteImport } from './routes/app.isps_.dos.$id'
 import { Route as AppMovementSarIdRouteImport } from './routes/app.movement_.sar.$id'
 import { Route as AppMovementVoyagesIdRouteImport } from './routes/app.movement_.voyages.$id'
 import { Route as ForensicCasesIdAiRouteImport } from './routes/forensic.cases.$id.ai'
@@ -155,6 +158,11 @@ const AppInventoryRoute = AppInventoryRouteImport.update({
   path: '/inventory',
   getParentRoute: () => AppRoute,
 } as any)
+const AppIspsRoute = AppIspsRouteImport.update({
+  id: '/isps',
+  path: '/isps',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppLinksRoute = AppLinksRouteImport.update({
   id: '/links',
   path: '/links',
@@ -239,6 +247,11 @@ const ConsumerStatusRoute = ConsumerStatusRouteImport.update({
   id: '/status',
   path: '/status',
   getParentRoute: () => ConsumerRoute,
+} as any)
+const DosTokenRoute = DosTokenRouteImport.update({
+  id: '/dos/$token',
+  path: '/dos/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ForensicIndexRoute = ForensicIndexRouteImport.update({
   id: '/',
@@ -375,6 +388,11 @@ const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AppAdminOrganisationsRoute,
 } as any)
+const AppIspsDosIdRoute = AppIspsDosIdRouteImport.update({
+  id: '/isps_/dos/$id',
+  path: '/isps/dos/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMovementSarIdRoute = AppMovementSarIdRouteImport.update({
   id: '/movement_/sar/$id',
   path: '/movement/sar/$id',
@@ -417,6 +435,7 @@ export interface FileRoutesByFullPath {
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
+  '/app/isps': typeof AppIspsRoute
   '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
@@ -433,6 +452,7 @@ export interface FileRoutesByFullPath {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/dos/$token': typeof DosTokenRoute
   '/forensic/cases': typeof ForensicCasesRouteWithChildren
   '/forensic/queries': typeof ForensicQueriesRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
@@ -462,6 +482,7 @@ export interface FileRoutesByFullPath {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/isps/dos/$id': typeof AppIspsDosIdRoute
   '/app/movement/sar/$id': typeof AppMovementSarIdRoute
   '/app/movement/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
@@ -480,6 +501,7 @@ export interface FileRoutesByTo {
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
+  '/app/isps': typeof AppIspsRoute
   '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
@@ -496,6 +518,7 @@ export interface FileRoutesByTo {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/dos/$token': typeof DosTokenRoute
   '/forensic/cases': typeof ForensicCasesRouteWithChildren
   '/forensic/queries': typeof ForensicQueriesRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
@@ -525,6 +548,7 @@ export interface FileRoutesByTo {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/isps/dos/$id': typeof AppIspsDosIdRoute
   '/app/movement/sar/$id': typeof AppMovementSarIdRoute
   '/app/movement/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
@@ -548,6 +572,7 @@ export interface FileRoutesById {
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
+  '/app/isps': typeof AppIspsRoute
   '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
@@ -564,6 +589,7 @@ export interface FileRoutesById {
   '/consumer/home': typeof ConsumerHomeRoute
   '/consumer/report': typeof ConsumerReportRoute
   '/consumer/status': typeof ConsumerStatusRoute
+  '/dos/$token': typeof DosTokenRoute
   '/forensic/cases': typeof ForensicCasesRouteWithChildren
   '/forensic/queries': typeof ForensicQueriesRoute
   '/officer/dispatch': typeof OfficerDispatchRoute
@@ -593,6 +619,7 @@ export interface FileRoutesById {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/isps_/dos/$id': typeof AppIspsDosIdRoute
   '/app/movement_/sar/$id': typeof AppMovementSarIdRoute
   '/app/movement_/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
@@ -617,6 +644,7 @@ export interface FileRouteTypes {
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
+    | '/app/isps'
     | '/app/links'
     | '/app/locations'
     | '/app/map'
@@ -633,6 +661,7 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/dos/$token'
     | '/forensic/cases'
     | '/forensic/queries'
     | '/officer/dispatch'
@@ -662,6 +691,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/isps/dos/$id'
     | '/app/movement/sar/$id'
     | '/app/movement/voyages/$id'
     | '/forensic/cases/$id/ai'
@@ -680,6 +710,7 @@ export interface FileRouteTypes {
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
+    | '/app/isps'
     | '/app/links'
     | '/app/locations'
     | '/app/map'
@@ -696,6 +727,7 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/dos/$token'
     | '/forensic/cases'
     | '/forensic/queries'
     | '/officer/dispatch'
@@ -725,6 +757,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/isps/dos/$id'
     | '/app/movement/sar/$id'
     | '/app/movement/voyages/$id'
     | '/forensic/cases/$id/ai'
@@ -747,6 +780,7 @@ export interface FileRouteTypes {
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
+    | '/app/isps'
     | '/app/links'
     | '/app/locations'
     | '/app/map'
@@ -763,6 +797,7 @@ export interface FileRouteTypes {
     | '/consumer/home'
     | '/consumer/report'
     | '/consumer/status'
+    | '/dos/$token'
     | '/forensic/cases'
     | '/forensic/queries'
     | '/officer/dispatch'
@@ -792,6 +827,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/isps_/dos/$id'
     | '/app/movement_/sar/$id'
     | '/app/movement_/voyages/$id'
     | '/forensic/cases/$id/ai'
@@ -810,6 +846,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   BoardTokenRoute: typeof BoardTokenRoute
+  DosTokenRoute: typeof DosTokenRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
   VerifyIdRoute: typeof VerifyIdRoute
@@ -927,6 +964,13 @@ declare module '@tanstack/react-router' {
       path: '/inventory'
       fullPath: '/app/inventory'
       preLoaderRoute: typeof AppInventoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/isps': {
+      id: '/app/isps'
+      path: '/isps'
+      fullPath: '/app/isps'
+      preLoaderRoute: typeof AppIspsRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/links': {
@@ -1047,6 +1091,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/consumer/status'
       preLoaderRoute: typeof ConsumerStatusRouteImport
       parentRoute: typeof ConsumerRoute
+    }
+    '/dos/$token': {
+      id: '/dos/$token'
+      path: '/dos/$token'
+      fullPath: '/dos/$token'
+      preLoaderRoute: typeof DosTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/forensic/': {
       id: '/forensic/'
@@ -1237,6 +1288,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminOrganisationsIdRouteImport
       parentRoute: typeof AppAdminOrganisationsRoute
     }
+    '/app/isps_/dos/$id': {
+      id: '/app/isps_/dos/$id'
+      path: '/isps/dos/$id'
+      fullPath: '/app/isps/dos/$id'
+      preLoaderRoute: typeof AppIspsDosIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/movement_/sar/$id': {
       id: '/app/movement_/sar/$id'
       path: '/movement/sar/$id'
@@ -1331,6 +1389,7 @@ interface AppRouteChildren {
   AppIncidentsRoute: typeof AppIncidentsRouteWithChildren
   AppIntelligenceRoute: typeof AppIntelligenceRoute
   AppInventoryRoute: typeof AppInventoryRoute
+  AppIspsRoute: typeof AppIspsRoute
   AppLinksRoute: typeof AppLinksRoute
   AppLocationsRoute: typeof AppLocationsRoute
   AppMapRoute: typeof AppMapRoute
@@ -1348,6 +1407,7 @@ interface AppRouteChildren {
   AppAdminSystemRoute: typeof AppAdminSystemRoute
   AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
   AppLinksIdRoute: typeof AppLinksIdRoute
+  AppIspsDosIdRoute: typeof AppIspsDosIdRoute
   AppMovementSarIdRoute: typeof AppMovementSarIdRoute
   AppMovementVoyagesIdRoute: typeof AppMovementVoyagesIdRoute
 }
@@ -1359,6 +1419,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIncidentsRoute: AppIncidentsRouteWithChildren,
   AppIntelligenceRoute: AppIntelligenceRoute,
   AppInventoryRoute: AppInventoryRoute,
+  AppIspsRoute: AppIspsRoute,
   AppLinksRoute: AppLinksRoute,
   AppLocationsRoute: AppLocationsRoute,
   AppMapRoute: AppMapRoute,
@@ -1376,6 +1437,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminSystemRoute: AppAdminSystemRoute,
   AppCaseFilesIdRoute: AppCaseFilesIdRoute,
   AppLinksIdRoute: AppLinksIdRoute,
+  AppIspsDosIdRoute: AppIspsDosIdRoute,
   AppMovementSarIdRoute: AppMovementSarIdRoute,
   AppMovementVoyagesIdRoute: AppMovementVoyagesIdRoute,
 }
@@ -1488,6 +1550,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   BoardTokenRoute: BoardTokenRoute,
+  DosTokenRoute: DosTokenRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
   VerifyIdRoute: VerifyIdRoute,

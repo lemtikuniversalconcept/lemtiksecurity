@@ -25,7 +25,7 @@ const STATUS: Record<OrgLink["status"], [string, Tone]> = {
   expired: ["Expired", "off"],
 };
 const ACTION: Record<string, string> = { offered: "offered access", accepted: "accepted", declined: "declined", revoked: "ended the share", viewed: "opened the shared view", imported_corridor: "copied a corridor" };
-const SHORT: Record<Scope, string> = { vessels: "Boats", voyages: "Voyages", alerts: "Alerts", search_rescue: "Search and rescue", corridors: "Corridors", people: "People" };
+const SHORT: Record<Scope, string> = { vessels: "Boats", voyages: "Voyages", alerts: "Alerts", search_rescue: "Search and rescue", corridors: "Corridors", isps: "ISPS compliance", people: "People" };
 const TYPE: Record<string, string> = { authority: "Authority", responder: "Responder" };
 
 function LinksPage() {

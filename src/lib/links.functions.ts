@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveOrgId } from "@/lib/orgs.server";
 import { throwSafeError } from "@/lib/server-errors";
-import { recordBlackboxAudit } from "@/lib/audit.server";
+import { admin, logEvent, myName, roleIn } from "@/lib/links.server";
 
 // Shared access between organisations. The owner chooses what to share, with whom,
 // why and until when; the partner accepts; either side can end it; every step and
@@ -11,7 +11,7 @@ import { recordBlackboxAudit } from "@/lib/audit.server";
 // Shared data is read with the service role only after the link is checked, and
 // only the columns listed here leave the owner's organisation.
 
-export const SCOPES = ["vessels", "voyages", "alerts", "search_rescue", "corridors", "people"] as const;
+export const SCOPES = ["vessels", "voyages", "alerts", "search_rescue", "corridors", "isps", "people"] as const;
 export type Scope = (typeof SCOPES)[number];
 export const SCOPE_LABEL: Record<Scope, string> = {
   vessels: "Boats: name, licence number, live position, speed and status",
@@ -19,6 +19,7 @@ export const SCOPE_LABEL: Record<Scope, string> = {
   alerts: "Alerts from the last 48 hours (SOS, man overboard, off route…)",
   search_rescue: "Search and rescue plans: last known position and status",
   corridors: "Corridors: routes, curfews and wind limits (they can copy them)",
+  isps: "ISPS compliance: security levels, drills, Declarations of Security, breach register",
   people: "Tracked people: name, live position and status (no phone numbers)",
 };
 const PARTNER_TYPES = ["authority", "responder"];
@@ -26,25 +27,6 @@ const VIEW_ROLES = ["manager", "supervisor", "client_admin"];
 const MANAGE_ROLES = ["manager", "client_admin"];
 
 const sb = (c: { supabase: unknown }) => c.supabase as any;
-async function admin() {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin as any;
-}
-async function roleIn(db: any, userId: string, orgId: string): Promise<string | null> {
-  const { data } = await db.from("organisation_members").select("role").eq("user_id", userId).eq("organisation_id", orgId).maybeSingle();
-  return (data?.role as string | undefined) ?? null;
-}
-async function myName(db: any, userId: string) {
-  const { data } = await db.from("profiles").select("display_name").eq("user_id", userId).maybeSingle();
-  return (data?.display_name as string | undefined)?.trim() || "A manager";
-}
-async function logEvent(db: any, link: { id: string; owner_org_id: string; partner_org_id: string }, actor: { id: string; name: string; org: string }, action: string, detail: Record<string, unknown> = {}) {
-  await db.from("org_link_events").insert({ link_id: link.id, owner_org_id: link.owner_org_id, partner_org_id: link.partner_org_id, actor_id: actor.id, actor_name: actor.name, actor_org_id: actor.org, action, detail });
-  // Into both organisations' audit logs.
-  for (const orgId of [link.owner_org_id, link.partner_org_id]) {
-    await recordBlackboxAudit({ userId: actor.id, orgId, resourceType: "org_link", resourceId: link.id, actionType: action, actionDetail: { ...detail, by_org: actor.org } });
-  }
-}
 
 export type OrgLink = {
   id: string;

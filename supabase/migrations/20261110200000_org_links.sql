@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS public.org_links (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_org_id uuid NOT NULL REFERENCES public.organisations(id) ON DELETE CASCADE,
   partner_org_id uuid NOT NULL REFERENCES public.organisations(id) ON DELETE CASCADE,
-  scopes text[] NOT NULL CHECK (array_length(scopes, 1) >= 1 AND scopes <@ ARRAY['vessels', 'voyages', 'alerts', 'search_rescue', 'corridors', 'people']::text[]),
+  scopes text[] NOT NULL CHECK (array_length(scopes, 1) >= 1 AND scopes <@ ARRAY['vessels', 'voyages', 'alerts', 'search_rescue', 'corridors', 'isps', 'people']::text[]),
   purpose text NOT NULL CHECK (char_length(purpose) BETWEEN 3 AND 500),
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'declined', 'revoked')),
   expires_at timestamptz NOT NULL,
