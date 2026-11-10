@@ -48,10 +48,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { AppAccess, SpecRole } from "@/lib/rbac";
+import type { AppAccess, OrgKind, SpecRole } from "@/lib/rbac";
 import type { LucideIcon } from "lucide-react";
 
-type NavItem = { to: AppPath; label: string; icon: LucideIcon; exact?: boolean; allowed: SpecRole[]; count?: "incidents" | "alerts" };
+type NavItem = { to: AppPath; label: string; icon: LucideIcon; exact?: boolean; allowed: SpecRole[]; count?: "incidents" | "alerts"; kinds?: OrgKind[]; labelFor?: Partial<Record<OrgKind, string>> };
+// Which kinds of organisation see an item (none listed = everyone).
+const ON_LAND_AND_PORT: OrgKind[] = ["land", "port_facility"];
+const OPERATORS: OrgKind[] = ["land", "maritime_operator", "port_facility"];
+const MARITIME_ISPS: OrgKind[] = ["maritime_operator", "port_facility", "authority"];
 type NavGroup = { label: string; items: NavItem[] };
 
 const ALL: SpecRole[] = ["security_manager", "operator", "client_admin"];
@@ -65,11 +69,11 @@ const CLIENT_NAV: NavGroup[] = [
       { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true, allowed: ALL },
       { to: "/app/map", label: "Live map", icon: Map, allowed: ALL },
       { to: "/app/incidents", label: "Incidents", icon: Siren, allowed: ALL, count: "incidents" },
-      { to: "/app/patrols", label: "Patrols", icon: Route, allowed: ALL },
-      { to: "/app/movement", label: "Protected movement", icon: Navigation, allowed: ALL },
-      { to: "/app/cargo", label: "Cargo custody", icon: Package, allowed: ALL },
-      { to: "/app/isps", label: "ISPS Watch", icon: ShieldCheck, allowed: ALL },
-      { to: "/app/links", label: "Shared access", icon: Share2, allowed: ALL },
+      { to: "/app/patrols", label: "Patrols", icon: Route, allowed: ALL, kinds: ON_LAND_AND_PORT },
+      { to: "/app/movement", label: "Protected movement", icon: Navigation, allowed: ALL, kinds: OPERATORS, labelFor: { maritime_operator: "Fleet and voyages" } },
+      { to: "/app/cargo", label: "Cargo custody", icon: Package, allowed: ALL, kinds: OPERATORS },
+      { to: "/app/isps", label: "ISPS Watch", icon: ShieldCheck, allowed: ALL, kinds: MARITIME_ISPS, labelFor: { authority: "ISPS compliance" } },
+      { to: "/app/links", label: "Shared access", icon: Share2, allowed: ALL, labelFor: { authority: "Members and shared access", responder: "Shared with us" } },
       { to: "/app/alerts", label: "Alerts", icon: Bell, allowed: OPS, count: "alerts" },
     ],
   },
@@ -77,14 +81,14 @@ const CLIENT_NAV: NavGroup[] = [
     label: "Sense",
     items: [
       { to: "/app/intelligence", label: "Intelligence", icon: Radar, allowed: ALL },
-      { to: "/app/sensors", label: "Cameras & sensors", icon: Cctv, allowed: OPS },
-      { to: "/app/devices", label: "Devices", icon: Cpu, allowed: ["security_manager"] },
+      { to: "/app/sensors", label: "Cameras & sensors", icon: Cctv, allowed: OPS, kinds: OPERATORS },
+      { to: "/app/devices", label: "Devices", icon: Cpu, allowed: ["security_manager"], kinds: OPERATORS },
     ],
   },
   {
     label: "Resources",
     items: [
-      { to: "/app/inventory", label: "Inventory", icon: Boxes, allowed: ALL },
+      { to: "/app/inventory", label: "Inventory", icon: Boxes, allowed: ALL, kinds: ON_LAND_AND_PORT },
       { to: "/app/users", label: "Team", icon: Users, allowed: ADMINS },
     ],
   },
@@ -100,7 +104,7 @@ const CLIENT_NAV: NavGroup[] = [
     label: "Configure",
     items: [
       { to: "/app/org", label: "Organisation", icon: Building2, allowed: ADMINS },
-      { to: "/app/locations", label: "Locations", icon: MapPin, allowed: ADMINS },
+      { to: "/app/locations", label: "Locations", icon: MapPin, allowed: ADMINS, kinds: OPERATORS },
     ],
   },
 ];
@@ -233,9 +237,14 @@ export function AppShell({ access }: { access: AppAccess }) {
   const groups = useMemo(
     () =>
       (isAdmin ? ADMIN_NAV : CLIENT_NAV)
-        .map((g) => ({ ...g, items: g.items.filter((i) => i.allowed.includes(access.specRole)) }))
+        .map((g) => ({
+          ...g,
+          items: g.items
+            .filter((i) => i.allowed.includes(access.specRole) && (isAdmin || !i.kinds || i.kinds.includes(access.orgKind)))
+            .map((i) => ({ ...i, label: (!isAdmin && i.labelFor?.[access.orgKind]) || i.label })),
+        }))
         .filter((g) => g.items.length > 0),
-    [isAdmin, access.specRole],
+    [isAdmin, access.specRole, access.orgKind],
   );
   const paletteGroups: PaletteGroup[] = groups.map((g) => ({ label: g.label, items: g.items.map(({ to, label, icon }) => ({ to, label, icon })) }));
 

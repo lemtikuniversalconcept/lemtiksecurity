@@ -9,6 +9,9 @@
 -- does nothing.
 -- ============================================================
 
+-- Port facilities (terminals, jetties, tank farms) get their own workspace.
+ALTER TYPE public.org_type ADD VALUE IF NOT EXISTS 'port_facility';
+
 ALTER TYPE public.incident_type ADD VALUE IF NOT EXISTS 'man_overboard';
 ALTER TYPE public.incident_type ADD VALUE IF NOT EXISTS 'capsize';
 ALTER TYPE public.incident_type ADD VALUE IF NOT EXISTS 'collision';

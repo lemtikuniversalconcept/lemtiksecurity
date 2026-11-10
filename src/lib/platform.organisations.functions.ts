@@ -6,7 +6,7 @@ import { buildWelcomeEmail, sendResendEmail } from "@/lib/email.service";
 import { throwSafeError } from "@/lib/server-errors";
 import { getSiteUrl } from "@/lib/orgs.server";
 
-const orgType = z.enum(["estate", "corporate", "hotel", "government", "maritime_operator", "authority", "responder"]);
+const orgType = z.enum(["estate", "corporate", "hotel", "government", "maritime_operator", "port_facility", "authority", "responder"]);
 const subscriptionTier = z.enum(["basic", "professional", "enterprise", "government"]);
 const subscriptionStatus = z.enum(["trial", "active", "past_due", "suspended"]);
 

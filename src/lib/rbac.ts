@@ -20,7 +20,15 @@ const getRequestSupabase = createIsomorphicFn()
 export type DbRole = "manager" | "supervisor" | "officer" | "client_admin" | "lemtik_admin" | "security_forensic_analyst";
 export type SpecRole = "security_manager" | "operator" | "field_officer" | "client_admin" | "lemtik_admin" | "security_forensic_analyst";
 
+/** What kind of organisation this is decides the menu and the words used (see orgKind). */
+export type OrgKind = "land" | "maritime_operator" | "port_facility" | "authority" | "responder";
+export function orgKind(type: string | null | undefined): OrgKind {
+  return type === "maritime_operator" || type === "port_facility" || type === "authority" || type === "responder" ? type : "land";
+}
+
 export interface AppAccess {
+  orgType: string;
+  orgKind: OrgKind;
   userId: string;
   email: string | null;
   displayName: string | null;
@@ -58,7 +66,19 @@ export function toSpecRole(role: DbRole): SpecRole {
   }
 }
 
-export function roleLabel(role: DbRole | SpecRole): string {
+const MARITIME_LABELS: Partial<Record<OrgKind, Partial<Record<DbRole, string>>>> = {
+  maritime_operator: { manager: "Fleet Security Manager", supervisor: "Watch Officer", officer: "Master / Crew", client_admin: "Company Management" },
+  port_facility: { manager: "Port Facility Security Officer", supervisor: "Security Supervisor", officer: "Guard", client_admin: "Facility Management" },
+  authority: { manager: "Programme Lead", supervisor: "Duty Officer", officer: "Field Inspector", client_admin: "Authority Administrator" },
+  responder: { manager: "Commander", supervisor: "Duty Officer", officer: "Responder", client_admin: "Administrator" },
+};
+const TO_DB: Record<string, DbRole> = { security_manager: "manager", operator: "supervisor", field_officer: "officer" };
+
+/** The role's name. Labels only: permissions are the same whatever the organisation type. */
+export function roleLabel(role: DbRole | SpecRole, kind: OrgKind = "land"): string {
+  const db = (TO_DB[role] ?? role) as DbRole;
+  const special = MARITIME_LABELS[kind]?.[db];
+  if (special) return special;
   switch (role) {
     case "manager":
     case "security_manager":
@@ -125,6 +145,8 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
       displayName: profile?.display_name ?? null,
       orgId: "",
       orgName: "Lemtik Platform",
+      orgType: "",
+      orgKind: "land",
       dbRole: "lemtik_admin",
       specRole: "lemtik_admin",
       roleLabel: roleLabel("lemtik_admin"),
@@ -141,7 +163,7 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
 
   const { data: membership, error: membershipError } = await supabase
     .from("organisation_members")
-    .select("role, organisation:organisations(id, name)")
+    .select("role, organisation:organisations(id, name, type)")
     .eq("organisation_id", profile.active_organisation_id)
     .eq("user_id", data.user.id)
     .maybeSingle();
@@ -161,8 +183,10 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
     displayName: profile.display_name ?? null,
     orgId: profile.active_organisation_id,
     orgName: org?.name ?? "Active organisation",
+    orgType: String((org as { type?: string } | null)?.type ?? ""),
+    orgKind: orgKind((org as { type?: string } | null)?.type),
     dbRole,
     specRole: toSpecRole(dbRole),
-    roleLabel: roleLabel(dbRole),
+    roleLabel: roleLabel(dbRole, orgKind((org as { type?: string } | null)?.type)),
   };
 }

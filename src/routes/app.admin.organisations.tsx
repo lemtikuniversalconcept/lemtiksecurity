@@ -39,7 +39,8 @@ const TYPE_OPTIONS = [
   ["corporate", "Corporate"],
   ["hotel", "Hotel"],
   ["government", "Government"],
-  ["maritime_operator", "Maritime operator"],
+  ["maritime_operator", "Maritime operator (ferries, barges, crew boats)"],
+  ["port_facility", "Port facility (terminal, jetty, tank farm)"],
   ["authority", "Authority (regulator, police, navy)"],
   ["responder", "Responder (rescue, medical)"],
 ] as const;

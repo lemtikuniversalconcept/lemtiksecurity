@@ -1162,7 +1162,7 @@ export type Database = {
         | "stowaway"
         | "pollution_spill"
         | "drifting_vessel"
-      org_type: "estate" | "corporate" | "hotel" | "government" | "maritime_operator" | "authority" | "responder"
+      org_type: "estate" | "corporate" | "hotel" | "government" | "maritime_operator" | "port_facility" | "authority" | "responder"
       subscription_status:
         | "trial"
         | "active"
@@ -1329,7 +1329,7 @@ export const Constants = {
         "fraud_scam",
         "cyber_incident", "man_overboard", "capsize", "collision", "hijack", "sea_robbery", "boarding_attempt", "crude_theft", "cargo_theft", "seal_tamper", "stowaway", "pollution_spill", "drifting_vessel",
       ],
-      org_type: ["estate", "corporate", "hotel", "government", "maritime_operator", "authority", "responder"],
+      org_type: ["estate", "corporate", "hotel", "government", "maritime_operator", "port_facility", "authority", "responder"],
       subscription_status: [
         "trial",
         "active",

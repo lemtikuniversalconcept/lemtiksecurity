@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { listMembers, listLocations, updateMemberRole, removeMember } from "@/lib/orgs.functions";
 import { listInvites, createInvite, resendInvite, cancelInvite, bulkInvite, setUserActive } from "@/lib/users.functions";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireSectionAccess, roleLabel as rbacRoleLabel, normalizeRole, type OrgKind } from "@/lib/rbac";
 import { Plus, Loader2, X, Mail, Upload, RefreshCw, Copy, Search, ChevronRight } from "lucide-react";
 import { Avatar, Empty, Notice, PageHeader, Panel, Status, Tabs, Tag, timeAgo, type Tone } from "@/components/nw";
 
@@ -29,7 +29,8 @@ const ROLE_LABEL: Record<string, string> = {
   security_forensic_analyst: "Forensic analyst",
   lemtik_admin: "Lemtik admin",
 };
-const roleLabel = (r: string) => ROLE_LABEL[r] ?? r.replace(/_/g, " ");
+const roleLabel = (r: string, kind?: OrgKind) =>
+  kind && kind !== "land" && r !== "lemtik_admin" ? rbacRoleLabel(normalizeRole(r), kind) : ROLE_LABEL[r] ?? r.replace(/_/g, " ");
 const DUTY: Record<string, { tone: Tone; label: string }> = {
   "on-duty": { tone: "ok", label: "On duty" },
   break: { tone: "warn", label: "On break" },
@@ -141,7 +142,7 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
               <option value="all">Role: all</option>
               {ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {roleLabel(r)}
+                  {roleLabel(r, appAccess.orgKind)}
                 </option>
               ))}
             </select>
@@ -196,12 +197,12 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
                             <select className="in" style={{ width: "auto", height: 30 }} value={m.role} disabled={roleMut.isPending} aria-label={`Role for ${name}`} onChange={(e) => roleMut.mutate({ member_id: m.id, role: e.target.value as Role })}>
                               {Array.from(new Set([...editableRoles, m.role])).map((r) => (
                                 <option key={r} value={r}>
-                                  {roleLabel(r)}
+                                  {roleLabel(r, appAccess.orgKind)}
                                 </option>
                               ))}
                             </select>
                           ) : (
-                            roleLabel(m.role)
+                            roleLabel(m.role, appAccess.orgKind)
                           )}
                         </td>
                         <td>{isActive ? <Status tone={st.tone}>{st.label}</Status> : <Tag>Deactivated</Tag>}</td>
@@ -259,7 +260,7 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
                     return (
                       <tr key={inv.id}>
                         <td className="mono">{inv.email}</td>
-                        <td>{roleLabel(inv.role)}</td>
+                        <td>{roleLabel(inv.role, appAccess.orgKind)}</td>
                         <td>
                           <Status tone={tone}>{eff}</Status>
                         </td>
@@ -287,7 +288,7 @@ function UsersList({ appAccess }: { appAccess: ReturnType<typeof Route.useRouteC
         </Panel>
       )}
 
-      {inviteOpen && <InviteDialog locations={locations as any[]} onClose={() => setInviteOpen(false)} onDone={refresh} />}
+      {inviteOpen && <InviteDialog orgKind={appAccess.orgKind} locations={locations as any[]} onClose={() => setInviteOpen(false)} onDone={refresh} />}
 
       {removing && (
         <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}>
@@ -355,7 +356,7 @@ function CopyLine({ value }: { value: string }) {
   );
 }
 
-function InviteDialog({ locations, onClose, onDone }: { locations: any[]; onClose: () => void; onDone: () => void }) {
+function InviteDialog({ locations, onClose, onDone, orgKind }: { locations: any[]; onClose: () => void; onDone: () => void; orgKind?: import("@/lib/rbac").OrgKind }) {
   const cInv = useServerFn(createInvite);
   const bInv = useServerFn(bulkInvite);
   const [mode, setMode] = useState<"single" | "bulk">("single");
@@ -481,7 +482,7 @@ function InviteDialog({ locations, onClose, onDone }: { locations: any[]; onClos
               <select className="in" value={role} onChange={(e) => setRole(e.target.value as Role)}>
                 {ROLES.map((r) => (
                   <option key={r} value={r}>
-                    {roleLabel(r)}
+                    {roleLabel(r, orgKind)}
                   </option>
                 ))}
               </select>
