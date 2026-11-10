@@ -179,11 +179,17 @@ export const getVoyageReport = createServerFn({ method: "POST" })
         .order("recorded_at", { ascending: true })
         .limit(5000);
       const { metres } = await import("./movement.server");
-      const good = ((rows ?? []) as { lat: number; lng: number; accuracy_m: number | null; speed_mps: number | null }[]).filter((r) => r.accuracy_m == null || r.accuracy_m <= 100);
+      const good = ((rows ?? []) as { lat: number; lng: number; accuracy_m: number | null; speed_mps: number | null; recorded_at: string }[]).filter((r) => r.accuracy_m == null || r.accuracy_m <= 100);
       count = good.length;
+      // A jump faster than ~60 knots between two fixes is a GPS glitch, not travel; leave it out.
+      const MAX_MPS = 31;
       for (let i = 0; i < good.length; i++) {
-        if (i) distance += metres(good[i - 1].lat, good[i - 1].lng, good[i].lat, good[i].lng);
-        if (good[i].speed_mps != null) maxSpeed = Math.max(maxSpeed ?? 0, good[i].speed_mps!);
+        if (i) {
+          const d = metres(good[i - 1].lat, good[i - 1].lng, good[i].lat, good[i].lng);
+          const dt = (Date.parse(good[i].recorded_at) - Date.parse(good[i - 1].recorded_at)) / 1000;
+          if (dt > 0 && d / dt <= MAX_MPS) distance += d;
+        }
+        if (good[i].speed_mps != null && good[i].speed_mps! <= MAX_MPS) maxSpeed = Math.max(maxSpeed ?? 0, good[i].speed_mps!);
       }
       track = good.map((r) => [r.lng, r.lat]);
     }

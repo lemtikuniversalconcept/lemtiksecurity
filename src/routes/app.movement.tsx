@@ -43,11 +43,13 @@ type Tab = "live" | "subjects" | "voyages" | "zones" | "alerts";
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
 
-const STATE: Record<MovementSubject["state"], { tone: Tone; label: string; color: string }> = {
+type ShownState = MovementSubject["state"] | "waiting";
+const STATE: Record<ShownState, { tone: Tone; label: string; color: string }> = {
   sos: { tone: "fail", label: "SOS", color: "#F2384B" },
   silent: { tone: "warn", label: "Silent", color: "#F5A524" },
   moving: { tone: "ok", label: "Moving", color: "#2BD576" },
   stopped: { tone: "blue", label: "Stopped", color: "#7A9BFF" },
+  waiting: { tone: "neutral", label: "Waiting for position", color: "#8A93A6" },
   idle: { tone: "neutral", label: "Not tracking", color: "#8A93A6" },
 };
 const ZONE_COLOR: Record<MovementGeofence["kind"], string> = { safe: "#2BD576", restricted: "#F5A524", exclusion: "#F2384B" };
@@ -74,8 +76,9 @@ function KindIcon({ kind, size = 14 }: { kind: MovementSubject["kind"]; size?: n
   return <User size={size} strokeWidth={1.75} />;
 }
 
-function stateOf(s: MovementSubject): MovementSubject["state"] {
-  return s.tracking_enabled ? s.state : "idle";
+function stateOf(s: MovementSubject): ShownState {
+  if (!s.tracking_enabled) return "idle";
+  return s.state === "idle" ? "waiting" : s.state;
 }
 
 function circle(lat: number, lng: number, radius: number, steps = 64): LngLat[] {
@@ -264,7 +267,7 @@ function LiveView({ subjects, zones, alerts, voyages }: { subjects: MovementSubj
     if (s.last_lat != null && s.last_lng != null) mapRef.current?.flyTo({ center: [s.last_lng, s.last_lat], zoom: Math.max(mapRef.current.getZoom(), 15), duration: 700 });
   };
   const sel = subjects.find((s) => s.id === selected) ?? null;
-  const ordered = [...subjects].sort((a, b) => ["sos", "silent", "moving", "stopped", "idle"].indexOf(stateOf(a)) - ["sos", "silent", "moving", "stopped", "idle"].indexOf(stateOf(b)));
+  const ordered = [...subjects].sort((a, b) => ["sos", "silent", "moving", "stopped", "waiting", "idle"].indexOf(stateOf(a)) - ["sos", "silent", "moving", "stopped", "waiting", "idle"].indexOf(stateOf(b)));
 
   return (
     <div className="grid g16" style={{ gridTemplateColumns: "minmax(0,1fr) 340px" }}>
