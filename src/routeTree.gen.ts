@@ -67,6 +67,7 @@ import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id
 import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
 import { Route as OfficerIncidentNewRouteImport } from './routes/officer.incident.new'
 import { Route as AppAdminOrganisationsIdRouteImport } from './routes/app.admin.organisations.$id'
+import { Route as AppMovementSarIdRouteImport } from './routes/app.movement_.sar.$id'
 import { Route as AppMovementVoyagesIdRouteImport } from './routes/app.movement_.voyages.$id'
 import { Route as ForensicCasesIdAiRouteImport } from './routes/forensic.cases.$id.ai'
 import { Route as ForensicCasesIdEvidenceRouteImport } from './routes/forensic.cases.$id.evidence'
@@ -362,6 +363,11 @@ const AppAdminOrganisationsIdRoute = AppAdminOrganisationsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AppAdminOrganisationsRoute,
 } as any)
+const AppMovementSarIdRoute = AppMovementSarIdRouteImport.update({
+  id: '/movement_/sar/$id',
+  path: '/movement/sar/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppMovementVoyagesIdRoute = AppMovementVoyagesIdRouteImport.update({
   id: '/movement_/voyages/$id',
   path: '/movement/voyages/$id',
@@ -442,6 +448,7 @@ export interface FileRoutesByFullPath {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/movement/sar/$id': typeof AppMovementSarIdRoute
   '/app/movement/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
   '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
@@ -502,6 +509,7 @@ export interface FileRoutesByTo {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/movement/sar/$id': typeof AppMovementSarIdRoute
   '/app/movement/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
   '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
@@ -567,6 +575,7 @@ export interface FileRoutesById {
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
   '/officer/incident/new': typeof OfficerIncidentNewRoute
   '/app/admin/organisations/$id': typeof AppAdminOrganisationsIdRoute
+  '/app/movement_/sar/$id': typeof AppMovementSarIdRoute
   '/app/movement_/voyages/$id': typeof AppMovementVoyagesIdRoute
   '/forensic/cases/$id/ai': typeof ForensicCasesIdAiRoute
   '/forensic/cases/$id/evidence': typeof ForensicCasesIdEvidenceRoute
@@ -633,6 +642,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/movement/sar/$id'
     | '/app/movement/voyages/$id'
     | '/forensic/cases/$id/ai'
     | '/forensic/cases/$id/evidence'
@@ -693,6 +703,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/movement/sar/$id'
     | '/app/movement/voyages/$id'
     | '/forensic/cases/$id/ai'
     | '/forensic/cases/$id/evidence'
@@ -757,6 +768,7 @@ export interface FileRouteTypes {
     | '/officer/incident/$id'
     | '/officer/incident/new'
     | '/app/admin/organisations/$id'
+    | '/app/movement_/sar/$id'
     | '/app/movement_/voyages/$id'
     | '/forensic/cases/$id/ai'
     | '/forensic/cases/$id/evidence'
@@ -1187,6 +1199,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminOrganisationsIdRouteImport
       parentRoute: typeof AppAdminOrganisationsRoute
     }
+    '/app/movement_/sar/$id': {
+      id: '/app/movement_/sar/$id'
+      path: '/movement/sar/$id'
+      fullPath: '/app/movement/sar/$id'
+      preLoaderRoute: typeof AppMovementSarIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/movement_/voyages/$id': {
       id: '/app/movement_/voyages/$id'
       path: '/movement/voyages/$id'
@@ -1289,6 +1308,7 @@ interface AppRouteChildren {
   AppAdminOrganisationsRoute: typeof AppAdminOrganisationsRouteWithChildren
   AppAdminSystemRoute: typeof AppAdminSystemRoute
   AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
+  AppMovementSarIdRoute: typeof AppMovementSarIdRoute
   AppMovementVoyagesIdRoute: typeof AppMovementVoyagesIdRoute
 }
 
@@ -1314,6 +1334,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminOrganisationsRoute: AppAdminOrganisationsRouteWithChildren,
   AppAdminSystemRoute: AppAdminSystemRoute,
   AppCaseFilesIdRoute: AppCaseFilesIdRoute,
+  AppMovementSarIdRoute: AppMovementSarIdRoute,
   AppMovementVoyagesIdRoute: AppMovementVoyagesIdRoute,
 }
 

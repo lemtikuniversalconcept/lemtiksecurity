@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
@@ -32,6 +32,7 @@ import { getNearbyShips, listVoyages, type NearbyShip, type Voyage } from "@/lib
 import { VoyagesView } from "@/components/movement/Voyages";
 import { CorridorsView, HandoffPanel, RespondersView } from "@/components/movement/Corridors";
 import { listCorridors, listResponders } from "@/lib/corridor.functions";
+import { createSarCase, listSarCases, type SarCase } from "@/lib/sar.functions";
 import { MovementPermsContext, movementPerms, useMovementPerms } from "@/components/movement/perms";
 
 export const Route = createFileRoute("/app/movement")({
@@ -43,7 +44,7 @@ export const Route = createFileRoute("/app/movement")({
   component: Movement,
 });
 
-type Tab = "live" | "subjects" | "voyages" | "corridors" | "responders" | "zones" | "alerts";
+type Tab = "live" | "subjects" | "voyages" | "corridors" | "responders" | "sar" | "zones" | "alerts";
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
 
@@ -119,6 +120,10 @@ function Movement() {
   const respondersQ = useQuery({ queryKey: ["movement-responders"], queryFn: () => listRespondersFn() });
   const corridors = corridorsQ.data ?? [];
   const responders = respondersQ.data ?? [];
+  const listSarFn = useServerFn(listSarCases);
+  const sarQ = useQuery({ queryKey: ["sar-cases"], queryFn: () => listSarFn() });
+  const sarCases = sarQ.data ?? [];
+  const activeSar = sarCases.filter((c) => c.status === "active").length;
   const underway = voyages.filter((v) => v.status === "underway");
 
   const subjects = subjectsQ.data ?? [];
@@ -152,6 +157,7 @@ function Movement() {
           { value: "voyages", label: "Voyages", count: underway.length || undefined },
           { value: "corridors", label: "Corridors", count: corridors.length || undefined },
           { value: "responders", label: "Responders", count: responders.length || undefined },
+          { value: "sar", label: "Search & rescue", count: activeSar || undefined },
           { value: "zones", label: "Zones", count: zones.length },
           { value: "alerts", label: "Alerts", count: openAlerts.length || undefined },
         ]}
@@ -160,6 +166,7 @@ function Movement() {
       {tab === "voyages" && <VoyagesView voyages={voyages} subjects={subjects} corridors={corridors} />}
       {tab === "corridors" && <CorridorsView corridors={corridors} />}
       {tab === "responders" && <RespondersView responders={responders} />}
+      {tab === "sar" && <SarList cases={sarCases} />}
       {tab === "subjects" && <SubjectsView subjects={subjects} loading={subjectsQ.isLoading} />}
       {tab === "zones" && <ZonesView zones={zones} subjects={subjects} />}
       {tab === "alerts" && <AlertsView alerts={alerts} subjects={subjects} />}
@@ -396,7 +403,15 @@ function LiveView({ subjects, zones, alerts, voyages }: { subjects: MovementSubj
 
 function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?: MovementSubject; onFocus?: (s: MovementSubject) => void; compact?: boolean }) {
   const ack = useServerFn(acknowledgeMovementAlert);
+  const sarFn = useServerFn(createSarCase);
+  const navigate = useNavigate();
   const { canOperate } = useMovementPerms();
+  const sar = useMutation({
+    mutationFn: () => sarFn({ data: { alert_id: a.id } }),
+    onSuccess: (r) => navigate({ to: "/app/movement/sar/$id", params: { id: r.id } }),
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const sarable = canOperate && a.lat != null && ["man_overboard", "sos", "unexpected_stop", "silent", "overdue", "checkin_missed", "off_route"].includes(a.kind) && Date.now() - Date.parse(a.created_at) < 48 * 3_600_000;
   const qc = useQueryClient();
   const m = useMutation({
     mutationFn: () => ack({ data: { id: a.id } }),
@@ -414,6 +429,11 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
         <b className="trunc" style={{ fontSize: 13 }}>{a.message}</b>
         <span className="t3" style={{ fontSize: 11.5 }}>{new Date(a.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
       </button>
+      {sarable && (
+        <button type="button" className="b b-sm b-gh" style={{ color: "var(--s5)" }} onClick={() => sar.mutate()} disabled={sar.isPending} title="Estimate where they've drifted and plan the search">
+          {sar.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Search plan
+        </button>
+      )}
       {a.acknowledged_at ? (
         <span className="tg tg-ok"><Check size={12} /> Seen</span>
       ) : !canOperate ? (
@@ -872,5 +892,29 @@ function ZonesView({ zones, subjects }: { zones: MovementGeofence[]; subjects: M
         </Panel>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- Search and rescue
+
+function SarList({ cases }: { cases: SarCase[] }) {
+  return (
+    <Panel title="Search and rescue plans" meta={cases.length}>
+      {cases.length === 0 ? (
+        <Empty>When someone goes overboard or a boat goes missing, press "Search plan" on its alert. Lemtik estimates where they have drifted from the wind and current, draws the search area as it grows, lays out a search pattern and prints a package for the rescue centre.</Empty>
+      ) : (
+        <div className="col g4">
+          {cases.map((c) => (
+            <Link key={c.id} to="/app/movement/sar/$id" params={{ id: c.id }} className="row g10 w-full hover:bg-ink-3" style={{ padding: "9px 8px", borderRadius: 8 }}>
+              <span className="col f1" style={{ minWidth: 0 }}>
+                <b className="trunc">{c.title}</b>
+                <span className="t3 trunc" style={{ fontSize: 12 }}>Last known {new Date(c.lkp_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · started by {c.created_by_name ?? "—"}</span>
+              </span>
+              <Status tone={c.status === "active" ? "fail" : c.status === "found" ? "ok" : "off"}>{c.status === "active" ? "Active" : c.status === "found" ? "Found" : "Stood down"}</Status>
+            </Link>
+          ))}
+        </div>
+      )}
+    </Panel>
   );
 }

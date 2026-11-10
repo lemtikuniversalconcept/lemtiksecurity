@@ -28,7 +28,7 @@ export async function weatherAt(lat: number, lng: number): Promise<Weather | nul
   try {
     const res = await fetch(`https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}`, {
       headers: { "User-Agent": process.env.MET_NO_USER_AGENT?.trim() || "LemtikSOD/1.0" },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(12000),
     });
     if (res.ok) {
       const j: any = await res.json();
