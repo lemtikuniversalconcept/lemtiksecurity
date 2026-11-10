@@ -281,6 +281,20 @@ export async function sweepOrg(orgId: string) {
     if (!subj) continue;
     await checkOverdue(subj, v, subj.last_lat != null ? { lat: subj.last_lat, lng: subj.last_lng } : null);
   }
+
+  // Curfew: an underway voyage on a corridor that's now under curfew.
+  const { data: curfewV } = await db().from("movement_voyages").select("id, name, subject_id, corridor_id").eq("organisation_id", orgId).eq("status", "underway").eq("curfew_alerted", false).not("corridor_id", "is", null);
+  if (curfewV?.length) {
+    const { inCurfew } = await import("./corridor.server");
+    for (const v of curfewV as { id: string; name: string; subject_id: string; corridor_id: string }[]) {
+      const { data: c } = await db().from("movement_corridors").select("name, curfew_start, curfew_end").eq("id", v.corridor_id).maybeSingle();
+      if (!c || !inCurfew(c.curfew_start, c.curfew_end)) continue;
+      const { data: flipped } = await db().from("movement_voyages").update({ curfew_alerted: true }).eq("id", v.id).eq("curfew_alerted", false).select("id");
+      if (!flipped?.length) continue;
+      const { data: subj } = await db().from("movement_subjects").select("id, organisation_id, name, last_lat, last_lng").eq("id", v.subject_id).maybeSingle();
+      if (subj) await alert(subj, "curfew", 4, `${subj.name} is still on "${v.name}" during the ${c.name} curfew (${String(c.curfew_start).slice(0, 5)}–${String(c.curfew_end).slice(0, 5)})`, subj.last_lat != null ? { lat: subj.last_lat, lng: subj.last_lng } : null, { voyageId: v.id });
+    }
+  }
 }
 
 /** Kept for callers of the old name. */

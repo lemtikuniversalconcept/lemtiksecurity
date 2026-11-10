@@ -4,13 +4,15 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import { toast } from "sonner";
-import { FileText, Loader2, Play, Plus, Save, Square, Undo2, Users, X } from "lucide-react";
+import { FileText, LifeBuoy, Loader2, Plus, Save, Square, Undo2, Users, X } from "lucide-react";
 import { basemapOptions, useBasemap } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
 import { Empty, Notice, Panel, Status, type Tone } from "@/components/nw";
 import type { MovementSubject } from "@/lib/movement.functions";
 import { useMovementPerms } from "./perms";
-import { cancelVoyage, finishVoyage, saveVoyage, startVoyage, type CrewMember, type Voyage } from "@/lib/voyages.functions";
+import { cancelVoyage, finishVoyage, saveVoyage, type CrewMember, type Voyage } from "@/lib/voyages.functions";
+import type { Corridor } from "@/lib/corridor.functions";
+import { BoardingPanel, HandoffPanel } from "./Corridors";
 
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
@@ -65,9 +67,10 @@ type Form = {
   planned_arrival: string;
   crewText: string;
   notes: string;
+  corridor_id: string;
 };
 
-export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects: MovementSubject[] }) {
+export function VoyagesView({ voyages, subjects, corridors = [] }: { voyages: Voyage[]; subjects: MovementSubject[]; corridors?: Corridor[] }) {
   const [form, setForm] = useState<Form | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const open = voyages.find((v) => v.id === openId) ?? null;
@@ -77,7 +80,7 @@ export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects
   const order = ["underway", "planned", "completed", "cancelled"];
   const sorted = [...voyages].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
 
-  const newForm = (): Form => ({ subject_id: movers[0]?.id ?? "", name: "", route: [], corridor_m: 2000, planned_departure: "", planned_arrival: "", crewText: "", notes: "" });
+  const newForm = (): Form => ({ subject_id: movers[0]?.id ?? "", name: "", route: [], corridor_m: 2000, planned_departure: "", planned_arrival: "", crewText: "", notes: "", corridor_id: "" });
 
   return (
     <div className="grid g16" style={{ gridTemplateColumns: form || open ? "minmax(0,1fr) 480px" : "minmax(0,1fr)" }}>
@@ -116,11 +119,12 @@ export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects
           </div>
         )}
       </Panel>
-      {form && <VoyageEditor form={form} setForm={setForm} movers={movers} onSaved={(id) => { setForm(null); setOpenId(id); }} />}
+      {form && <VoyageEditor form={form} setForm={setForm} movers={movers} corridors={corridors.filter((c) => c.active || c.id === form.corridor_id)} onSaved={(id) => { setForm(null); setOpenId(id); }} />}
       {open && !form && (
         <VoyageDetail
           v={open}
           subjectName={name(open.subject_id)}
+          corridorName={corridors.find((c) => c.id === open.corridor_id)?.name ?? null}
           onClose={() => setOpenId(null)}
           onEdit={() =>
             setForm({
@@ -133,6 +137,7 @@ export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects
               planned_arrival: toLocalInput(open.planned_arrival),
               crewText: crewToText(open.crew),
               notes: open.notes ?? "",
+              corridor_id: open.corridor_id ?? "",
             })
           }
         />
@@ -141,7 +146,7 @@ export function VoyagesView({ voyages, subjects }: { voyages: Voyage[]; subjects
   );
 }
 
-function VoyageEditor({ form, setForm, movers, onSaved }: { form: Form; setForm: (f: Form | null) => void; movers: MovementSubject[]; onSaved: (id: string) => void }) {
+function VoyageEditor({ form, setForm, movers, corridors, onSaved }: { form: Form; setForm: (f: Form | null) => void; movers: MovementSubject[]; corridors: Corridor[]; onSaved: (id: string) => void }) {
   const save = useServerFn(saveVoyage);
   const qc = useQueryClient();
   const crew = textToCrew(form.crewText);
@@ -158,6 +163,7 @@ function VoyageEditor({ form, setForm, movers, onSaved }: { form: Form; setForm:
           planned_arrival: fromLocalInput(form.planned_arrival),
           crew,
           notes: form.notes || null,
+          corridor_id: form.corridor_id || null,
         },
       }),
     onSuccess: (r) => {
@@ -181,6 +187,22 @@ function VoyageEditor({ form, setForm, movers, onSaved }: { form: Form; setForm:
           </select>
         </label>
 
+        {corridors.length > 0 && (
+          <label className="fl">
+            <span>Approved corridor</span>
+            <select
+              className="in"
+              value={form.corridor_id}
+              onChange={(e) => {
+                const c = corridors.find((x) => x.id === e.target.value);
+                setForm(c ? { ...form, corridor_id: c.id, route: c.route, corridor_m: c.corridor_m } : { ...form, corridor_id: "" });
+              }}
+            >
+              <option value="">None (draw a route below)</option>
+              {corridors.map((c) => <option key={c.id} value={c.id}>{c.name}{c.curfew_start ? ` · curfew ${c.curfew_start}–${c.curfew_end}` : ""}</option>)}
+            </select>
+          </label>
+        )}
         <div className="col g6">
           <span className="o-lbl">PLANNED ROUTE</span>
           <span className="t3" style={{ fontSize: 12 }}>Click the map to add waypoints in order, from departure to destination.</span>
@@ -216,10 +238,10 @@ function VoyageEditor({ form, setForm, movers, onSaved }: { form: Form; setForm:
   );
 }
 
-function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectName: string; onClose: () => void; onEdit: () => void }) {
+function VoyageDetail({ v, subjectName, corridorName, onClose, onEdit }: { v: Voyage; subjectName: string; corridorName: string | null; onClose: () => void; onEdit: () => void }) {
   const qc = useQueryClient();
   const { canOperate } = useMovementPerms();
-  const startFn = useServerFn(startVoyage);
+  const [handoff, setHandoff] = useState(false);
   const finishFn = useServerFn(finishVoyage);
   const cancelFn = useServerFn(cancelVoyage);
   const [count, setCount] = useState<string>(String(v.status === "underway" ? v.departure_count ?? "" : v.crew.length || ""));
@@ -232,11 +254,6 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
   const n = count.trim() === "" ? NaN : Number(count);
   const countOk = Number.isInteger(n) && n >= 0 && n <= 5000;
 
-  const start = useMutation({
-    mutationFn: () => startFn({ data: { id: v.id, departure_count: n } }),
-    onSuccess: () => { toast.success("Voyage started"); refresh(); },
-    onError: (e) => toast.error((e as Error).message),
-  });
   const finish = useMutation({
     mutationFn: () => finishFn({ data: { id: v.id, arrival_count: n } }),
     onSuccess: (r) => { r.mismatch ? toast.error("Head count doesn't match departure. The control room has been alerted.") : toast.success("Voyage completed"); refresh(); },
@@ -267,6 +284,7 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
         </div>
         <section className="col g4" style={{ fontSize: 13 }}>
           <span><span className="t3">Boat or vehicle:</span> {subjectName}</span>
+          {corridorName && <span><span className="t3">Corridor:</span> {corridorName}</span>}
           <span><span className="t3">Route:</span> {v.route.length >= 2 ? `${v.route.length} waypoints · ${km(len)} (${nm(len)}) · corridor ${km(v.corridor_m)}` : "none set"}</span>
           <span><span className="t3">Planned:</span> {when(v.planned_departure)} → {when(v.planned_arrival)}</span>
           {v.departed_at && <span><span className="t3">Actual:</span> {when(v.departed_at)} → {v.arrived_at ? when(v.arrived_at) : "underway"}</span>}
@@ -287,27 +305,37 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
           </section>
         )}
 
-        {canOperate && (v.status === "planned" || v.status === "underway") && (
-          <section className="col g8">
-            <span className="o-lbl">{v.status === "planned" ? "DEPARTURE HEAD COUNT" : "ARRIVAL HEAD COUNT"}</span>
-            <span className="t3" style={{ fontSize: 12.5 }}>
-              {v.status === "planned" ? "Count everyone aboard as the boat leaves." : `Count everyone aboard on arrival. If it doesn't match the ${v.departure_count} who departed, the control room gets a critical alert.`}
-            </span>
-            <div className="row g8">
-              <input className="in" style={{ width: 110 }} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, "").slice(0, 4))} aria-label="Head count" placeholder="Count" />
-              {v.status === "planned" ? (
-                <button type="button" className="b b-pri" disabled={!countOk || start.isPending} onClick={() => start.mutate()}>
-                  {start.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Start voyage
-                </button>
-              ) : (
-                <button type="button" className="b b-pri" disabled={!countOk || finish.isPending} onClick={() => finish.mutate()}>
-                  {finish.isPending ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />} Finish voyage
-                </button>
-              )}
-            </div>
-            {v.status === "planned" && v.crew.length > 0 && countOk && n !== v.crew.length && <Notice tone="warn">The crew list has {v.crew.length}; you counted {n}.</Notice>}
+        {v.boarding && (
+          <section className="col g4" style={{ fontSize: 12.5 }}>
+            <span className="o-lbl">BOARDING CHECK</span>
+            <span>Checked {when(v.boarding.checked_at)} by {v.boarding.checked_by}: {v.boarding.departure_count} aboard{v.boarding.capacity != null ? ` (licensed for ${v.boarding.capacity})` : ""}{v.boarding.life_jackets != null ? `, ${v.boarding.life_jackets} life jackets` : ""}{v.boarding.qr_passengers ? `, ${v.boarding.qr_passengers} on the passenger list` : ""}.</span>
+            {v.boarding.weather && <span className="t3">{v.boarding.weather}</span>}
+            {v.boarding.override_reason && <Notice tone="warn">Departed despite: {v.boarding.problems.map((p) => p.text).join("; ")}. Reason given: {v.boarding.override_reason}</Notice>}
           </section>
         )}
+
+        {canOperate && v.status === "planned" && <BoardingPanel v={v} onStarted={refresh} />}
+
+        {canOperate && v.status === "underway" && (
+          <section className="col g8">
+            <span className="o-lbl">ARRIVAL HEAD COUNT</span>
+            <span className="t3" style={{ fontSize: 12.5 }}>Count everyone aboard on arrival. If it doesn't match the {v.departure_count} who departed, the control room gets a critical alert.</span>
+            <div className="row g8">
+              <input className="in" style={{ width: 110 }} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, "").slice(0, 4))} aria-label="Head count" placeholder="Count" />
+              <button type="button" className="b b-pri" disabled={!countOk || finish.isPending} onClick={() => finish.mutate()}>
+                {finish.isPending ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} />} Finish voyage
+              </button>
+            </div>
+          </section>
+        )}
+
+        {canOperate && v.status === "underway" && (handoff ? (
+          <HandoffPanel subjectId={v.subject_id} onClose={() => setHandoff(false)} />
+        ) : (
+          <button type="button" className="b b-sm b-sec" style={{ alignSelf: "flex-start", color: "var(--s5)" }} onClick={() => setHandoff(true)}>
+            <LifeBuoy size={13} /> Emergency: hand off to a responder
+          </button>
+        ))}
 
         <div className="row g8 wrap">
           <Link to="/app/movement/voyages/$id" params={{ id: v.id }} className="b b-sm b-sec">
@@ -330,7 +358,7 @@ function VoyageDetail({ v, subjectName, onClose, onEdit }: { v: Voyage; subjectN
 }
 
 /** Click-to-add waypoints on a map. */
-function RouteDrawer({ route, corridor, onChange }: { route: LngLat[]; corridor: number; onChange: (r: LngLat[]) => void }) {
+export function RouteDrawer({ route, corridor, onChange }: { route: LngLat[]; corridor: number; onChange: (r: LngLat[]) => void }) {
   const { data: tokenData } = useMapboxToken();
   const token = tokenData?.token ?? "";
   const [basemap] = useBasemap();

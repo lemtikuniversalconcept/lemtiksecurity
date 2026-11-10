@@ -34,6 +34,7 @@ import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
 import { Route as AppSensorsRouteImport } from './routes/app.sensors'
 import { Route as AppUsersRouteImport } from './routes/app.users'
+import { Route as BoardTokenRouteImport } from './routes/board.$token'
 import { Route as ConsumerIndexRouteImport } from './routes/consumer.index'
 import { Route as ConsumerActivateRouteImport } from './routes/consumer.activate'
 import { Route as ConsumerAiRouteImport } from './routes/consumer.ai'
@@ -195,6 +196,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
   id: '/users',
   path: '/users',
   getParentRoute: () => AppRoute,
+} as any)
+const BoardTokenRoute = BoardTokenRouteImport.update({
+  id: '/board/$token',
+  path: '/board/$token',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ConsumerIndexRoute = ConsumerIndexRouteImport.update({
   id: '/',
@@ -402,6 +408,7 @@ export interface FileRoutesByFullPath {
   '/app/reports': typeof AppReportsRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
+  '/board/$token': typeof BoardTokenRoute
   '/consumer/activate': typeof ConsumerActivateRoute
   '/consumer/ai': typeof ConsumerAiRoute
   '/consumer/home': typeof ConsumerHomeRoute
@@ -461,6 +468,7 @@ export interface FileRoutesByTo {
   '/app/reports': typeof AppReportsRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
+  '/board/$token': typeof BoardTokenRoute
   '/consumer/activate': typeof ConsumerActivateRoute
   '/consumer/ai': typeof ConsumerAiRoute
   '/consumer/home': typeof ConsumerHomeRoute
@@ -525,6 +533,7 @@ export interface FileRoutesById {
   '/app/reports': typeof AppReportsRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
+  '/board/$token': typeof BoardTokenRoute
   '/consumer/activate': typeof ConsumerActivateRoute
   '/consumer/ai': typeof ConsumerAiRoute
   '/consumer/home': typeof ConsumerHomeRoute
@@ -590,6 +599,7 @@ export interface FileRouteTypes {
     | '/app/reports'
     | '/app/sensors'
     | '/app/users'
+    | '/board/$token'
     | '/consumer/activate'
     | '/consumer/ai'
     | '/consumer/home'
@@ -649,6 +659,7 @@ export interface FileRouteTypes {
     | '/app/reports'
     | '/app/sensors'
     | '/app/users'
+    | '/board/$token'
     | '/consumer/activate'
     | '/consumer/ai'
     | '/consumer/home'
@@ -712,6 +723,7 @@ export interface FileRouteTypes {
     | '/app/reports'
     | '/app/sensors'
     | '/app/users'
+    | '/board/$token'
     | '/consumer/activate'
     | '/consumer/ai'
     | '/consumer/home'
@@ -761,6 +773,7 @@ export interface RootRouteChildren {
   OfficerRoute: typeof OfficerRouteWithChildren
   OnboardingRoute: typeof OnboardingRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  BoardTokenRoute: typeof BoardTokenRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
   VerifyIdRoute: typeof VerifyIdRoute
@@ -942,6 +955,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/users'
       preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/board/$token': {
+      id: '/board/$token'
+      path: '/board/$token'
+      fullPath: '/board/$token'
+      preLoaderRoute: typeof BoardTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/consumer/': {
       id: '/consumer/'
@@ -1404,6 +1424,7 @@ const rootRouteChildren: RootRouteChildren = {
   OfficerRoute: OfficerRouteWithChildren,
   OnboardingRoute: OnboardingRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  BoardTokenRoute: BoardTokenRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
   VerifyIdRoute: VerifyIdRoute,

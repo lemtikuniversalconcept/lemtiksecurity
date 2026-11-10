@@ -30,6 +30,8 @@ import {
 } from "@/lib/movement.functions";
 import { getNearbyShips, listVoyages, type NearbyShip, type Voyage } from "@/lib/voyages.functions";
 import { VoyagesView } from "@/components/movement/Voyages";
+import { CorridorsView, HandoffPanel, RespondersView } from "@/components/movement/Corridors";
+import { listCorridors, listResponders } from "@/lib/corridor.functions";
 import { MovementPermsContext, movementPerms, useMovementPerms } from "@/components/movement/perms";
 
 export const Route = createFileRoute("/app/movement")({
@@ -41,7 +43,7 @@ export const Route = createFileRoute("/app/movement")({
   component: Movement,
 });
 
-type Tab = "live" | "subjects" | "voyages" | "zones" | "alerts";
+type Tab = "live" | "subjects" | "voyages" | "corridors" | "responders" | "zones" | "alerts";
 type LngLat = [number, number];
 const LAGOS: LngLat = [3.4219, 6.4281];
 
@@ -111,6 +113,12 @@ function Movement() {
   const voyagesQ = useQuery({ queryKey: ["movement-voyages"], queryFn: () => listVoyagesFn(), refetchInterval: 60_000 });
   useRealtimeInvalidate("movement_voyages", [["movement-voyages"]]);
   const voyages = voyagesQ.data ?? [];
+  const listCorridorsFn = useServerFn(listCorridors);
+  const listRespondersFn = useServerFn(listResponders);
+  const corridorsQ = useQuery({ queryKey: ["movement-corridors"], queryFn: () => listCorridorsFn() });
+  const respondersQ = useQuery({ queryKey: ["movement-responders"], queryFn: () => listRespondersFn() });
+  const corridors = corridorsQ.data ?? [];
+  const responders = respondersQ.data ?? [];
   const underway = voyages.filter((v) => v.status === "underway");
 
   const subjects = subjectsQ.data ?? [];
@@ -142,12 +150,16 @@ function Movement() {
           { value: "live", label: "Live" },
           { value: "subjects", label: "People & assets", count: subjects.length },
           { value: "voyages", label: "Voyages", count: underway.length || undefined },
+          { value: "corridors", label: "Corridors", count: corridors.length || undefined },
+          { value: "responders", label: "Responders", count: responders.length || undefined },
           { value: "zones", label: "Zones", count: zones.length },
           { value: "alerts", label: "Alerts", count: openAlerts.length || undefined },
         ]}
       />
       {tab === "live" && <LiveView subjects={subjects} zones={zones} alerts={openAlerts} voyages={underway} />}
-      {tab === "voyages" && <VoyagesView voyages={voyages} subjects={subjects} />}
+      {tab === "voyages" && <VoyagesView voyages={voyages} subjects={subjects} corridors={corridors} />}
+      {tab === "corridors" && <CorridorsView corridors={corridors} />}
+      {tab === "responders" && <RespondersView responders={responders} />}
       {tab === "subjects" && <SubjectsView subjects={subjects} loading={subjectsQ.isLoading} />}
       {tab === "zones" && <ZonesView zones={zones} subjects={subjects} />}
       {tab === "alerts" && <AlertsView alerts={alerts} subjects={subjects} />}
@@ -443,8 +455,10 @@ type SubjectForm = {
   silent_after_minutes: number;
   checkin_every_minutes: number | null;
   stop_alert_minutes: number | null;
+  passenger_capacity: string;
+  life_jackets: string;
 };
-const NEW_SUBJECT: SubjectForm = { kind: "person", category: "student", name: "", reference: "", mmsi: "", phone: "", emergency_contact: "", notes: "", device_kind: "phone", device_id: "", silent_after_minutes: 15, checkin_every_minutes: null, stop_alert_minutes: null };
+const NEW_SUBJECT: SubjectForm = { kind: "person", category: "student", name: "", reference: "", mmsi: "", phone: "", emergency_contact: "", notes: "", device_kind: "phone", device_id: "", silent_after_minutes: 15, checkin_every_minutes: null, stop_alert_minutes: null, passenger_capacity: "", life_jackets: "" };
 const mins = (m: number) => (m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}`);
 
 function SubjectsView({ subjects, loading }: { subjects: MovementSubject[]; loading: boolean }) {
@@ -489,7 +503,7 @@ function SubjectsView({ subjects, loading }: { subjects: MovementSubject[]; load
         )}
       </Panel>
       {form && <SubjectEditor form={form} setForm={setForm} onSaved={(id) => { setForm(null); setOpenId(id); }} />}
-      {open && !form && <SubjectDetail s={open} onEdit={() => setForm({ id: open.id, kind: open.kind, category: open.category, name: open.name, reference: open.reference ?? "", mmsi: open.mmsi ?? "", phone: open.phone ?? "", emergency_contact: open.emergency_contact ?? "", notes: open.notes ?? "", device_kind: open.device_kind, device_id: open.device_id ?? "", silent_after_minutes: open.silent_after_minutes, checkin_every_minutes: open.checkin_every_minutes, stop_alert_minutes: open.stop_alert_minutes })} onClose={() => setOpenId(null)} />}
+      {open && !form && <SubjectDetail s={open} onEdit={() => setForm({ id: open.id, kind: open.kind, category: open.category, name: open.name, reference: open.reference ?? "", mmsi: open.mmsi ?? "", phone: open.phone ?? "", emergency_contact: open.emergency_contact ?? "", notes: open.notes ?? "", device_kind: open.device_kind, device_id: open.device_id ?? "", silent_after_minutes: open.silent_after_minutes, checkin_every_minutes: open.checkin_every_minutes, stop_alert_minutes: open.stop_alert_minutes, passenger_capacity: open.passenger_capacity != null ? String(open.passenger_capacity) : "", life_jackets: open.life_jackets != null ? String(open.life_jackets) : "" })} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
@@ -516,6 +530,8 @@ function SubjectEditor({ form, setForm, onSaved }: { form: SubjectForm; setForm:
           silent_after_minutes: form.silent_after_minutes,
           checkin_every_minutes: form.checkin_every_minutes,
           stop_alert_minutes: form.stop_alert_minutes,
+          passenger_capacity: form.passenger_capacity ? Number(form.passenger_capacity) : null,
+          life_jackets: form.life_jackets ? Number(form.life_jackets) : null,
         },
       }),
     onSuccess: (r) => {
@@ -549,6 +565,12 @@ function SubjectEditor({ form, setForm, onSaved }: { form: SubjectForm; setForm:
           <label className="fl"><span>MMSI (optional, 9 digits)</span><input className="in" inputMode="numeric" value={form.mmsi} onChange={(e) => set("mmsi", e.target.value.replace(/\D/g, "").slice(0, 9))} /></label>
         )}
         {mmsiBad && <Notice tone="warn">An MMSI is exactly 9 digits.</Notice>}
+        {form.kind !== "person" && (
+          <div className="grid g10" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <label className="fl"><span>Licensed to carry (people)</span><input className="in" inputMode="numeric" value={form.passenger_capacity} onChange={(e) => set("passenger_capacity", e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="e.g. 16" /></label>
+            {form.kind === "vessel" && <label className="fl"><span>Life jackets on board</span><input className="in" inputMode="numeric" value={form.life_jackets} onChange={(e) => set("life_jackets", e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="e.g. 18" /></label>}
+          </div>
+        )}
         <div className="grid g10" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <label className="fl"><span>Phone</span><input className="in" value={form.phone} onChange={(e) => set("phone", e.target.value)} maxLength={40} /></label>
           <label className="fl"><span>Emergency contact</span><input className="in" value={form.emergency_contact} onChange={(e) => set("emergency_contact", e.target.value)} maxLength={200} placeholder="Parent, next of kin, ops desk" /></label>
@@ -607,7 +629,8 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
   const [note, setNote] = useState("");
   const [qr, setQr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { canManage } = useMovementPerms();
+  const [handoff, setHandoff] = useState(false);
+  const { canManage, canOperate } = useMovementPerms();
   const refresh = () => qc.invalidateQueries({ queryKey: ["movement-subjects"] });
   const origin = typeof window === "undefined" ? "https://app.lemtik.com.ng" : window.location.origin;
   const link = `${origin}/track/${s.tracker_token}`;
@@ -666,6 +689,12 @@ function SubjectDetail({ s, onEdit, onClose }: { s: MovementSubject; onEdit: () 
           </div>
           </>}
         </section>
+
+        {canOperate && s.kind !== "person" && s.tracking_enabled && (handoff ? (
+          <HandoffPanel subjectId={s.id} onClose={() => setHandoff(false)} />
+        ) : (
+          <button type="button" className="b b-sm b-sec" style={{ alignSelf: "flex-start", color: "var(--s5)" }} onClick={() => setHandoff(true)}>Emergency: hand off to a responder</button>
+        ))}
 
         <section className="row g10">
           <span className="col f1">

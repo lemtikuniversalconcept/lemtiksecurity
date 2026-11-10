@@ -51,6 +51,9 @@ const ALERT_LABEL: Record<string, string> = {
   voyage_started: "Departed",
   voyage_completed: "Arrived",
   headcount_mismatch: "Head count mismatch",
+  curfew: "Curfew",
+  boarding_override: "Boarding override",
+  handoff: "Handed off",
 };
 
 function VoyageReportPage() {

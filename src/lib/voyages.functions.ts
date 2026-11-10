@@ -27,10 +27,22 @@ export type Voyage = {
   off_route: boolean;
   overdue_alerted: boolean;
   notes: string | null;
+  corridor_id: string | null;
+  boarding: {
+    checked_at: string;
+    checked_by: string;
+    departure_count: number;
+    life_jackets: number | null;
+    capacity: number | null;
+    qr_passengers: number;
+    weather: string | null;
+    problems: { code: string; text: string }[];
+    override_reason: string | null;
+  } | null;
   created_at: string;
 };
 
-const COLS = "id, subject_id, name, status, route, corridor_m, planned_departure, planned_arrival, departed_at, arrived_at, crew, departure_count, arrival_count, off_route, overdue_alerted, notes, created_at";
+const COLS = "id, subject_id, name, status, route, corridor_m, planned_departure, planned_arrival, departed_at, arrived_at, crew, departure_count, arrival_count, off_route, overdue_alerted, notes, corridor_id, boarding, created_at";
 const sb = (ctx: { supabase: unknown }) => ctx.supabase as any;
 
 export const listVoyages = createServerFn({ method: "GET" })
@@ -64,6 +76,7 @@ export const saveVoyage = createServerFn({ method: "POST" })
       planned_arrival: z.string().datetime({ offset: true }).nullable(),
       crew: z.array(z.object({ name: z.string().trim().min(1).max(120), role: z.string().trim().max(60) })).max(500),
       notes: z.string().trim().max(2000).nullable(),
+      corridor_id: z.string().uuid().nullable().optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -90,22 +103,68 @@ async function voyageAndSubject(context: any, orgId: string, id: string) {
 
 export const startVoyage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), departure_count: z.number().int().min(0).max(5000) }).parse(d))
+  .inputValidator((d: unknown) =>
+    z.object({
+      id: z.string().uuid(),
+      departure_count: z.number().int().min(0).max(5000),
+      life_jackets: z.number().int().min(0).max(5000).nullable().optional(),
+      override_reason: z.string().trim().max(500).nullable().optional(),
+    }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const { v, s } = await voyageAndSubject(context, orgId, data.id);
     if (v.status !== "planned") throwSafeError("voyages.start", new Error("not planned"), "Only a planned voyage can be started.");
+
+    // Jetty boarding check: capacity, life jackets, curfew and weather.
+    const { boardingProblems, weatherAt, DEFAULT_MAX_WIND_KN } = await import("./corridor.server");
+    const [{ data: boat }, { data: corridor }, { count: qr }, { data: me }] = await Promise.all([
+      sb(context).from("movement_subjects").select("kind, passenger_capacity, life_jackets").eq("id", v.subject_id).maybeSingle(),
+      v.corridor_id ? sb(context).from("movement_corridors").select("name, curfew_start, curfew_end, max_wind_kn").eq("id", v.corridor_id).maybeSingle() : Promise.resolve({ data: null }),
+      sb(context).from("voyage_passengers").select("id", { count: "exact", head: true }).eq("voyage_id", v.id),
+      sb(context).from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle(),
+    ]);
+    const point = v.route[0] ?? (s?.last_lng != null ? ([s.last_lng, s.last_lat] as [number, number]) : null);
+    const weather = point ? await weatherAt(point[1], point[0]) : null;
+    const lifeJackets = data.life_jackets ?? null;
+    const problems = boardingProblems({
+      count: data.departure_count,
+      lifeJackets,
+      capacity: boat?.passenger_capacity ?? null,
+      isVessel: boat?.kind === "vessel",
+      curfew: corridor?.curfew_start ? { start: corridor.curfew_start, end: corridor.curfew_end, corridor: corridor.name } : null,
+      weather,
+      maxWindKn: corridor?.max_wind_kn ?? DEFAULT_MAX_WIND_KN,
+    });
+    const reason = data.override_reason?.trim() || null;
+    if (problems.length && (!reason || reason.length < 10)) {
+      throwSafeError("voyages.start", new Error("boarding check failed"), `Not cleared to depart: ${problems.map((p) => p.text).join("; ")}. To depart anyway, give a reason (at least 10 characters); the control room is alerted.`);
+    }
+    const who = (me?.display_name as string | undefined)?.trim() || "Operator";
+    const boarding = {
+      checked_at: new Date().toISOString(),
+      checked_by: who,
+      departure_count: data.departure_count,
+      life_jackets: lifeJackets,
+      capacity: boat?.passenger_capacity ?? null,
+      qr_passengers: qr ?? 0,
+      weather: weather?.summary ?? null,
+      problems,
+      override_reason: problems.length ? reason : null,
+    };
     const { error } = await sb(context)
       .from("movement_voyages")
-      .update({ status: "underway", departed_at: new Date().toISOString(), departure_count: data.departure_count, off_route: false, overdue_alerted: false })
+      .update({ status: "underway", departed_at: new Date().toISOString(), departure_count: data.departure_count, off_route: false, overdue_alerted: false, curfew_alerted: false, boarding })
       .eq("id", v.id);
     if (error) throwSafeError("voyages.start", error, error.code === "23505" ? `${s?.name ?? "This boat"} is already on another voyage. Finish that one first.` : "Unable to start the voyage.");
     if (s) {
       const { raiseAlert } = await import("./movement.server");
       const crewNote = v.crew.length && v.crew.length !== data.departure_count ? ` (crew list has ${v.crew.length})` : "";
-      await raiseAlert(s, "voyage_started", 1, `${s.name} departed on "${v.name}" with ${data.departure_count} aboard${crewNote}`, s.last_lat != null ? { lat: s.last_lat, lng: s.last_lng! } : null, v.id);
+      const at = s.last_lat != null ? { lat: s.last_lat, lng: s.last_lng! } : null;
+      await raiseAlert(s, "voyage_started", 1, `${s.name} departed on "${v.name}" with ${data.departure_count} aboard${crewNote}`, at, v.id);
+      if (problems.length) await raiseAlert(s, "boarding_override", 4, `${who} cleared "${v.name}" to depart despite: ${problems.map((p) => p.text).join("; ")}. Reason: ${reason}`, at, v.id);
     }
-    await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_voyage", resourceId: v.id, actionType: "start", actionDetail: { departure_count: data.departure_count } });
+    await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_voyage", resourceId: v.id, actionType: "start", actionDetail: { departure_count: data.departure_count, problems: problems.map((p) => p.code), override: !!boarding.override_reason } });
     return { ok: true };
   });
 

@@ -39,6 +39,8 @@ export type MovementSubject = {
   checkin_overdue: boolean;
   stop_alert_minutes: number | null;
   stopped_since: string | null;
+  passenger_capacity: number | null;
+  life_jackets: number | null;
   created_at: string;
 };
 
@@ -100,6 +102,8 @@ const subjectInput = z.object({
   silent_after_minutes: z.number().int().min(1).max(1440),
   checkin_every_minutes: z.number().int().min(5).max(1440).nullable().optional(),
   stop_alert_minutes: z.number().int().min(5).max(720).nullable().optional(),
+  passenger_capacity: z.number().int().min(1).max(5000).nullable().optional(),
+  life_jackets: z.number().int().min(0).max(5000).nullable().optional(),
 });
 
 export const saveMovementSubject = createServerFn({ method: "POST" })
@@ -121,12 +125,14 @@ export const saveMovementSubject = createServerFn({ method: "POST" })
       silent_after_minutes: data.silent_after_minutes,
       checkin_every_minutes: data.checkin_every_minutes ?? null,
       stop_alert_minutes: data.stop_alert_minutes ?? null,
+      passenger_capacity: data.kind === "person" ? null : data.passenger_capacity ?? null,
+      life_jackets: data.kind === "vessel" ? data.life_jackets ?? null : null,
     };
     const q = data.id
       ? sb(context).from("movement_subjects").update(row).eq("id", data.id).eq("organisation_id", orgId).select("id").single()
       : sb(context).from("movement_subjects").insert({ ...row, organisation_id: orgId, created_by: context.userId }).select("id").single();
     const { data: saved, error } = await q;
-    if (error) throwSafeError("movement.save", error, error.code === "23505" ? "Another tracker already uses that device ID." : "Unable to save. Only managers and client admins can add people or assets.");
+    if (error) throwSafeError("movement.save", error, error.code === "23505" ? "Another tracker already uses that device ID." : "Unable to save. Only security managers can add or change people and assets.");
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_subject", resourceId: saved.id, actionType: data.id ? "update" : "create", actionDetail: { name: data.name, kind: data.kind } });
     return { id: saved.id as string };
   });
