@@ -54,7 +54,7 @@ async function handle(request: Request) {
   return Response.json({ ok: errors.length === 0, orgs: orgs.length, ms: duration });
 }
 
-export const Route = createFileRoute("/api/cron/sweep")({
+export const Route = createFileRoute("/cron/sweep")({
   server: {
     handlers: {
       POST: ({ request }) => handle(request),

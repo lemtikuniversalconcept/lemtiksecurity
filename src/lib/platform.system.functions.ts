@@ -171,7 +171,7 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
     const brokerConfigured = emqxConfigured;
     const redisStatus = statusFromConfigured(redisConfigured);
 
-    // Scheduled alert checks (Supabase Cron → /api/cron/sweep), last hour.
+    // Scheduled alert checks (Supabase Cron → /cron/sweep), last hour.
     const { data: runs } = await (supabaseAdmin as any)
       .from("system_job_runs")
       .select("started_at, duration_ms, orgs_checked, ok, error")

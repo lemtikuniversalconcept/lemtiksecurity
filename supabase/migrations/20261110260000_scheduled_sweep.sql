@@ -2,7 +2,7 @@
 -- F1: run the alert checks every minute, whether or not anyone is logged in.
 -- F5: maritime incident types.
 --
--- Supabase Cron (pg_cron) calls the app's /api/cron/sweep endpoint every minute
+-- Supabase Cron (pg_cron) calls the app's /cron/sweep endpoint every minute
 -- through pg_net. The endpoint only runs when the request carries the shared
 -- secret, which is kept in Supabase Vault (name: lemtik_cron_secret) and in the
 -- app's CRON_SECRET environment variable. Until the secret is stored, the job
@@ -52,7 +52,7 @@ SELECT cron.schedule(
   '* * * * *',
   $job$
     SELECT net.http_post(
-      url := 'https://app.lemtik.com.ng/api/cron/sweep',
+      url := 'https://app.lemtik.com.ng/cron/sweep',
       headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', s.decrypted_secret),
       body := '{}'::jsonb,
       timeout_milliseconds := 55000
