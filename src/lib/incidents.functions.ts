@@ -16,6 +16,7 @@ const incidentInput = z.object({
     "intrusion", "theft", "robbery", "armed_attack", "kidnapping",
     "medical", "fire", "suspicious", "civil_unrest", "vandalism",
     "fraud_scam", "cyber_incident", "other",
+    "man_overboard", "capsize", "collision", "hijack", "sea_robbery", "boarding_attempt", "crude_theft", "cargo_theft", "seal_tamper", "stowaway", "pollution_spill", "drifting_vessel",
   ]),
   severity: z.number().int().min(1).max(5),
   title: z.string().max(100).optional(),

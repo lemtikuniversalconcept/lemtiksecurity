@@ -3,7 +3,8 @@ export type IncidentStatus = "reported" | "acknowledged" | "responding" | "conta
 export type IncidentType =
   | "intrusion" | "theft" | "robbery" | "armed_attack" | "kidnapping"
   | "medical" | "fire" | "suspicious" | "civil_unrest" | "vandalism"
-  | "fraud_scam" | "cyber_incident" | "other";
+  | "fraud_scam" | "cyber_incident" | "other"
+  | "man_overboard" | "capsize" | "collision" | "hijack" | "sea_robbery" | "boarding_attempt" | "crude_theft" | "cargo_theft" | "seal_tamper" | "stowaway" | "pollution_spill" | "drifting_vessel";
 
 export const severityMeta: Record<Severity, { label: string; sublabel: string; token: string; }> = {
   5: { label: "Critical", sublabel: "Life at risk / major threat", token: "critical" },
@@ -37,4 +38,16 @@ export const typeMeta: Record<IncidentType, string> = {
   fraud_scam: "Fraud / Scam",
   cyber_incident: "Cyber Incident",
   other: "Other",
+  man_overboard: "Man Overboard",
+  capsize: "Capsize",
+  collision: "Collision",
+  hijack: "Hijack",
+  sea_robbery: "Sea Robbery",
+  boarding_attempt: "Boarding Attempt",
+  crude_theft: "Crude Oil Theft",
+  cargo_theft: "Cargo Theft",
+  seal_tamper: "Seal Tampering",
+  stowaway: "Stowaway",
+  pollution_spill: "Pollution / Spill",
+  drifting_vessel: "Drifting Vessel",
 };

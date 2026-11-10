@@ -118,6 +118,7 @@ function SystemHealthPage() {
         </Panel>
 
         <div className="col g16">
+          <ScheduledChecks c={data?.scheduledChecks ?? null} />
           <Panel title="Database" meta={db?.checkedAt ? `checked ${new Date(db.checkedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : undefined}>
             {db ? (
               <div className="col g10">
@@ -219,5 +220,26 @@ function SystemHealthPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function ScheduledChecks({ c }: { c: { lastRunAt: string | null; lastDurationMs: number | null; lastOrgs: number | null; lastOk: boolean | null; runsLastHour: number; failuresLastHour: number; lastError: string | null; cronSecretSet: boolean } | null }) {
+  if (!c) return null;
+  const ageMin = c.lastRunAt ? (Date.now() - Date.parse(c.lastRunAt)) / 60_000 : null;
+  const healthy = ageMin != null && ageMin < 3 && c.lastOk;
+  return (
+    <Panel title="Scheduled alert checks" meta="every minute">
+      <dl className="kv">
+        <dt>State</dt>
+        <dd style={{ color: healthy ? "var(--ok)" : "var(--fail)" }}>
+          {!c.cronSecretSet ? "CRON_SECRET not set in the app" : ageMin == null ? "No run in the last hour" : ageMin >= 3 ? `Last run ${Math.round(ageMin)} min ago` : c.lastOk ? "Running" : "Last run had errors"}
+        </dd>
+        <dt>Last run</dt>
+        <dd className="mono">{c.lastRunAt ? `${new Date(c.lastRunAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · ${c.lastDurationMs} ms · ${c.lastOrgs} orgs` : "—"}</dd>
+        <dt>Last hour</dt>
+        <dd className="mono">{c.runsLastHour} runs · {c.failuresLastHour} with errors</dd>
+        {c.lastError && (<><dt>Last error</dt><dd style={{ fontSize: 12, wordBreak: "break-word" }}>{c.lastError}</dd></>)}
+      </dl>
+    </Panel>
   );
 }

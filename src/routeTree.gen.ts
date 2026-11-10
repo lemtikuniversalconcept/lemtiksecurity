@@ -60,6 +60,7 @@ import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as TrackTokenRouteImport } from './routes/track.$token'
 import { Route as TrackerOsmandRouteImport } from './routes/tracker.osmand'
 import { Route as VerifyIdRouteImport } from './routes/verify.$id'
+import { Route as ApiCronSweepRouteImport } from './routes/api.cron.sweep'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminBillingRouteImport } from './routes/app.admin.billing'
 import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.organisations'
@@ -336,6 +337,11 @@ const VerifyIdRoute = VerifyIdRouteImport.update({
   path: '/verify/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronSweepRoute = ApiCronSweepRouteImport.update({
+  id: '/api/cron/sweep',
+  path: '/api/cron/sweep',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/admin/audit',
   path: '/admin/audit',
@@ -489,6 +495,7 @@ export interface FileRoutesByFullPath {
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
+  '/api/cron/sweep': typeof ApiCronSweepRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -558,6 +565,7 @@ export interface FileRoutesByTo {
   '/consumer': typeof ConsumerIndexRoute
   '/forensic': typeof ForensicIndexRoute
   '/officer': typeof OfficerIndexRoute
+  '/api/cron/sweep': typeof ApiCronSweepRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -632,6 +640,7 @@ export interface FileRoutesById {
   '/consumer/': typeof ConsumerIndexRoute
   '/forensic/': typeof ForensicIndexRoute
   '/officer/': typeof OfficerIndexRoute
+  '/api/cron/sweep': typeof ApiCronSweepRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/billing': typeof AppAdminBillingRoute
   '/app/admin/organisations': typeof AppAdminOrganisationsRouteWithChildren
@@ -707,6 +716,7 @@ export interface FileRouteTypes {
     | '/consumer/'
     | '/forensic/'
     | '/officer/'
+    | '/api/cron/sweep'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -776,6 +786,7 @@ export interface FileRouteTypes {
     | '/consumer'
     | '/forensic'
     | '/officer'
+    | '/api/cron/sweep'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -849,6 +860,7 @@ export interface FileRouteTypes {
     | '/consumer/'
     | '/forensic/'
     | '/officer/'
+    | '/api/cron/sweep'
     | '/app/admin/audit'
     | '/app/admin/billing'
     | '/app/admin/organisations'
@@ -887,6 +899,7 @@ export interface RootRouteChildren {
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
   VerifyIdRoute: typeof VerifyIdRoute
+  ApiCronSweepRoute: typeof ApiCronSweepRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1246,6 +1259,13 @@ declare module '@tanstack/react-router' {
       path: '/verify/$id'
       fullPath: '/verify/$id'
       preLoaderRoute: typeof VerifyIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cron/sweep': {
+      id: '/api/cron/sweep'
+      path: '/api/cron/sweep'
+      fullPath: '/api/cron/sweep'
+      preLoaderRoute: typeof ApiCronSweepRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/admin/audit': {
@@ -1617,6 +1637,7 @@ const rootRouteChildren: RootRouteChildren = {
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
   VerifyIdRoute: VerifyIdRoute,
+  ApiCronSweepRoute: ApiCronSweepRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

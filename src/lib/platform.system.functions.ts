@@ -171,7 +171,29 @@ export const getPlatformSystemHealth = createServerFn({ method: "GET" })
     const brokerConfigured = emqxConfigured;
     const redisStatus = statusFromConfigured(redisConfigured);
 
+    // Scheduled alert checks (Supabase Cron → /api/cron/sweep), last hour.
+    const { data: runs } = await (supabaseAdmin as any)
+      .from("system_job_runs")
+      .select("started_at, duration_ms, orgs_checked, ok, error")
+      .eq("job", "sweep")
+      .gte("started_at", new Date(Date.now() - 3_600_000).toISOString())
+      .order("started_at", { ascending: false })
+      .limit(120);
+    const last = (runs ?? [])[0] ?? null;
+    const lastFailure = (runs ?? []).find((r: any) => !r.ok) ?? null;
+    const scheduledChecks = {
+      lastRunAt: (last?.started_at as string | undefined) ?? null,
+      lastDurationMs: (last?.duration_ms as number | undefined) ?? null,
+      lastOrgs: (last?.orgs_checked as number | undefined) ?? null,
+      lastOk: (last?.ok as boolean | undefined) ?? null,
+      runsLastHour: (runs ?? []).length,
+      failuresLastHour: (runs ?? []).filter((r: any) => !r.ok).length,
+      lastError: (lastFailure?.error as string | undefined) ?? null,
+      cronSecretSet: !!process.env.CRON_SECRET && process.env.CRON_SECRET.trim().length >= 24,
+    };
+
     return {
+      scheduledChecks,
       services,
       database: {
         status: dbHealth?.status ?? "offline",
