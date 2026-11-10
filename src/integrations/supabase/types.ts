@@ -1150,7 +1150,7 @@ export type Database = {
         | "vandalism"
         | "fraud_scam"
         | "cyber_incident"
-      org_type: "estate" | "corporate" | "hotel" | "government"
+      org_type: "estate" | "corporate" | "hotel" | "government" | "maritime_operator" | "authority" | "responder"
       subscription_status:
         | "trial"
         | "active"
@@ -1317,7 +1317,7 @@ export const Constants = {
         "fraud_scam",
         "cyber_incident",
       ],
-      org_type: ["estate", "corporate", "hotel", "government"],
+      org_type: ["estate", "corporate", "hotel", "government", "maritime_operator", "authority", "responder"],
       subscription_status: [
         "trial",
         "active",

@@ -25,6 +25,7 @@ import { Route as AppDevicesRouteImport } from './routes/app.devices'
 import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
 import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
 import { Route as AppInventoryRouteImport } from './routes/app.inventory'
+import { Route as AppLinksRouteImport } from './routes/app.links'
 import { Route as AppLocationsRouteImport } from './routes/app.locations'
 import { Route as AppMapRouteImport } from './routes/app.map'
 import { Route as AppMovementRouteImport } from './routes/app.movement'
@@ -61,6 +62,7 @@ import { Route as AppAdminOrganisationsRouteImport } from './routes/app.admin.or
 import { Route as AppAdminSystemRouteImport } from './routes/app.admin.system'
 import { Route as AppCaseFilesIdRouteImport } from './routes/app.case-files.$id'
 import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
+import { Route as AppLinksIdRouteImport } from './routes/app.links_.$id'
 import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
 import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
 import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id'
@@ -151,6 +153,11 @@ const AppIntelligenceRoute = AppIntelligenceRouteImport.update({
 const AppInventoryRoute = AppInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLinksRoute = AppLinksRouteImport.update({
+  id: '/links',
+  path: '/links',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLocationsRoute = AppLocationsRouteImport.update({
@@ -333,6 +340,11 @@ const AppIncidentsIdRoute = AppIncidentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AppIncidentsRoute,
 } as any)
+const AppLinksIdRoute = AppLinksIdRouteImport.update({
+  id: '/links_/$id',
+  path: '/links/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPatrolsIdRoute = AppPatrolsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -405,6 +417,7 @@ export interface FileRoutesByFullPath {
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
+  '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
   '/app/movement': typeof AppMovementRoute
@@ -442,6 +455,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/system': typeof AppAdminSystemRoute
   '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
+  '/app/links/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
@@ -466,6 +480,7 @@ export interface FileRoutesByTo {
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
+  '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
   '/app/movement': typeof AppMovementRoute
@@ -503,6 +518,7 @@ export interface FileRoutesByTo {
   '/app/admin/system': typeof AppAdminSystemRoute
   '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
+  '/app/links/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
@@ -532,6 +548,7 @@ export interface FileRoutesById {
   '/app/incidents': typeof AppIncidentsRouteWithChildren
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
+  '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
   '/app/movement': typeof AppMovementRoute
@@ -569,6 +586,7 @@ export interface FileRoutesById {
   '/app/admin/system': typeof AppAdminSystemRoute
   '/app/case-files/$id': typeof AppCaseFilesIdRoute
   '/app/incidents/$id': typeof AppIncidentsIdRoute
+  '/app/links_/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
@@ -599,6 +617,7 @@ export interface FileRouteTypes {
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
+    | '/app/links'
     | '/app/locations'
     | '/app/map'
     | '/app/movement'
@@ -636,6 +655,7 @@ export interface FileRouteTypes {
     | '/app/admin/system'
     | '/app/case-files/$id'
     | '/app/incidents/$id'
+    | '/app/links/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
@@ -660,6 +680,7 @@ export interface FileRouteTypes {
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
+    | '/app/links'
     | '/app/locations'
     | '/app/map'
     | '/app/movement'
@@ -697,6 +718,7 @@ export interface FileRouteTypes {
     | '/app/admin/system'
     | '/app/case-files/$id'
     | '/app/incidents/$id'
+    | '/app/links/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
@@ -725,6 +747,7 @@ export interface FileRouteTypes {
     | '/app/incidents'
     | '/app/intelligence'
     | '/app/inventory'
+    | '/app/links'
     | '/app/locations'
     | '/app/map'
     | '/app/movement'
@@ -762,6 +785,7 @@ export interface FileRouteTypes {
     | '/app/admin/system'
     | '/app/case-files/$id'
     | '/app/incidents/$id'
+    | '/app/links_/$id'
     | '/app/patrols/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
@@ -903,6 +927,13 @@ declare module '@tanstack/react-router' {
       path: '/inventory'
       fullPath: '/app/inventory'
       preLoaderRoute: typeof AppInventoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/links': {
+      id: '/app/links'
+      path: '/links'
+      fullPath: '/app/links'
+      preLoaderRoute: typeof AppLinksRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/locations': {
@@ -1157,6 +1188,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIncidentsIdRouteImport
       parentRoute: typeof AppIncidentsRoute
     }
+    '/app/links_/$id': {
+      id: '/app/links_/$id'
+      path: '/links/$id'
+      fullPath: '/app/links/$id'
+      preLoaderRoute: typeof AppLinksIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/patrols/$id': {
       id: '/app/patrols/$id'
       path: '/$id'
@@ -1293,6 +1331,7 @@ interface AppRouteChildren {
   AppIncidentsRoute: typeof AppIncidentsRouteWithChildren
   AppIntelligenceRoute: typeof AppIntelligenceRoute
   AppInventoryRoute: typeof AppInventoryRoute
+  AppLinksRoute: typeof AppLinksRoute
   AppLocationsRoute: typeof AppLocationsRoute
   AppMapRoute: typeof AppMapRoute
   AppMovementRoute: typeof AppMovementRoute
@@ -1308,6 +1347,7 @@ interface AppRouteChildren {
   AppAdminOrganisationsRoute: typeof AppAdminOrganisationsRouteWithChildren
   AppAdminSystemRoute: typeof AppAdminSystemRoute
   AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
+  AppLinksIdRoute: typeof AppLinksIdRoute
   AppMovementSarIdRoute: typeof AppMovementSarIdRoute
   AppMovementVoyagesIdRoute: typeof AppMovementVoyagesIdRoute
 }
@@ -1319,6 +1359,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIncidentsRoute: AppIncidentsRouteWithChildren,
   AppIntelligenceRoute: AppIntelligenceRoute,
   AppInventoryRoute: AppInventoryRoute,
+  AppLinksRoute: AppLinksRoute,
   AppLocationsRoute: AppLocationsRoute,
   AppMapRoute: AppMapRoute,
   AppMovementRoute: AppMovementRoute,
@@ -1334,6 +1375,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminOrganisationsRoute: AppAdminOrganisationsRouteWithChildren,
   AppAdminSystemRoute: AppAdminSystemRoute,
   AppCaseFilesIdRoute: AppCaseFilesIdRoute,
+  AppLinksIdRoute: AppLinksIdRoute,
   AppMovementSarIdRoute: AppMovementSarIdRoute,
   AppMovementVoyagesIdRoute: AppMovementVoyagesIdRoute,
 }

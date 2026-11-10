@@ -39,6 +39,9 @@ const TYPE_OPTIONS = [
   ["corporate", "Corporate"],
   ["hotel", "Hotel"],
   ["government", "Government"],
+  ["maritime_operator", "Maritime operator"],
+  ["authority", "Authority (regulator, police, navy)"],
+  ["responder", "Responder (rescue, medical)"],
 ] as const;
 
 const STATUS_OPTIONS = [
