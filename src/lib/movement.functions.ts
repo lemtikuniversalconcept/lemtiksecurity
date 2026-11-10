@@ -355,6 +355,12 @@ export const reportTrackerFix = createServerFn({ method: "POST" })
       battery: z.number().int().min(0).max(100).nullable().optional(),
       sos: z.boolean().optional(),
       event: z.enum(["position", "sos", "man_overboard", "checkin"]).optional(),
+      // Set when the phone queued the fix while offline and is sending it later.
+      recorded_at: z
+        .string()
+        .datetime({ offset: true })
+        .refine((v) => Date.now() - Date.parse(v) <= 24 * 3_600_000, "Queued positions older than 24 hours are dropped.")
+        .optional(),
     }).parse(d),
   )
   .handler(async ({ data }) => {

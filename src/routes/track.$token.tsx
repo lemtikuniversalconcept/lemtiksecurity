@@ -18,6 +18,34 @@ export const Route = createFileRoute("/track/$token")({
 type Info = Awaited<ReturnType<typeof getTrackerInfo>>;
 const SEND_EVERY_MS = 15_000;
 const HOLD_MS = 2000;
+const MAX_QUEUE = 3000; // about 12 hours at one fix every 15 s
+type Event = "position" | "sos" | "man_overboard" | "checkin";
+type Queued = { lat: number; lng: number; accuracy_m: number | null; speed_mps: number | null; heading: number | null; battery: number | null; event: Event; recorded_at: string };
+
+// Positions taken while there's no signal are kept on the phone and sent, oldest first,
+// with their original times once the connection comes back.
+const qKey = (token: string) => `lemtik.track.queue.${token}`;
+function readQueue(token: string): Queued[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(qKey(token)) ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => Date.now() - Date.parse(x.recorded_at) < 24 * 3_600_000) : [];
+  } catch {
+    return [];
+  }
+}
+function writeQueue(token: string, q: Queued[]) {
+  try {
+    // Keep alarms and check-ins even if the queue is full; drop the oldest plain positions first.
+    let out = q;
+    while (out.length > MAX_QUEUE) {
+      const i = out.findIndex((x) => x.event === "position");
+      out = i >= 0 ? [...out.slice(0, i), ...out.slice(i + 1)] : out.slice(1);
+    }
+    localStorage.setItem(qKey(token), JSON.stringify(out));
+  } catch {
+    /* storage unavailable: queued fixes live only in memory */
+  }
+}
 
 function Tracker() {
   const { token } = Route.useParams();
@@ -33,6 +61,8 @@ function Tracker() {
   const [hold, setHold] = useState<{ kind: "sos" | "man_overboard"; p: number } | null>(null);
   const [lastCheckin, setLastCheckin] = useState<number | null>(null);
   const [checking, setChecking] = useState(false);
+  const [pending, setPending] = useState(0);
+  const flushing = useRef(false);
   const watchId = useRef<number | null>(null);
   const latest = useRef<GeolocationPosition | null>(null);
   const lastSent = useRef(0);
@@ -58,22 +88,64 @@ function Tracker() {
     }
   };
 
+  const toQueued = async (p: GeolocationPosition, event: Event): Promise<Queued> => ({
+    lat: p.coords.latitude,
+    lng: p.coords.longitude,
+    accuracy_m: Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : null,
+    speed_mps: p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : null,
+    heading: p.coords.heading != null && Number.isFinite(p.coords.heading) ? p.coords.heading : null,
+    battery: await battery(),
+    event,
+    recorded_at: new Date(p.timestamp || Date.now()).toISOString(),
+  });
+
+  /** Sends everything waiting on the phone, oldest first. Stops at the first network failure. */
+  const flush = useCallback(async () => {
+    if (flushing.current) return;
+    flushing.current = true;
+    try {
+      let q = readQueue(token);
+      while (q.length) {
+        const item = q[0];
+        try {
+          const r = await send({ data: { token, ...item } });
+          if (!r.ok && /isn't valid|switched off/i.test(r.reason ?? "")) {
+            writeQueue(token, []);
+            q = [];
+            setError(r.reason ?? null);
+            break;
+          }
+          if (r.ok && (item.event === "sos" || item.event === "man_overboard")) {
+            setSosSent(item.event);
+            setError(null);
+          }
+        } catch {
+          break; // still offline
+        }
+        q = readQueue(token).slice(1);
+        writeQueue(token, q);
+        setPending(q.length);
+      }
+      setPending(readQueue(token).length);
+    } finally {
+      flushing.current = false;
+    }
+  }, [send, token]);
+
   const push = useCallback(
-    async (p: GeolocationPosition, event: "position" | "sos" | "man_overboard" | "checkin" = "position") => {
+    async (p: GeolocationPosition, event: Event = "position") => {
       lastSent.current = Date.now();
+      const item = await toQueued(p, event);
+      // Anything already waiting goes first, so the track stays in order.
+      if (readQueue(token).length) {
+        writeQueue(token, [...readQueue(token), item]);
+        setPending(readQueue(token).length);
+        void flush();
+        setLast({ at: Date.now(), accuracy: p.coords.accuracy, ok: false });
+        return "queued" as const;
+      }
       try {
-        const r = await send({
-          data: {
-            token,
-            lat: p.coords.latitude,
-            lng: p.coords.longitude,
-            accuracy_m: Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : null,
-            speed_mps: p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : null,
-            heading: p.coords.heading != null && Number.isFinite(p.coords.heading) ? p.coords.heading : null,
-            battery: await battery(),
-            event,
-          },
-        });
+        const r = await send({ data: { token, ...item, recorded_at: undefined } });
         setLast({ at: Date.now(), accuracy: p.coords.accuracy, ok: r.ok });
         if (!r.ok) {
           setError(r.reason ?? "Your security team isn't receiving your location.");
@@ -81,13 +153,31 @@ function Tracker() {
         } else setError(null);
         return r.ok;
       } catch {
+        // No signal: keep it on the phone and send it later with its original time.
+        writeQueue(token, [...readQueue(token), item]);
+        setPending(readQueue(token).length);
         setLast({ at: Date.now(), accuracy: p.coords.accuracy, ok: false });
-        return false;
+        return "queued" as const;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [send, token],
+    [send, token, flush],
   );
+
+  // Retry when the phone says it's back online, and every 20 s while anything is waiting.
+  useEffect(() => {
+    setPending(readQueue(token).length);
+    void flush();
+    const on = () => void flush();
+    window.addEventListener("online", on);
+    const t = window.setInterval(() => {
+      if (readQueue(token).length) void flush();
+    }, 20_000);
+    return () => {
+      window.removeEventListener("online", on);
+      window.clearInterval(t);
+    };
+  }, [flush, token]);
 
   const start = () => {
     if (!navigator.geolocation) {
@@ -136,7 +226,11 @@ function Tracker() {
       return;
     }
     const ok = await push(p, kind);
-    if (ok) {
+    if (ok === "queued") {
+      setError(`No signal. The ${kind === "sos" ? "SOS" : "man overboard alert"} is saved on this phone and will send the moment signal returns. Call or radio for help now if you can.`);
+      navigator.vibrate?.([250, 120, 250]);
+      if (!sharing) start();
+    } else if (ok) {
       setSosSent(kind);
       navigator.vibrate?.([250, 120, 250]);
       if (!sharing) start();
@@ -164,7 +258,10 @@ function Tracker() {
     try {
       const p = latest.current;
       const ok = p ? await push(p, "checkin") : (await checkInNoFix({ data: { token } })).ok;
-      if (ok) {
+      if (ok === "queued") {
+        setLastCheckin(Date.now());
+        setError("No signal. Your check-in is saved on this phone and will send when signal returns.");
+      } else if (ok) {
         setLastCheckin(Date.now());
         navigator.vibrate?.(80);
       } else setError("Check-in didn't go through. Try again, or call your security team.");
@@ -253,6 +350,11 @@ function Tracker() {
               <b className="f1">{sharing ? "Sharing your location" : "Not sharing"}</b>
               <MapPin size={16} className="t3" />
             </div>
+            {pending > 0 && (
+              <span style={{ fontSize: 13, color: "var(--warn)" }}>
+                No signal: {pending} position{pending === 1 ? "" : "s"} waiting on this phone. They'll send with their original times when signal returns.
+              </span>
+            )}
             <span className="t3" style={{ fontSize: 13 }}>
               {last ? `${last.ok ? "Last sent" : "Last attempt failed"} ${new Date(last.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} · ±${Math.round(last.accuracy)} m` : sharing ? "Getting a GPS fix…" : "Press Start when you set off. Keep this page open; your screen will stay on."}
             </span>
@@ -289,7 +391,7 @@ function Tracker() {
 
       <div className="row g8 t3" style={{ fontSize: 12, alignItems: "flex-start" }}>
         <ShieldCheck size={14} style={{ flex: "none", marginTop: 2 }} />
-        <span>Your location is sent only while this page is sharing, and only your organisation's security leads can see it. Location history is deleted after 90 days.</span>
+        <span>For long trips, the free Traccar Client app keeps sending in the background and uses less battery; ask your security team to set it up. Your location is sent only while this page is sharing, and only your organisation's security leads can see it. Location history is deleted after 90 days.</span>
       </div>
     </>,
   );
