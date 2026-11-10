@@ -303,7 +303,9 @@ function LiveView({ subjects, zones, alerts, voyages }: { subjects: MovementSubj
                       ? "Not switched on yet: add a free AISStream key as AISSTREAM_API_KEY in Vercel."
                       : ships.note
                         ? ships.note
-                        : `${ships.list.length} ship${ships.list.length === 1 ? "" : "s"} heard in this view · ${new Date(ships.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Public AIS: coverage can be patchy, and small boats often don't transmit.`}
+                        : ships.list.length === 0
+                          ? "No ships reported here right now. The free public AIS feed has little or no receiver coverage in this area. A Lemtik AIS receiver at a jetty can cover 20–40 nm around it."
+                          : `${ships.list.length} ship${ships.list.length === 1 ? "" : "s"} heard in this view · ${new Date(ships.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Public AIS: coverage can be patchy, and small boats often don't transmit.`}
               </span>
             )}
           </div>
