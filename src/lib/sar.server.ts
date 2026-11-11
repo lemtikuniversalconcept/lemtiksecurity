@@ -220,7 +220,7 @@ function snapshot(x: Float64Array, y: Float64Array, lkp: DriftInput["lkp"], cosL
 }
 
 export type SearchPattern = {
-  kind: "expanding_square" | "parallel_sweep";
+  kind: "expanding_square" | "parallel_sweep" | "creek_sweep";
   spacingNm: number;
   waypoints: [number, number][];
   trackNm: number;
@@ -282,4 +282,196 @@ export function searchPattern(s: DriftSnapshot, spacingNm: number): SearchPatter
     pts.push(toLL(off * px + sgn * halfLen * ax, off * py + sgn * halfLen * ay));
   }
   return { kind: "parallel_sweep", spacingNm, waypoints: pts, trackNm: len(pts), coverage: `${tracks} parallel tracks along the drift axis, ${spacingNm} nm apart, covering the 90% area` };
+}
+
+// ---------------------------------------------------------------- Creek mode
+//
+// In a creek or river the object can't spread sideways much: it moves up or down the channel
+// with the river flow or the tide, wind pushes it only along the channel, and some of it
+// catches in mangrove roots or on the bank and stops. The channel is a known line (a voyage
+// route or corridor), so the result is a stretch of channel rather than an ellipse.
+
+export type CreekFlow = "toward_end" | "toward_start" | "tidal";
+export type CreekInput = DriftInput & { channel: [number, number][]; widthM: number; flow: CreekFlow };
+
+const TIDE_MS = 12.42 * 3_600_000; // semi-diurnal tide
+const SNAG_PER_HOUR = 0.05; // share that catches on the bank each hour
+
+type Chain = { xy: [number, number][]; cum: number[]; total: number; lng0: number; lat0: number; cos: number };
+
+function chain(route: [number, number][], lat0: number, lng0: number): Chain {
+  const cos = mPerDegLng(lat0) / M_PER_DEG_LAT;
+  const xy = route.map(([lng, lat]) => [(lng - lng0) * M_PER_DEG_LAT * cos, (lat - lat0) * M_PER_DEG_LAT] as [number, number]);
+  const cum = [0];
+  for (let i = 1; i < xy.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
+  return { xy, cum, total: cum[cum.length - 1], lng0, lat0, cos };
+}
+
+/** Distance along the chain of the point closest to (x, y), and how far off the line it is. */
+function project(c: Chain, x: number, y: number) {
+  let best = { s: 0, d: Infinity };
+  for (let i = 1; i < c.xy.length; i++) {
+    const [ax, ay] = c.xy[i - 1];
+    const [bx, by] = c.xy[i];
+    const dx = bx - ax, dy = by - ay;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2)) : 0;
+    const d = Math.hypot(ax + t * dx - x, ay + t * dy - y);
+    if (d < best.d) best = { s: c.cum[i - 1] + t * Math.sqrt(L2), d };
+  }
+  return best;
+}
+
+/** Point and unit tangent at distance s along the chain. */
+function at(c: Chain, s: number) {
+  const v = Math.max(0, Math.min(c.total, s));
+  let i = 1;
+  while (i < c.cum.length - 1 && c.cum[i] < v) i++;
+  const [ax, ay] = c.xy[i - 1];
+  const [bx, by] = c.xy[i];
+  const L = c.cum[i] - c.cum[i - 1] || 1;
+  const t = (v - c.cum[i - 1]) / L;
+  return { x: ax + (bx - ax) * t, y: ay + (by - ay) * t, tx: (bx - ax) / L, ty: (by - ay) / L };
+}
+
+const toLL = (c: Chain, x: number, y: number): [number, number] => [c.lng0 + x / (M_PER_DEG_LAT * c.cos), c.lat0 + y / M_PER_DEG_LAT];
+
+/** Centre line from s1 to s2, offset sideways by `off` metres (positive = left of the direction of travel along the chain). */
+function stretch(c: Chain, s1: number, s2: number, off = 0, maxPts = 80): [number, number][] {
+  const a = Math.max(0, Math.min(s1, s2));
+  const b = Math.min(c.total, Math.max(s1, s2));
+  const ss = [a, ...c.cum.filter((v) => v > a && v < b), b];
+  const step = Math.max(1, Math.ceil(ss.length / maxPts));
+  const pick = ss.filter((_, i) => i % step === 0 || i === ss.length - 1);
+  return pick.map((s) => {
+    const p = at(c, s);
+    return toLL(c, p.x - p.ty * off, p.y + p.tx * off);
+  });
+}
+
+function band(c: Chain, s1: number, s2: number, halfW: number): [number, number][] {
+  const minLen = Math.max(halfW, 20);
+  if (Math.abs(s2 - s1) < minLen) {
+    const m = (s1 + s2) / 2;
+    s1 = m - minLen / 2;
+    s2 = m + minLen / 2;
+  }
+  const left = stretch(c, s1, s2, halfW);
+  const right = stretch(c, s1, s2, -halfW).reverse();
+  return [...left, ...right, left[0]];
+}
+
+export type CreekSnapshot = DriftSnapshot & { creek: { fromM: number; toM: number; snaggedPct: number; atEnd: boolean } };
+
+/** Drift confined to a channel. Distances in the result are along the channel from its start. */
+export function simulateCreekDrift(inp: CreekInput): CreekSnapshot[] {
+  const r = rng(inp.seed);
+  const L = LEEWAY[inp.objectType];
+  const N = inp.particles ?? 2000;
+  const c = chain(inp.channel, inp.lkp.lat, inp.lkp.lng);
+  const s0 = project(c, 0, 0).s;
+  const halfW = inp.widthM / 2;
+  const s = new Float64Array(N);
+  const amp = new Float64Array(N);
+  const phase = new Float64Array(N);
+  const rate = new Float64Array(N);
+  const snag = new Uint8Array(N);
+  const sigma0 = inp.lkp.errorM / 2;
+  for (let i = 0; i < N; i++) {
+    s[i] = s0 + gauss(r) * sigma0;
+    rate[i] = Math.max(0, L.rate * (1 + gauss(r) * L.spread));
+    const kn = inp.current ? Math.max(0, inp.current.kn * (1 + gauss(r) * 0.3)) : 0.2 + r() * 0.8;
+    amp[i] = kn * 0.514444;
+    phase[i] = r() * 2 * Math.PI; // tide state unknown unless the operator says which way it flows
+  }
+  const dirSign = inp.flow === "toward_end" ? 1 : inp.flow === "toward_start" ? -1 : 0;
+
+  const STEP = 5 * 60_000;
+  let t = inp.lkp.at;
+  const out: CreekSnapshot[] = [];
+  for (const target of inp.times) {
+    while (t < target) {
+      const dt = Math.min(STEP, target - t);
+      const dts = dt / 1000;
+      const w = windAt(inp.wind, t + dt / 2);
+      const ws = Math.hypot(w.u, w.v);
+      const snagP = 1 - Math.pow(1 - SNAG_PER_HOUR, dt / 3_600_000);
+      const tideF = (t + dt / 2 - inp.lkp.at) / TIDE_MS;
+      for (let i = 0; i < N; i++) {
+        if (snag[i]) continue;
+        if (r() < snagP) {
+          snag[i] = 1;
+          continue;
+        }
+        const p = at(c, s[i]);
+        const lee = ws > 0.1 ? (rate[i] * ws + L.offsetMps) * (1 + gauss(r) * 0.15) : 0;
+        const along = ws > 0.1 ? lee * ((w.u / ws) * p.tx + (w.v / ws) * p.ty) : 0;
+        const cur = dirSign !== 0 ? dirSign * amp[i] : amp[i] * Math.sin(2 * Math.PI * tideF + phase[i]);
+        s[i] = Math.max(0, Math.min(c.total, s[i] + (along + cur) * dts));
+      }
+      t += dt;
+    }
+    const sorted = Array.from(s).sort((a, b) => a - b);
+    const q = (f: number) => sorted[Math.min(N - 1, Math.max(0, Math.floor(f * N)))];
+    const a90 = q(0.05), b90 = q(0.95), a50 = q(0.25), b50 = q(0.75), med = q(0.5);
+    const d = at(c, med);
+    const sample: [number, number][] = [];
+    const stride = Math.max(1, Math.floor(N / 400));
+    for (let i = 0; i < N; i += stride) {
+      const p = at(c, s[i]);
+      const off = (r() * 2 - 1) * halfW * 0.8;
+      sample.push(toLL(c, p.x - p.ty * off, p.y + p.tx * off));
+    }
+    let snagged = 0;
+    let ends = 0;
+    for (let i = 0; i < N; i++) {
+      snagged += snag[i];
+      if (s[i] <= 1 || s[i] >= c.total - 1) ends++;
+    }
+    const lenM = Math.max(b90 - a90, 1);
+    out.push({
+      at: target,
+      datum: toLL(c, d.x, d.y),
+      ellipse50: band(c, a50, b50, halfW),
+      ellipse90: band(c, a90, b90, halfW),
+      axes90: { majorM: lenM, minorM: inp.widthM, bearingDeg: ((Math.atan2(d.tx, d.ty) * 180) / Math.PI + 360) % 180 },
+      areaKm2_90: (lenM * inp.widthM) / 1e6,
+      sample,
+      hoursAdrift: (target - inp.lkp.at) / 3_600_000,
+      creek: { fromM: Math.round(a90), toM: Math.round(b90), snaggedPct: Math.round((snagged / N) * 100), atEnd: ends / N > 0.05 },
+    });
+  }
+  return out;
+}
+
+/** Runs along the stretch of channel in lanes across its width, starting at the end nearest the datum. */
+export function creekPattern(snap: CreekSnapshot, channel: [number, number][], widthM: number, spacingNm: number): SearchPattern {
+  const c = chain(channel, snap.datum[1], snap.datum[0]);
+  const S = Math.max(0.05, spacingNm) * NM;
+  const lanes = Math.max(1, Math.min(6, Math.ceil(widthM / (2 * S))));
+  const halfW = widthM / 2;
+  const pts: [number, number][] = [];
+  const { fromM, toM } = snap.creek;
+  const dS = project(c, 0, 0).s;
+  const startNearFrom = Math.abs(dS - fromM) <= Math.abs(toM - dS);
+  for (let k = 0; k < lanes; k++) {
+    const off = lanes === 1 ? 0 : -halfW + ((k + 0.5) * widthM) / lanes;
+    const forward = (k % 2 === 0) === startNearFrom;
+    const leg = stretch(c, fromM, toM, off, 40);
+    pts.push(...(forward ? leg : leg.reverse()));
+  }
+  let trackM = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dx = (pts[i][0] - pts[i - 1][0]) * M_PER_DEG_LAT * c.cos;
+    const dy = (pts[i][1] - pts[i - 1][1]) * M_PER_DEG_LAT;
+    trackM += Math.hypot(dx, dy);
+  }
+  const km = ((toM - fromM) / 1000).toFixed(1);
+  return {
+    kind: "creek_sweep",
+    spacingNm,
+    waypoints: pts,
+    trackNm: trackM / NM,
+    coverage: `${lanes === 1 ? "One run down the middle" : `${lanes} runs across the width`} of the ${km} km stretch of creek. Check both banks, mangrove roots, jetties and moored boats, where people in the water often reach or get caught`,
+  };
 }

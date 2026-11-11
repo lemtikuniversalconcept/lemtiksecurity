@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Printer, Save } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Printer, Save } from "lucide-react";
+import { download, sarFileName, sarGeoJSON, sarKML } from "@/lib/sar.export";
 import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { basemapOptions } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
@@ -82,6 +83,8 @@ function SarPage() {
       <div className="row g8 wrap no-print">
         <Link to="/app/movement" className="b b-sm b-gh"><ArrowLeft size={14} /> Protected movement</Link>
         <span className="f1" />
+        <button type="button" className="b b-sm b-sec" onClick={() => download(sarFileName(p, "kml"), sarKML(p), "application/vnd.google-earth.kml+xml")} title="Opens in Google Earth, most chartplotters and navigation apps"><Download size={14} /> KML</button>
+        <button type="button" className="b b-sm b-sec" onClick={() => download(sarFileName(p, "geojson"), sarGeoJSON(p), "application/geo+json")} title="For GIS tools such as QGIS"><Download size={14} /> GeoJSON</button>
         <button type="button" className="b b-sm b-pri" onClick={() => window.print()}><Printer size={14} /> Rescue package (print or PDF)</button>
       </div>
       <PageHeader title={c.title} sub={`Search and rescue plan · ${p.organisation} · started ${when(c.created_at)} by ${c.created_by_name ?? "—"}`} />
@@ -90,9 +93,15 @@ function SarPage() {
         <span className="t2" style={{ fontSize: 13 }}>{OBJECTS[c.object_type]}{c.persons != null ? ` · ${c.persons} ${c.persons === 1 ? "person" : "people"}` : ""} · adrift {f.hoursAdrift < 1 ? `${Math.round(f.hoursAdrift * 60)} min` : `${f.hoursAdrift.toFixed(1)} h`} at the selected time</span>
       </div>
 
+      {p.creek ? (
+        <Notice tone="warn">
+          Creek mode: a first estimate to start searching quickly, not a replacement for the rescue centre's own planning. The drift is kept inside the channel ({p.creek.source ?? "creek"}, {p.creek.widthM} m wide) and moves {p.creek.flow === "tidal" ? "with a tide whose state isn't known, so both directions are allowed for" : p.creek.flow === "toward_end" ? "with the flow toward the end of the route" : "with the flow toward the start of the route"} at {c.current_kn != null ? `about ${c.current_kn} kn as entered` : "0.2 to 1 kn"}. Wind pushes only along the channel. About 5% an hour is assumed to catch on the bank or in mangrove roots and stop. Side creeks aren't modelled{p.creek.atEnd ? ", and part of the drift has reached the end of the known channel, so search beyond it too" : ""}.
+        </Notice>
+      ) : (
       <Notice tone="warn">
         A first estimate to start searching quickly, not a replacement for the rescue centre's own planning. Wind: MET Norway forecast at the last known position{p.wind.hours ? "" : " (unavailable — no wind applied)"}. Current: {c.current_kn != null ? `${c.current_kn} kn toward ${c.current_toward_deg}° as entered` : "unknown, so up to 0.5 kn in any direction is allowed for"}. Shorelines aren't modelled.
       </Notice>
+      )}
 
       <div className="row g6 wrap no-print" role="group" aria-label="Time">
         {p.snapshots.map((s, i) => {
@@ -114,6 +123,7 @@ function SarPage() {
             <span><Swatch c="#E8590C" /> 90% area</span>
             <span><Swatch c="#F2384B" /> 50% area</span>
             <span><Swatch c="#4F8BFF" /> Search pattern</span>
+            {p.creek && <span><Swatch c="#8A93A6" /> Channel followed</span>}
             <span>● last known position · ◆ datum (most likely position)</span>
           </div>
         </Panel>
@@ -123,13 +133,17 @@ function SarPage() {
               <KV k="Last known position" v={<>{pos(lkp)}<br /><span className="t3 mono">{dec(lkp)}</span> · {when(c.lkp_at)} · ±{c.lkp_error_m} m</>} />
               <KV k={`Datum (${f.label.toLowerCase()})`} v={<>{pos(f.datum)}<br /><span className="t3 mono">{dec(f.datum)}</span></>} />
               <KV k="Drift so far" v={`${(dist(lkp, f.datum) / 1000).toFixed(2)} km toward ${Math.round(bearing(lkp, f.datum))}°`} />
+              {p.creek ? (
+                <KV k="90% stretch" v={`${((p.creek.toM - p.creek.fromM) / 1000).toFixed(2)} km of creek, ${(p.creek.fromM / 1000).toFixed(2)}–${(p.creek.toM / 1000).toFixed(2)} km along the channel · ${p.creek.snaggedPct}% likely caught on a bank by now`} />
+              ) : (
               <KV k="90% area" v={`${f.areaKm2_90.toFixed(1)} km² (${(f.areaKm2_90 / 3.43).toFixed(1)} nm²) · ${(f.axes90.majorM / NM).toFixed(1)} × ${(f.axes90.minorM / NM).toFixed(1)} nm, long axis ${Math.round(f.axes90.bearingDeg)}°`} />
+              )}
               {p.wind.nowKn != null && <KV k="Wind now" v={`${p.wind.nowKn} kn from ${p.wind.nowFromDeg}°`} />}
             </div>
           </Panel>
           <Panel title="Search pattern">
             <div className="col g8" style={{ fontSize: 13 }}>
-              <b>{p.pattern.kind === "expanding_square" ? "Expanding square" : "Parallel sweep"}</b>
+              <b>{p.pattern.kind === "expanding_square" ? "Expanding square" : p.pattern.kind === "creek_sweep" ? "Creek search" : "Parallel sweep"}</b>
               <span className="t2">{p.pattern.coverage}.</span>
               <div className="grid g10 no-print" style={{ gridTemplateColumns: "1fr 1fr" }}>
                 <label className="fl"><span>Track spacing (nm)</span>
@@ -188,6 +202,9 @@ function SarInputs({ c }: { c: SarCase }) {
     cur: c.current_kn != null ? String(c.current_kn) : "",
     dir: c.current_toward_deg != null ? String(c.current_toward_deg) : "",
     notes: c.notes ?? "",
+    env: c.environment,
+    width: String(c.channel_width_m),
+    flow: c.creek_flow,
   });
   const [outcome, setOutcome] = useState("");
   const refresh = () => {
@@ -205,9 +222,12 @@ function SarInputs({ c }: { c: SarCase }) {
           lkp_lng: Number(f.lng),
           lkp_at: new Date(f.at).toISOString(),
           lkp_error_m: Number(f.err) || 100,
-          current_kn: f.cur !== "" && f.dir !== "" ? Number(f.cur) : null,
+          current_kn: f.cur !== "" && (f.dir !== "" || f.env === "creek") ? Number(f.cur) : null,
           current_toward_deg: f.cur !== "" && f.dir !== "" ? Number(f.dir) : null,
           notes: f.notes || null,
+          environment: f.env,
+          channel_width_m: Math.min(3000, Math.max(5, Number(f.width) || 80)),
+          creek_flow: f.flow,
         },
       }),
     onSuccess: () => { toast.success("Plan updated"); refresh(); },
@@ -235,8 +255,31 @@ function SarInputs({ c }: { c: SarCase }) {
           <label className="fl"><span>Last known time</span><input type="datetime-local" className="in" value={f.at} onChange={(e) => setF({ ...f, at: e.target.value })} /></label>
           <label className="fl"><span>Position accuracy (± m)</span><input className="in" inputMode="numeric" value={f.err} onChange={(e) => setF({ ...f, err: e.target.value.replace(/\D/g, "").slice(0, 5) })} /></label>
           <label className="fl"><span>Current (kn), if known</span><input className="in" inputMode="decimal" value={f.cur} onChange={(e) => setF({ ...f, cur: e.target.value.replace(/[^\d.]/g, "").slice(0, 4) })} placeholder="e.g. 0.8" /></label>
-          <label className="fl"><span>Current flowing toward (°)</span><input className="in" inputMode="numeric" value={f.dir} onChange={(e) => setF({ ...f, dir: e.target.value.replace(/\D/g, "").slice(0, 3) })} placeholder="e.g. 250 on the ebb" /></label>
+          {f.env === "open_water" && <label className="fl"><span>Current flowing toward (°)</span><input className="in" inputMode="numeric" value={f.dir} onChange={(e) => setF({ ...f, dir: e.target.value.replace(/\D/g, "").slice(0, 3) })} placeholder="e.g. 250 on the ebb" /></label>}
+          <label className="fl"><span>Where</span>
+            <select className="in" value={f.env} onChange={(e) => setF({ ...f, env: e.target.value as SarCase["environment"] })}>
+              <option value="open_water">Open water (lagoon, estuary, sea)</option>
+              <option value="creek">Creek or river (drift follows the channel)</option>
+            </select>
+          </label>
+          {f.env === "creek" && (
+            <>
+              <label className="fl"><span>Channel width (m)</span><input className="in" inputMode="numeric" value={f.width} onChange={(e) => setF({ ...f, width: e.target.value.replace(/\D/g, "").slice(0, 4) })} /></label>
+              <label className="fl"><span>Water is flowing</span>
+                <select className="in" value={f.flow} onChange={(e) => setF({ ...f, flow: e.target.value as SarCase["creek_flow"] })}>
+                  <option value="tidal">Tidal, or not sure</option>
+                  <option value="toward_end">Toward the end of the route</option>
+                  <option value="toward_start">Toward the start of the route</option>
+                </select>
+              </label>
+            </>
+          )}
         </div>
+        {f.env === "creek" && (
+          <span className="t3" style={{ fontSize: 12 }}>
+            {c.channel_source ? `Follows ${c.channel_source}.` : "Uses the voyage route, or the nearest corridor within 3 km of the last known position."} For a creek with no route or corridor yet, add it under Fleet and voyages → Corridors. In creek mode only the current speed is used; its direction comes from "Water is flowing".
+          </span>
+        )}
         <span className="t3" style={{ fontSize: 12 }}>Local knowledge of the tide and river flow makes the biggest difference. Enter both current fields, or leave both empty.</span>
         <label className="fl"><span>Notes</span><textarea className="in" rows={2} maxLength={2000} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="Last seen wearing, colour of boat, assets searching" /></label>
         <button type="submit" className="b b-pri" style={{ alignSelf: "flex-start" }} disabled={m.isPending || bad}>{m.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Update and re-run</button>
@@ -265,6 +308,7 @@ function SarMap({ plan }: { plan: SarPlan }) {
     e50: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [f.ellipse50] } },
     pts: { type: "FeatureCollection", features: f.sample.map((c) => ({ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: c } })) },
     path: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: plan.pattern.waypoints } },
+    channel: plan.creek ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: plan.creek.route } } : { type: "FeatureCollection", features: [] },
     drift: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: plan.snapshots.map((s) => s.datum) } },
     marks: {
       type: "FeatureCollection",
@@ -283,6 +327,7 @@ function SarMap({ plan }: { plan: SarPlan }) {
     map.on("load", () => {
       const d = data() as any;
       for (const k of Object.keys(d)) map.addSource(k, { type: "geojson", data: d[k] });
+      map.addLayer({ id: "channel", type: "line", source: "channel", paint: { "line-color": "#8A93A6", "line-width": 3, "line-opacity": 0.6 } });
       map.addLayer({ id: "e90", type: "fill", source: "e90", paint: { "fill-color": "#E8590C", "fill-opacity": 0.15 } });
       map.addLayer({ id: "e90l", type: "line", source: "e90", paint: { "line-color": "#E8590C", "line-width": 2 } });
       map.addLayer({ id: "e50l", type: "line", source: "e50", paint: { "line-color": "#F2384B", "line-width": 2, "line-dasharray": [2, 1] } });
