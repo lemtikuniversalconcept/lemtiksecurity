@@ -59,6 +59,7 @@ import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
 import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as RespondTokenRouteImport } from './routes/respond.$token'
+import { Route as TelegramWebhookRouteImport } from './routes/telegram.webhook'
 import { Route as TrackTokenRouteImport } from './routes/track.$token'
 import { Route as TrackerOsmandRouteImport } from './routes/tracker.osmand'
 import { Route as VerifyIdRouteImport } from './routes/verify.$id'
@@ -333,6 +334,11 @@ const RespondTokenRoute = RespondTokenRouteImport.update({
   path: '/respond/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TelegramWebhookRoute = TelegramWebhookRouteImport.update({
+  id: '/telegram/webhook',
+  path: '/telegram/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TrackTokenRoute = TrackTokenRouteImport.update({
   id: '/track/$token',
   path: '/track/$token',
@@ -496,6 +502,7 @@ export interface FileRoutesByFullPath {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/respond/$token': typeof RespondTokenRoute
+  '/telegram/webhook': typeof TelegramWebhookRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
   '/verify/$id': typeof VerifyIdRoute
@@ -567,6 +574,7 @@ export interface FileRoutesByTo {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/respond/$token': typeof RespondTokenRoute
+  '/telegram/webhook': typeof TelegramWebhookRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
   '/verify/$id': typeof VerifyIdRoute
@@ -643,6 +651,7 @@ export interface FileRoutesById {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/respond/$token': typeof RespondTokenRoute
+  '/telegram/webhook': typeof TelegramWebhookRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
   '/verify/$id': typeof VerifyIdRoute
@@ -720,6 +729,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/respond/$token'
+    | '/telegram/webhook'
     | '/track/$token'
     | '/tracker/osmand'
     | '/verify/$id'
@@ -791,6 +801,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/respond/$token'
+    | '/telegram/webhook'
     | '/track/$token'
     | '/tracker/osmand'
     | '/verify/$id'
@@ -866,6 +877,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/respond/$token'
+    | '/telegram/webhook'
     | '/track/$token'
     | '/tracker/osmand'
     | '/verify/$id'
@@ -910,6 +922,7 @@ export interface RootRouteChildren {
   CustodyTokenRoute: typeof CustodyTokenRoute
   DosTokenRoute: typeof DosTokenRoute
   RespondTokenRoute: typeof RespondTokenRoute
+  TelegramWebhookRoute: typeof TelegramWebhookRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
   VerifyIdRoute: typeof VerifyIdRoute
@@ -1265,6 +1278,13 @@ declare module '@tanstack/react-router' {
       path: '/respond/$token'
       fullPath: '/respond/$token'
       preLoaderRoute: typeof RespondTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/telegram/webhook': {
+      id: '/telegram/webhook'
+      path: '/telegram/webhook'
+      fullPath: '/telegram/webhook'
+      preLoaderRoute: typeof TelegramWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/track/$token': {
@@ -1656,6 +1676,7 @@ const rootRouteChildren: RootRouteChildren = {
   CustodyTokenRoute: CustodyTokenRoute,
   DosTokenRoute: DosTokenRoute,
   RespondTokenRoute: RespondTokenRoute,
+  TelegramWebhookRoute: TelegramWebhookRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
   VerifyIdRoute: VerifyIdRoute,

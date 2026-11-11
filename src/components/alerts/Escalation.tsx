@@ -2,14 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { Notice, Switch } from "@/components/nw";
 import { getEscalationPolicy, listAlertDeliveries, saveEscalationPolicy, type EscalationStep } from "@/lib/escalation.functions";
+import { getMyTelegram, startTelegramLink, unlinkTelegram } from "@/lib/telegram.functions";
 
 const ROLE_LABEL: Record<string, string> = { supervisor: "Supervisors", manager: "Security managers", client_admin: "Client admins" };
-const CHANNEL_LABEL: Record<string, string> = { in_app: "In-app", email: "Email" };
+const CHANNEL_LABEL: Record<string, string> = { in_app: "In-app", email: "Email", telegram: "Telegram" };
 const ROLES = ["supervisor", "manager", "client_admin"] as const;
-const CHANNELS = ["in_app", "email"] as const;
+const CHANNELS = ["in_app", "email", "telegram"] as const;
 
 /** Security manager settings: who is told about a serious movement alert, and when, until someone acknowledges it. */
 export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
@@ -60,6 +61,7 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
             {q.data.is_default ? " These are the default steps; save to make them your own." : q.data.updated_by_name ? ` Last changed by ${q.data.updated_by_name}.` : ""}
           </span>
           {!q.data.email_configured && <Notice tone="warn">Email isn't set up on this system yet, so email steps are logged as skipped.</Notice>}
+          <TelegramCard />
           <div className="row g12 wrap" style={{ alignItems: "center" }}>
             <Switch on={enabled} onChange={(v) => canConfigure && setEnabled(v)} label="Escalation on" />
             <b>{enabled ? "On" : "Off"}</b>
@@ -96,7 +98,7 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
                     <input type="checkbox" checked={s.channels.includes(c)} disabled={!canConfigure} onChange={() => patch(i, { channels: toggle(s.channels, c) })} /> {CHANNEL_LABEL[c]}
                   </label>
                 ))}
-                <span className="t3">· Push and Telegram come next</span>
+                <span className="t3">· Push comes next</span>
               </div>
             </div>
           ))}
@@ -109,6 +111,42 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** The signed-in user's own Telegram link. Anyone can link; alerts only arrive if a chain step includes Telegram and their role. */
+function TelegramCard() {
+  const getFn = useServerFn(getMyTelegram);
+  const startFn = useServerFn(startTelegramLink);
+  const stopFn = useServerFn(unlinkTelegram);
+  const q = useQuery({ queryKey: ["my-telegram"], queryFn: () => getFn(), refetchInterval: (query) => (query.state.data && !query.state.data.linked ? 5_000 : false) });
+  const start = useMutation({
+    mutationFn: () => startFn(),
+    onSuccess: (r) => {
+      const w = window.open(r.url, "_blank", "noopener");
+      if (!w) window.location.href = r.url; // popup blocked (common on phones)
+      toast.message("Telegram opened. Press Start in the bot chat to finish.");
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const stop = useMutation({ mutationFn: () => stopFn(), onSuccess: () => { q.refetch(); toast.success("Telegram unlinked"); }, onError: (e) => toast.error((e as Error).message) });
+  const t = q.data;
+  if (!t) return null;
+  return (
+    <div className="card row g10 wrap" style={{ padding: "10px 12px", alignItems: "center" }}>
+      <Send size={16} />
+      <span className="col f1" style={{ minWidth: 0 }}>
+        <b>Your Telegram</b>
+        <span className="t3" style={{ fontSize: 12 }}>
+          {!t.configured ? "Telegram isn't set up on this system yet." : t.linked ? `Linked${t.username ? ` as @${t.username}` : t.name ? ` as ${t.name}` : ""}. Alerts arrive with an Acknowledge button.` : "Link your Telegram to get alerts on your phone, with an Acknowledge button."}
+        </span>
+      </span>
+      {t.configured && (t.linked ? (
+        <button type="button" className="b b-sm b-sec" disabled={stop.isPending} onClick={() => stop.mutate()}>Unlink</button>
+      ) : (
+        <button type="button" className="b b-sm b-pri" disabled={start.isPending} onClick={() => start.mutate()}>{start.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Connect Telegram</button>
+      ))}
+    </div>
   );
 }
 

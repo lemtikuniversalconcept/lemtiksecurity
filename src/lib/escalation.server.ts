@@ -5,7 +5,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 export type EscalationRole = "supervisor" | "manager" | "client_admin";
-export type EscalationChannel = "in_app" | "email";
+export type EscalationChannel = "in_app" | "email" | "telegram";
 export type EscalationStep = { after_min: number; roles: EscalationRole[]; channels: EscalationChannel[] };
 export type EscalationPolicy = { enabled: boolean; min_severity: number; steps: EscalationStep[] };
 
@@ -14,7 +14,7 @@ export const DEFAULT_POLICY: EscalationPolicy = {
   enabled: true,
   min_severity: 4,
   steps: [
-    { after_min: 0, roles: ["supervisor", "manager"], channels: ["in_app"] },
+    { after_min: 0, roles: ["supervisor", "manager"], channels: ["in_app", "telegram"] },
     { after_min: 2, roles: ["manager"], channels: ["in_app", "email"] },
     { after_min: 10, roles: ["client_admin", "manager"], channels: ["email"] },
   ],
@@ -83,6 +83,25 @@ async function deliver(a: AlertRow, stepIndex: number, step: EscalationStep, sub
         status: r.ok ? "sent" : r.skipped ? "skipped" : "failed",
         detail: r.ok ? null : String(r.reason ?? r.error ?? "send failed").slice(0, 500),
       });
+    }
+  }
+  if (people.length && step.channels.includes("telegram")) {
+    const { botToken, tg, html } = await import("./telegram.server");
+    const { data: chats } = await db().from("user_telegram").select("user_id, chat_id").in("user_id", people.map((p) => p.user_id));
+    const chatOf = new Map(((chats ?? []) as { user_id: string; chat_id: number }[]).map((c) => [c.user_id, c.chat_id]));
+    const icon = a.severity >= 5 ? "🚨" : "⚠️";
+    const text = `${icon} <b>${html(title)}</b>\n\n${html(body)}`;
+    for (const p of people) {
+      const chat = chatOf.get(p.user_id);
+      if (!botToken() || !chat) {
+        log.push({ organisation_id: a.organisation_id, movement_alert_id: a.id, step: stepIndex, channel: "telegram", recipient_user_id: p.user_id, recipient_label: p.name, status: "skipped", detail: !botToken() ? "Telegram not set up" : "Telegram not linked" });
+        continue;
+      }
+      const r = await tg("sendMessage", {
+        chat_id: chat, text, parse_mode: "HTML", disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [[{ text: "✅ Acknowledge", callback_data: `ack:${a.id}` }, { text: "Open Lemtik", url: "https://app.lemtik.com.ng/app/movement" }]] },
+      });
+      log.push({ organisation_id: a.organisation_id, movement_alert_id: a.id, step: stepIndex, channel: "telegram", recipient_user_id: p.user_id, recipient_label: p.name, status: r.ok ? "sent" : "failed", detail: r.ok ? null : String(r.description ?? "send failed").slice(0, 500) });
     }
   }
   if (log.length) await db().from("alert_deliveries").insert(log);
