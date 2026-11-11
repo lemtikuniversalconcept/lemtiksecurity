@@ -32,6 +32,7 @@ import { getNearbyShips, listVoyages, type NearbyShip, type Voyage } from "@/lib
 import { VoyagesView } from "@/components/movement/Voyages";
 import { CorridorsView, HandoffPanel, RespondersView } from "@/components/movement/Corridors";
 import { reviewPossibleHijack } from "@/lib/hijack.functions";
+import { DeliveryLog } from "@/components/alerts/Escalation";
 import { listCorridors, listResponders } from "@/lib/corridor.functions";
 import { createSarCase, listSarCases, type SarCase } from "@/lib/sar.functions";
 import { MovementPermsContext, movementPerms, useMovementPerms } from "@/components/movement/perms";
@@ -424,6 +425,7 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
   });
   const reviewFn = useServerFn(reviewPossibleHijack);
   const [hj, setHj] = useState<null | "dismiss" | "handoff">(null);
+  const [showLog, setShowLog] = useState(false);
   const [hjNote, setHjNote] = useState("");
   const review = useMutation({
     mutationFn: (decision: "confirmed" | "dismissed") => reviewFn({ data: { alert_id: a.id, decision, note: hjNote.trim() || undefined } }),
@@ -454,6 +456,9 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
           {sar.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Search plan
         </button>
       )}
+      {a.severity >= 3 && canOperate && (
+        <button type="button" className="b b-sm b-gh" onClick={() => setShowLog((v) => !v)} aria-expanded={showLog} title="Who was told about this alert, how and when">Who was told</button>
+      )}
       {hijackOpen ? (
         <span className="row g6">
           <button type="button" className="b b-sm b-pri" onClick={() => review.mutate("confirmed")} disabled={review.isPending}>
@@ -477,6 +482,7 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
         <button type="button" className="b b-sm b-sec" style={{ alignSelf: "flex-start" }} disabled={hjNote.trim().length < 5 || review.isPending} onClick={() => review.mutate("dismissed")}>Dismiss as false alarm</button>
       </div>
     )}
+    {showLog && <div className="card" style={{ padding: "8px 12px" }}><DeliveryLog alertId={a.id} /></div>}
     {hj === "handoff" && <div className="card" style={{ padding: "10px 12px" }}><HandoffPanel subjectId={a.subject_id} onClose={() => setHj(null)} /></div>}
     </div>
   );

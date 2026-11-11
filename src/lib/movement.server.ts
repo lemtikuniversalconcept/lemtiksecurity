@@ -298,6 +298,14 @@ export async function sweepOrg(orgId: string) {
 
   await checkPossibleHijack(orgId);
 
+  // Escalation chain for serious alerts nobody has acknowledged. Ignored until its tables exist.
+  try {
+    const { escalateOrg } = await import("./escalation.server");
+    await escalateOrg(orgId);
+  } catch {
+    /* escalation not set up */
+  }
+
   // Cargo in transit with no custody record for too long. Ignored until the cargo tables exist.
   try {
     const { sweepCargo } = await import("./cargo.server");

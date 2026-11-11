@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { requireSectionAccess } from "@/lib/rbac";
 import { listAlerts, markAllNotificationsRead, markNotificationRead, getAlertPreferences, updateAlertPreferences } from "@/lib/alerts.functions";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
+import { EscalationPanel } from "@/components/alerts/Escalation";
 
 type AlertRow = {
   id: string;
@@ -60,7 +61,7 @@ function AlertCentre() {
   const markRead = useServerFn(markNotificationRead);
   const markAll = useServerFn(markAllNotificationsRead);
   const getPrefs = useServerFn(getAlertPreferences);
-  const updatePrefs = useServerFn(updateAlertPreferences);
+  const updatePrefsFn = useServerFn(updateAlertPreferences);
   const qc = useQueryClient();
   useRealtimeInvalidate("alerts", [["alerts"], ["my-notifications"]]);
 
@@ -113,6 +114,15 @@ function AlertCentre() {
       qc.invalidateQueries({ queryKey: ["alerts"] });
       qc.invalidateQueries({ queryKey: ["my-notifications"] });
     },
+  });
+
+  const updatePrefs = useMutation({
+    mutationFn: (input: Parameters<typeof updatePrefsFn>[0]) => updatePrefsFn(input),
+    onSuccess: () => {
+      toast.success("Delivery rules saved");
+      qc.invalidateQueries({ queryKey: ["alert-prefs"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
   });
 
   const savePrefs = () => {
@@ -289,6 +299,7 @@ function AlertCentre() {
             </>
           )}
         </aside>
+        <EscalationPanel canConfigure={canConfigure} />
       </div>
     </>
   );
