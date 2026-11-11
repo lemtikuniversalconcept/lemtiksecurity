@@ -79,6 +79,7 @@ export const getIspsOverview = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { orgId, role } = await ctxRole(context);
+    await (await import("./features.server")).assertFeature(orgId, "isps");
     const supabase = sb(context);
     const [facilities, drills, dos, breaches, levels, org] = await Promise.all([
       facilitiesFor(supabase, [orgId]),
@@ -118,6 +119,7 @@ export const saveFacility = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { orgId, role } = await ctxRole(context);
+    await (await import("./features.server")).assertFeature(orgId, "isps");
     need(role, ["manager"], "Only security managers can add or edit facilities.");
     const { id, ...row } = data;
     const supabase = sb(context);
@@ -135,6 +137,7 @@ export const setSecurityLevel = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ facility_ids: z.array(z.string().uuid()).min(1).max(100), level: LEVEL, reason: z.string().trim().min(3, "Give a reason.").max(500), notice_id: z.string().uuid().nullable().default(null) }).parse(d))
   .handler(async ({ data, context }) => {
     const { orgId, role } = await ctxRole(context);
+    await (await import("./features.server")).assertFeature(orgId, "isps");
     need(role, ["manager"], "Only security managers can change the security level.");
     const db = await admin();
     const { data: facs } = await db.from("isps_facilities").select("id, name, security_level").eq("organisation_id", orgId).in("id", data.facility_ids);
@@ -172,6 +175,7 @@ export const recordDrill = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { orgId, role } = await ctxRole(context);
+    await (await import("./features.server")).assertFeature(orgId, "isps");
     need(role, ["manager", "supervisor"], "Only managers and operators can record drills.");
     if (Date.parse(data.held_on) > Date.now() + 86_400_000) throwSafeError("isps.drill", new Error("future"), "A drill can't be recorded before it happens.");
     const supabase = sb(context);
@@ -255,6 +259,7 @@ export const createDeclaration = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { orgId, role } = await ctxRole(context);
+    await (await import("./features.server")).assertFeature(orgId, "isps");
     need(role, ["manager", "supervisor"], "Only managers and operators can issue a Declaration of Security.");
     if (Date.parse(data.valid_to) <= Date.parse(data.valid_from)) throwSafeError("isps.dos", new Error("dates"), "The end must be after the start.");
     const db = await admin();
@@ -528,6 +533,7 @@ export const sendNotice = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { orgId, role } = await ctxRole(context);
+    await (await import("./features.server")).assertFeature(orgId, "isps");
     need(role, ["manager", "client_admin"], "Only security managers and client admins can issue notices.");
     const db = await admin();
     const { data: me } = await db.from("organisations").select("name, type").eq("id", orgId).maybeSingle();

@@ -53,6 +53,7 @@ export const createSarCase = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "sar");
     const supabase = sb(context);
     let lat: number | null = null;
     let lng: number | null = null;

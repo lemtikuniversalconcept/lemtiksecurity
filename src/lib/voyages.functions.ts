@@ -81,6 +81,7 @@ export const saveVoyage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "movement");
     if (data.planned_departure && data.planned_arrival && Date.parse(data.planned_arrival) <= Date.parse(data.planned_departure)) {
       throwSafeError("voyages.save", new Error("arrival before departure"), "Planned arrival must be after planned departure.");
     }
@@ -113,6 +114,7 @@ export const startVoyage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "movement");
     const { v, s } = await voyageAndSubject(context, orgId, data.id);
     if (v.status !== "planned") throwSafeError("voyages.start", new Error("not planned"), "Only a planned voyage can be started.");
 

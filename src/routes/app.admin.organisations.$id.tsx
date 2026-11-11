@@ -5,12 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   deletePlatformOrganisation,
   getPlatformOrganisation,
+  setOrganisationFeatures,
   setPlatformOrganisationStatus,
   updatePlatformOrganisation,
 } from "@/lib/platform.organisations.functions";
 import { toast } from "sonner";
 import { Kpi, PageHeader } from "@/components/nw";
-import { requireSectionAccess } from "@/lib/rbac";
+import { orgKind, requireSectionAccess } from "@/lib/rbac";
+import { DEFAULT_FEATURES, effectiveFeatures, FEATURE_LABEL, FEATURES, type Feature } from "@/lib/features";
 import {
   ArrowLeft,
   CalendarDays,
@@ -265,6 +267,8 @@ function OrganisationDetail() {
             </div>
           </section>
 
+          {org && <ModulesPanel orgId={id} type={org.type} saved={(org as any).features ?? null} />}
+
           <section className="grid gap-4 xl:grid-cols-2">
             <div className="rounded-[10px] border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-3">
@@ -369,6 +373,83 @@ function OrganisationDetail() {
         </>
       )}
     </div>
+  );
+}
+
+const NEEDS_MOVEMENT: Feature[] = ["corridors", "sar"];
+
+/** Lemtik staff switch modules on or off for this organisation. */
+function ModulesPanel({ orgId, type, saved }: { orgId: string; type: string; saved: string[] | null }) {
+  const qc = useQueryClient();
+  const save = useServerFn(setOrganisationFeatures);
+  const kind = orgKind(type);
+  const defaults = DEFAULT_FEATURES[kind] ?? [];
+  const [on, setOn] = useState<Feature[]>(() => effectiveFeatures(kind, saved));
+  useEffect(() => setOn(effectiveFeatures(kind, saved)), [kind, saved?.join(",")]);
+  const usingDefaults = saved === null;
+  const changed = [...on].sort().join(",") !== [...effectiveFeatures(kind, saved)].sort().join(",");
+  const mut = useMutation({
+    mutationFn: (features: Feature[] | null) => save({ data: { organisation_id: orgId, features } }),
+    onSuccess: (_r, features) => {
+      toast.success(features === null ? "Modules reset to the defaults for this organisation type" : "Modules saved");
+      qc.invalidateQueries({ queryKey: ["platform-organisation", orgId] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const toggle = (f: Feature) =>
+    setOn((cur) => {
+      if (cur.includes(f)) return cur.filter((x) => x !== f && !(f === "movement" && NEEDS_MOVEMENT.includes(x)));
+      return [...cur, f, ...(NEEDS_MOVEMENT.includes(f) && !cur.includes("movement") ? (["movement"] as Feature[]) : [])];
+    });
+  return (
+    <section className="rounded-[10px] border border-border bg-card p-5 space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Modules</div>
+          <h2 className="text-lg font-semibold">What this organisation can use</h2>
+          <p className="mt-1 max-w-[60ch] text-sm text-muted-foreground">
+            A module that's off is hidden from their menu, its pages are blocked and the server refuses its actions. Their data is kept, so switching it back on restores everything.
+          </p>
+        </div>
+        <span className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground">
+          {usingDefaults ? `Using defaults for ${pretty(type)}` : "Custom selection"}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {FEATURES.map((f) => {
+          const checked = on.includes(f);
+          return (
+            <label key={f} className="flex cursor-pointer items-start justify-between gap-3 rounded-[9px] border border-border bg-surface px-3 py-2.5">
+              <span>
+                <span className="block text-sm font-medium">{FEATURE_LABEL[f]}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {defaults.includes(f) ? "On by default for this type" : "Off by default for this type"}
+                  {NEEDS_MOVEMENT.includes(f) ? " · needs Protected movement" : ""}
+                </span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={checked}
+                aria-label={FEATURE_LABEL[f]}
+                onClick={() => toggle(f)}
+                className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${checked ? "bg-primary" : "bg-muted"}`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-background shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+            </label>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => mut.mutate(on)} disabled={mut.isPending || !changed} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+          {mut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save modules
+        </button>
+        <button onClick={() => mut.mutate(null)} disabled={mut.isPending || usingDefaults} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-muted disabled:opacity-50">
+          Use defaults for this organisation type
+        </button>
+      </div>
+    </section>
   );
 }
 

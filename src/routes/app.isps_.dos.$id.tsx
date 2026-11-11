@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ArrowLeft, Copy, Loader2, Printer } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Notice } from "@/components/nw";
 import { cancelDeclaration, getDeclaration } from "@/lib/isps.functions";
 import { DosDocument } from "@/components/isps/DosDocument";
@@ -13,6 +13,7 @@ export const Route = createFileRoute("/app/isps_/dos/$id")({
   head: () => ({ meta: [{ title: "Declaration of Security · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin", "security_forensic_analyst"]);
+    requireFeature(context.appAccess, "isps");
     return { appAccess: context.appAccess };
   },
   component: DosPage,

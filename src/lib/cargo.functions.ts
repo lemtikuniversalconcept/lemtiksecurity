@@ -68,6 +68,7 @@ export const listConsignments = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "cargo");
     const supabase = sb(context);
     const [{ data, error }, role] = await Promise.all([
       supabase.from("cargo_consignments").select(COLS).eq("organisation_id", orgId).order("created_at", { ascending: false }).limit(200),
@@ -97,6 +98,7 @@ export const createConsignment = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "cargo");
     const db = await admin();
     const role = await roleIn(db, context.userId, orgId);
     if (!role || !CREATE_ROLES.includes(role)) throwSafeError("cargo.create", new Error("role"), "Only managers and operators can add consignments.");

@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Anchor, Check, Copy, FileSignature, Loader2, Plus, ShieldAlert } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
 import {
   acknowledgeNotice,
@@ -27,6 +27,7 @@ export const Route = createFileRoute("/app/isps")({
   head: () => ({ meta: [{ title: "ISPS Watch · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin", "security_forensic_analyst"]);
+    requireFeature(context.appAccess, "isps");
   },
   component: IspsPage,
 });

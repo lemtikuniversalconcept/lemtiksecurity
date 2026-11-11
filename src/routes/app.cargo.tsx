@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Package, Plus, Trash2 } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
 import { LocationPicker } from "@/components/LocationPicker";
 import { createConsignment, listConsignments, type Consignment } from "@/lib/cargo.functions";
@@ -14,6 +14,7 @@ export const Route = createFileRoute("/app/cargo")({
   head: () => ({ meta: [{ title: "Cargo custody · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin", "field_officer", "security_forensic_analyst"]);
+    requireFeature(context.appAccess, "cargo");
   },
   component: CargoPage,
 });

@@ -6,7 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import { Anchor, BellRing, Car, Check, Copy, Loader2, Plus, RefreshCw, Save, Ship, ShieldCheck, Trash2, User, X } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { useRealtimeInvalidate } from "@/lib/useRealtime";
 import { basemapOptions, BasemapSwitch, useBasemap } from "@/lib/basemap";
 import { LocationPicker, useMapboxToken } from "@/components/LocationPicker";
@@ -41,6 +41,7 @@ export const Route = createFileRoute("/app/movement")({
   head: () => ({ meta: [{ title: "Protected movement · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin"]);
+    requireFeature(context.appAccess, "movement");
     return { appAccess: context.appAccess };
   },
   component: Movement,
@@ -118,12 +119,15 @@ function Movement() {
   const voyages = voyagesQ.data ?? [];
   const listCorridorsFn = useServerFn(listCorridors);
   const listRespondersFn = useServerFn(listResponders);
-  const corridorsQ = useQuery({ queryKey: ["movement-corridors"], queryFn: () => listCorridorsFn() });
-  const respondersQ = useQuery({ queryKey: ["movement-responders"], queryFn: () => listRespondersFn() });
+  const isPlatformAdmin = appAccess?.dbRole === "lemtik_admin";
+  const hasCorridors = isPlatformAdmin || !!appAccess?.features.includes("corridors");
+  const hasSar = isPlatformAdmin || !!appAccess?.features.includes("sar");
+  const corridorsQ = useQuery({ queryKey: ["movement-corridors"], queryFn: () => listCorridorsFn(), enabled: hasCorridors });
+  const respondersQ = useQuery({ queryKey: ["movement-responders"], queryFn: () => listRespondersFn(), enabled: hasCorridors });
   const corridors = corridorsQ.data ?? [];
   const responders = respondersQ.data ?? [];
   const listSarFn = useServerFn(listSarCases);
-  const sarQ = useQuery({ queryKey: ["sar-cases"], queryFn: () => listSarFn() });
+  const sarQ = useQuery({ queryKey: ["sar-cases"], queryFn: () => listSarFn(), enabled: hasSar });
   const sarCases = sarQ.data ?? [];
   const activeSar = sarCases.filter((c) => c.status === "active").length;
   const underway = voyages.filter((v) => v.status === "underway");
@@ -157,9 +161,13 @@ function Movement() {
           { value: "live", label: "Live" },
           { value: "subjects", label: "People & assets", count: subjects.length },
           { value: "voyages", label: "Voyages", count: underway.length || undefined },
-          { value: "corridors", label: "Corridors", count: corridors.length || undefined },
-          { value: "responders", label: "Responders", count: responders.length || undefined },
-          { value: "sar", label: "Search & rescue", count: activeSar || undefined },
+          ...(hasCorridors
+            ? [
+                { value: "corridors" as const, label: "Corridors", count: corridors.length || undefined },
+                { value: "responders" as const, label: "Responders", count: responders.length || undefined },
+              ]
+            : []),
+          ...(hasSar ? [{ value: "sar" as const, label: "Search & rescue", count: activeSar || undefined }] : []),
           { value: "zones", label: "Zones", count: zones.length },
           { value: "alerts", label: "Alerts", count: openAlerts.length || undefined },
         ]}

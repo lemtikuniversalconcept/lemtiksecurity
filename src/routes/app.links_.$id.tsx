@@ -6,7 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import { ArrowLeft, Copy, Loader2 } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { basemapOptions } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
 import { Empty, Notice, PageHeader, Panel, Status } from "@/components/nw";
@@ -16,6 +16,7 @@ export const Route = createFileRoute("/app/links_/$id")({
   head: () => ({ meta: [{ title: "Shared view · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin"]);
+    requireFeature(context.appAccess, "links");
     return { appAccess: context.appAccess };
   },
   component: SharedPage,

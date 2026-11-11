@@ -65,6 +65,7 @@ export const saveCorridor = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "corridors");
     if (!!data.curfew_start !== !!data.curfew_end) throwSafeError("corridors.save", new Error("half curfew"), "Set both curfew times, or neither.");
     const { id, ...row } = data;
     const q = id
@@ -140,6 +141,7 @@ export const openBoarding = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => z.object({ voyage_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "corridors");
     const { randomBytes } = await import("node:crypto");
     const token = randomBytes(12).toString("base64url");
     const { error } = await sb(context).from("movement_voyages").update({ boarding_token: token }).eq("id", data.voyage_id).eq("organisation_id", orgId).eq("status", "planned");
@@ -330,6 +332,7 @@ export const recordHandoff = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "corridors");
     const supabase = sb(context);
     const [{ data: r }, { data: s }, { data: me }] = await Promise.all([
       supabase.from("movement_responders").select("id, name, phone, whatsapp, lat, lng").eq("id", data.responder_id).eq("organisation_id", orgId).maybeSingle(),

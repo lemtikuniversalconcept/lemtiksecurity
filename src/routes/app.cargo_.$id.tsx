@@ -6,7 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import { ArrowLeft, Copy, Link2, Loader2, ShieldCheck, ShieldX } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { basemapOptions } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
@@ -18,6 +18,7 @@ export const Route = createFileRoute("/app/cargo_/$id")({
   head: () => ({ meta: [{ title: "Consignment · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin", "field_officer", "security_forensic_analyst"]);
+    requireFeature(context.appAccess, "cargo");
     return { appAccess: context.appAccess };
   },
   component: ConsignmentPage,

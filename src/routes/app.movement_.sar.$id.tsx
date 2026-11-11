@@ -6,7 +6,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, Printer, Save } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { basemapOptions } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
 import { Notice, PageHeader, Panel, Status } from "@/components/nw";
@@ -17,6 +17,7 @@ export const Route = createFileRoute("/app/movement_/sar/$id")({
   head: () => ({ meta: [{ title: "Search and rescue plan · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin"]);
+    requireFeature(context.appAccess, "sar");
     return { appAccess: context.appAccess };
   },
   component: SarPage,

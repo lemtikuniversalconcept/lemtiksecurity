@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Check, Eye, Loader2, Share2, X } from "lucide-react";
-import { requireSectionAccess } from "@/lib/rbac";
+import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
 import { listLinkDirectory, listLinks, offerLink, respondLink, revokeLink, SCOPE_LABEL, SCOPES, type LinkEvent, type OrgLink, type Scope } from "@/lib/links.functions";
 
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/app/links")({
   head: () => ({ meta: [{ title: "Shared access · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin"]);
+    requireFeature(context.appAccess, "links");
   },
   component: LinksPage,
 });

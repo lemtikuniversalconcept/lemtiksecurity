@@ -104,6 +104,7 @@ export const offerLink = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
+    await (await import("./features.server")).assertFeature(orgId, "links");
     const db = await admin();
     const role = await roleIn(db, context.userId, orgId);
     if (!role || !MANAGE_ROLES.includes(role)) throwSafeError("links.offer", new Error("role"), "Only security managers and client admins can share access.");

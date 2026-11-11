@@ -341,6 +341,32 @@ export const updatePlatformOrganisation = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+/** Switches maritime modules on or off for one organisation. null = the defaults for its type. */
+export const setOrganisationFeatures = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      organisation_id: z.string().uuid(),
+      features: z.array(z.enum(["movement", "corridors", "sar", "isps", "cargo", "links"])).max(6).nullable(),
+    }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    await assertPlatformAdmin(context.supabase, context.userId);
+    const features = data.features ? Array.from(new Set(data.features)) : null;
+    const { data: before } = await context.supabase.from("organisations").select("features").eq("id", data.organisation_id).maybeSingle();
+    const { error } = await (context.supabase as any).from("organisations").update({ features }).eq("id", data.organisation_id);
+    if (error) throwSafeError("platform.org.features", error, "Unable to update modules.");
+    await recordBlackboxAudit({
+      userId: context.userId,
+      orgId: data.organisation_id,
+      resourceType: "organisation",
+      resourceId: data.organisation_id,
+      actionType: "update",
+      actionDetail: { modules_before: (before as any)?.features ?? "defaults", modules_after: features ?? "defaults" },
+    });
+    return { ok: true };
+  });
+
 export const setPlatformOrganisationStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({

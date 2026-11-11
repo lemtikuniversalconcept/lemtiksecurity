@@ -2,6 +2,7 @@ import { redirect } from "@tanstack/react-router";
 import { createIsomorphicFn } from "@tanstack/react-start";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "@/integrations/supabase/server";
+import { effectiveFeatures, FEATURES, type Feature } from "./features";
 
 // beforeLoad runs on the server during SSR (hard nav / refresh / deep link),
 // where the browser client passed into resolveAppAccess has no session to
@@ -29,6 +30,8 @@ export function orgKind(type: string | null | undefined): OrgKind {
 export interface AppAccess {
   orgType: string;
   orgKind: OrgKind;
+  /** Modules switched on for this organisation (see features.ts). */
+  features: Feature[];
   userId: string;
   email: string | null;
   displayName: string | null;
@@ -111,6 +114,12 @@ export function requireSectionAccess(access: AppAccess, allowedRoles: SpecRole[]
   throw redirect({ to: "/" });
 }
 
+/** Sends the user to the overview when a module is switched off for their organisation. */
+export function requireFeature(access: AppAccess, feature: Feature) {
+  if (access.dbRole === "lemtik_admin" || access.features?.includes(feature)) return;
+  throw redirect({ to: "/app" });
+}
+
 export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: string): Promise<AppAccess> {
   supabase = getRequestSupabase(supabase);
 
@@ -147,6 +156,7 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
       orgName: "Lemtik Platform",
       orgType: "",
       orgKind: "land",
+      features: [...FEATURES],
       dbRole: "lemtik_admin",
       specRole: "lemtik_admin",
       roleLabel: roleLabel("lemtik_admin"),
@@ -163,7 +173,7 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
 
   const { data: membership, error: membershipError } = await supabase
     .from("organisation_members")
-    .select("role, organisation:organisations(id, name, type)")
+    .select("role, organisation:organisations(id, name, type, features)")
     .eq("organisation_id", profile.active_organisation_id)
     .eq("user_id", data.user.id)
     .maybeSingle();
@@ -185,6 +195,7 @@ export async function resolveAppAccess(supabase: SupabaseClient, redirectPath?: 
     orgName: org?.name ?? "Active organisation",
     orgType: String((org as { type?: string } | null)?.type ?? ""),
     orgKind: orgKind((org as { type?: string } | null)?.type),
+    features: effectiveFeatures(orgKind((org as { type?: string } | null)?.type), (org as { features?: string[] | null } | null)?.features),
     dbRole,
     specRole: toSpecRole(dbRole),
     roleLabel: roleLabel(dbRole, orgKind((org as { type?: string } | null)?.type)),

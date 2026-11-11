@@ -1,4 +1,5 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import type { Feature } from "@/lib/features";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
@@ -51,7 +52,7 @@ import {
 import type { AppAccess, OrgKind, SpecRole } from "@/lib/rbac";
 import type { LucideIcon } from "lucide-react";
 
-type NavItem = { to: AppPath; label: string; icon: LucideIcon; exact?: boolean; allowed: SpecRole[]; count?: "incidents" | "alerts"; kinds?: OrgKind[]; labelFor?: Partial<Record<OrgKind, string>> };
+type NavItem = { to: AppPath; label: string; icon: LucideIcon; exact?: boolean; allowed: SpecRole[]; count?: "incidents" | "alerts"; kinds?: OrgKind[]; labelFor?: Partial<Record<OrgKind, string>>; feature?: Feature };
 // Which kinds of organisation see an item (none listed = everyone).
 const ON_LAND_AND_PORT: OrgKind[] = ["land", "port_facility"];
 const OPERATORS: OrgKind[] = ["land", "maritime_operator", "port_facility"];
@@ -70,10 +71,10 @@ const CLIENT_NAV: NavGroup[] = [
       { to: "/app/map", label: "Live map", icon: Map, allowed: ALL },
       { to: "/app/incidents", label: "Incidents", icon: Siren, allowed: ALL, count: "incidents" },
       { to: "/app/patrols", label: "Patrols", icon: Route, allowed: ALL, kinds: ON_LAND_AND_PORT },
-      { to: "/app/movement", label: "Protected movement", icon: Navigation, allowed: ALL, kinds: OPERATORS, labelFor: { maritime_operator: "Fleet and voyages" } },
-      { to: "/app/cargo", label: "Cargo custody", icon: Package, allowed: ALL, kinds: OPERATORS },
-      { to: "/app/isps", label: "ISPS Watch", icon: ShieldCheck, allowed: ALL, kinds: MARITIME_ISPS, labelFor: { authority: "ISPS compliance" } },
-      { to: "/app/links", label: "Shared access", icon: Share2, allowed: ALL, labelFor: { authority: "Members and shared access", responder: "Shared with us" } },
+      { to: "/app/movement", label: "Protected movement", icon: Navigation, allowed: ALL, kinds: OPERATORS, labelFor: { maritime_operator: "Fleet and voyages" }, feature: "movement" },
+      { to: "/app/cargo", label: "Cargo custody", icon: Package, allowed: ALL, kinds: OPERATORS, feature: "cargo" },
+      { to: "/app/isps", label: "ISPS Watch", icon: ShieldCheck, allowed: ALL, kinds: MARITIME_ISPS, labelFor: { authority: "ISPS compliance" }, feature: "isps" },
+      { to: "/app/links", label: "Shared access", icon: Share2, allowed: ALL, labelFor: { authority: "Members and shared access", responder: "Shared with us" }, feature: "links" },
       { to: "/app/alerts", label: "Alerts", icon: Bell, allowed: OPS, count: "alerts" },
     ],
   },
@@ -240,7 +241,7 @@ export function AppShell({ access }: { access: AppAccess }) {
         .map((g) => ({
           ...g,
           items: g.items
-            .filter((i) => i.allowed.includes(access.specRole) && (isAdmin || !i.kinds || i.kinds.includes(access.orgKind)))
+            .filter((i) => i.allowed.includes(access.specRole) && (isAdmin || ((!i.kinds || i.kinds.includes(access.orgKind)) && (!i.feature || access.features.includes(i.feature)))))
             .map((i) => ({ ...i, label: (!isAdmin && i.labelFor?.[access.orgKind]) || i.label })),
         }))
         .filter((g) => g.items.length > 0),
