@@ -120,13 +120,10 @@ function TelegramCard() {
   const startFn = useServerFn(startTelegramLink);
   const stopFn = useServerFn(unlinkTelegram);
   const q = useQuery({ queryKey: ["my-telegram"], queryFn: () => getFn(), refetchInterval: (query) => (query.state.data && !query.state.data.linked ? 5_000 : false) });
+  const [pending, setPending] = useState<null | { url: string; app_url: string; bot: string; command: string }>(null);
   const start = useMutation({
     mutationFn: () => startFn(),
-    onSuccess: (r) => {
-      const w = window.open(r.url, "_blank", "noopener");
-      if (!w) window.location.href = r.url; // popup blocked (common on phones)
-      toast.message("Telegram opened. Press Start in the bot chat to finish.");
-    },
+    onSuccess: (r) => setPending(r),
     onError: (e) => toast.error((e as Error).message),
   });
   const stop = useMutation({ mutationFn: () => stopFn(), onSuccess: () => { q.refetch(); toast.success("Telegram unlinked"); }, onError: (e) => toast.error((e as Error).message) });
@@ -146,6 +143,20 @@ function TelegramCard() {
       ) : (
         <button type="button" className="b b-sm b-pri" disabled={start.isPending} onClick={() => start.mutate()}>{start.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Connect Telegram</button>
       ))}
+      {pending && t.configured && !t.linked && (
+        <div className="col g6" style={{ flex: "1 1 100%", fontSize: 12.5 }}>
+          <div className="row g8 wrap">
+            <a className="b b-sm b-pri" href={pending.app_url}>Open in the Telegram app</a>
+            <a className="b b-sm b-sec" href={pending.url} target="_blank" rel="noopener noreferrer">Open t.me link</a>
+          </div>
+          <span className="t3">If neither opens, search for <b>@{pending.bot}</b> in Telegram and send this message (valid 15 minutes):</span>
+          <span className="row g8" style={{ alignItems: "center" }}>
+            <code className="mono" style={{ padding: "4px 8px", borderRadius: 6, background: "var(--bg-2, rgba(127,127,127,.12))" }}>{pending.command}</code>
+            <button type="button" className="b b-sm b-gh" onClick={() => navigator.clipboard?.writeText(pending.command).then(() => toast.success("Copied"), () => null)}>Copy</button>
+          </span>
+          <span className="t3">This card updates by itself once the bot confirms.</span>
+        </div>
+      )}
     </div>
   );
 }

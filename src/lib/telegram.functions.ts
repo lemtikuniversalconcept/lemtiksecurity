@@ -20,7 +20,7 @@ export const getMyTelegram = createServerFn({ method: "GET" })
 /** Returns a t.me link that opens the bot with a one-time code (valid 15 minutes). */
 export const startTelegramLink = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ url: string }> => {
+  .handler(async ({ context }): Promise<{ url: string; app_url: string; bot: string; command: string }> => {
     const { botToken, botUsername, ensureWebhook } = await import("./telegram.server");
     if (!botToken()) throwSafeError("telegram.link", new Error("no token"), "Telegram isn't set up on this system yet.");
     const { getSiteUrl } = await import("./orgs.server");
@@ -35,7 +35,7 @@ export const startTelegramLink = createServerFn({ method: "POST" })
     const code = randomBytes(18).toString("base64url");
     const { error } = await db.from("telegram_link_codes").insert({ code, user_id: context.userId, expires_at: new Date(Date.now() + 15 * 60_000).toISOString() });
     if (error) throwSafeError("telegram.link", error, "Couldn't start linking. Try again.");
-    return { url: `https://t.me/${username}?start=${code}` };
+    return { url: `https://t.me/${username}?start=${code}`, app_url: `tg://resolve?domain=${username}&start=${code}`, bot: username, command: `/start ${code}` };
   });
 
 export const unlinkTelegram = createServerFn({ method: "POST" })
