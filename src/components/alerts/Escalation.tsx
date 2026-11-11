@@ -2,15 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Send, Trash2 } from "lucide-react";
+import { BellRing, Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { Notice, Switch } from "@/components/nw";
 import { getEscalationPolicy, listAlertDeliveries, saveEscalationPolicy, type EscalationStep } from "@/lib/escalation.functions";
+import { getPushStatus, removePushSubscription, savePushSubscription, sendPushTest } from "@/lib/push.functions";
 import { getMyTelegram, sendTelegramTest, startTelegramLink, unlinkTelegram } from "@/lib/telegram.functions";
 
 const ROLE_LABEL: Record<string, string> = { supervisor: "Supervisors", manager: "Security managers", client_admin: "Client admins" };
-const CHANNEL_LABEL: Record<string, string> = { in_app: "In-app", email: "Email", telegram: "Telegram" };
+const CHANNEL_LABEL: Record<string, string> = { in_app: "In-app", push: "Push", email: "Email", telegram: "Telegram" };
 const ROLES = ["supervisor", "manager", "client_admin"] as const;
-const CHANNELS = ["in_app", "email", "telegram"] as const;
+const CHANNELS = ["in_app", "push", "email", "telegram"] as const;
 
 /** Security manager settings: who is told about a serious movement alert, and when, until someone acknowledges it. */
 export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
@@ -61,6 +62,7 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
             {q.data.is_default ? " These are the default steps; save to make them your own." : q.data.updated_by_name ? ` Last changed by ${q.data.updated_by_name}.` : ""}
           </span>
           {!q.data.email_configured && <Notice tone="warn">Email isn't set up on this system yet, so email steps are logged as skipped.</Notice>}
+          <PushCard />
           <TelegramCard />
           <div className="row g12 wrap" style={{ alignItems: "center" }}>
             <Switch on={enabled} onChange={(v) => canConfigure && setEnabled(v)} label="Escalation on" />
@@ -98,7 +100,6 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
                     <input type="checkbox" checked={s.channels.includes(c)} disabled={!canConfigure} onChange={() => patch(i, { channels: toggle(s.channels, c) })} /> {CHANNEL_LABEL[c]}
                   </label>
                 ))}
-                <span className="t3">· Push comes next</span>
               </div>
             </div>
           ))}
@@ -111,6 +112,79 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+function urlB64ToUint8Array(b64: string) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+/** Push notifications on this browser or phone. Each device is turned on separately. */
+function PushCard() {
+  const statusFn = useServerFn(getPushStatus);
+  const saveFn = useServerFn(savePushSubscription);
+  const removeFn = useServerFn(removePushSubscription);
+  const testFn = useServerFn(sendPushTest);
+  const q = useQuery({ queryKey: ["push-status"], queryFn: () => statusFn() });
+  const supported = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const [here, setHere] = useState<PushSubscription | null>(null);
+  const [perm, setPerm] = useState<NotificationPermission | "unsupported">(supported ? Notification.permission : "unsupported");
+  useEffect(() => {
+    if (!supported) return;
+    navigator.serviceWorker.getRegistration().then((r) => r?.pushManager.getSubscription()).then((s) => setHere(s ?? null)).catch(() => null);
+  }, [supported]);
+  const on = useMutation({
+    mutationFn: async () => {
+      const p = await Notification.requestPermission();
+      setPerm(p);
+      if (p !== "granted") throw new Error(p === "denied" ? "Notifications are blocked for this site. Allow them in your browser settings, then try again." : "Notifications weren't allowed.");
+      const reg = (await navigator.serviceWorker.getRegistration()) ?? (await navigator.serviceWorker.register("/sw.js"));
+      await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(q.data!.public_key) }));
+      const j = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } };
+      await saveFn({ data: { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device_label: navigator.userAgent.slice(0, 120) } });
+      setHere(sub);
+    },
+    onSuccess: () => { q.refetch(); toast.success("Notifications on for this device"); },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const off = useMutation({
+    mutationFn: async () => {
+      if (!here) return;
+      await removeFn({ data: { endpoint: here.endpoint } });
+      await here.unsubscribe().catch(() => null);
+      setHere(null);
+    },
+    onSuccess: () => { q.refetch(); toast.success("Notifications off for this device"); },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const test = useMutation({ mutationFn: () => testFn(), onSuccess: (r) => toast.success(`Test sent to ${r.sent} device${r.sent === 1 ? "" : "s"}`), onError: (e) => toast.error((e as Error).message) });
+  const s = q.data;
+  if (!s) return null;
+  return (
+    <div className="card row g10 wrap" style={{ padding: "10px 12px", alignItems: "center" }}>
+      <BellRing size={16} />
+      <span className="col f1" style={{ minWidth: 0 }}>
+        <b>Notifications on this device</b>
+        <span className="t3" style={{ fontSize: 12 }}>
+          {!s.configured ? "Push isn't set up on this system yet."
+            : !supported ? "This browser can't receive push notifications. On iPhone, add Lemtik to your home screen first (Share → Add to Home Screen), then open it from there."
+            : here ? `On for this device${s.devices > 1 ? ` (and ${s.devices - 1} other${s.devices > 2 ? "s" : ""})` : ""}. Alerts pop up even when Lemtik is closed.`
+            : perm === "denied" ? "Blocked for this site. Allow notifications in your browser settings."
+            : `Get alerts as phone or desktop notifications, even with Lemtik closed.${s.devices ? ` On for ${s.devices} other device${s.devices > 1 ? "s" : ""}.` : ""}`}
+        </span>
+      </span>
+      {s.configured && supported && (here ? (
+        <span className="row g6">
+          <button type="button" className="b b-sm b-pri" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Send test</button>
+          <button type="button" className="b b-sm b-sec" disabled={off.isPending} onClick={() => off.mutate()}>Turn off</button>
+        </span>
+      ) : (
+        <button type="button" className="b b-sm b-pri" disabled={on.isPending || perm === "denied"} onClick={() => on.mutate()}>{on.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Turn on</button>
+      ))}
+    </div>
   );
 }
 

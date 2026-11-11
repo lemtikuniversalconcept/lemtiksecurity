@@ -5,7 +5,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 export type EscalationRole = "supervisor" | "manager" | "client_admin";
-export type EscalationChannel = "in_app" | "email" | "telegram";
+export type EscalationChannel = "in_app" | "email" | "telegram" | "push";
 export type EscalationStep = { after_min: number; roles: EscalationRole[]; channels: EscalationChannel[] };
 export type EscalationPolicy = { enabled: boolean; min_severity: number; steps: EscalationStep[] };
 
@@ -14,7 +14,7 @@ export const DEFAULT_POLICY: EscalationPolicy = {
   enabled: true,
   min_severity: 4,
   steps: [
-    { after_min: 0, roles: ["supervisor", "manager"], channels: ["in_app", "telegram"] },
+    { after_min: 0, roles: ["supervisor", "manager"], channels: ["in_app", "push", "telegram"] },
     { after_min: 2, roles: ["manager"], channels: ["in_app", "email"] },
     { after_min: 10, roles: ["client_admin", "manager"], channels: ["email"] },
   ],
@@ -83,6 +83,23 @@ async function deliver(a: AlertRow, stepIndex: number, step: EscalationStep, sub
         status: r.ok ? "sent" : r.skipped ? "skipped" : "failed",
         detail: r.ok ? null : String(r.reason ?? r.error ?? "send failed").slice(0, 500),
       });
+    }
+  }
+  if (people.length && step.channels.includes("push")) {
+    const { vapidConfigured } = await import("./webpush.server");
+    if (!vapidConfigured()) {
+      for (const p of people) log.push({ organisation_id: a.organisation_id, movement_alert_id: a.id, step: stepIndex, channel: "push", recipient_user_id: p.user_id, recipient_label: p.name, status: "skipped", detail: "Push not set up" });
+    } else {
+      const { sendToUsers } = await import("./push.server");
+      const res = await sendToUsers(people.map((p) => p.user_id), { title, body, url: "/app/movement", tag: `alert-${a.id}`, requireInteraction: a.severity >= 5 });
+      for (const p of people) {
+        const r = res.get(p.user_id) ?? { sent: 0, failed: 0, detail: "No devices" };
+        log.push({
+          organisation_id: a.organisation_id, movement_alert_id: a.id, step: stepIndex, channel: "push", recipient_user_id: p.user_id, recipient_label: p.name,
+          status: r.sent ? "sent" : r.detail === "No devices" ? "skipped" : "failed",
+          detail: r.sent ? (r.sent > 1 ? `${r.sent} devices` : null) : r.detail === "No devices" ? "Push not turned on" : String(r.detail ?? "send failed").slice(0, 500),
+        });
+      }
     }
   }
   if (people.length && step.channels.includes("telegram")) {

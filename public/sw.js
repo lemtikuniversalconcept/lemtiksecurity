@@ -1,4 +1,4 @@
-const CACHE_NAME = "lemtik-security-v2";
+const CACHE_NAME = "lemtik-security-v3";
 const TILE_CACHE_NAME = "lemtik-mapbox-v2";
 const PRECACHE_URLS = [
   "/",
@@ -109,5 +109,42 @@ self.addEventListener("fetch", (event) => {
         const cached = await caches.match(event.request);
         return cached ?? new Response("", { status: 504, statusText: "Offline" });
       })
+  );
+});
+
+// ---- Push notifications (alerts from the escalation chain)
+self.addEventListener("push", (event) => {
+  let msg = { title: "Lemtik alert", body: "", url: "/app/alerts" };
+  try {
+    if (event.data) msg = { ...msg, ...event.data.json() };
+  } catch {
+    if (event.data) msg.body = event.data.text();
+  }
+  event.waitUntil(
+    self.registration.showNotification(msg.title, {
+      body: msg.body,
+      icon: "/favicon.png",
+      
+      tag: msg.tag,
+      renotify: !!msg.tag,
+      requireInteraction: !!msg.requireInteraction,
+      data: { url: msg.url || "/app/alerts" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/app/alerts", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+      for (const w of wins) {
+        if (w.url.startsWith(self.location.origin) && "focus" in w) {
+          w.navigate(url).catch(() => {});
+          return w.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    })
   );
 });

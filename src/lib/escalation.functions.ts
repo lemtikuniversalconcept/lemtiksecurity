@@ -27,7 +27,7 @@ export const getEscalationPolicy = createServerFn({ method: "GET" })
 const stepSchema = z.object({
   after_min: z.number().int().min(0).max(240),
   roles: z.array(z.enum(["supervisor", "manager", "client_admin"])).min(1).max(3),
-  channels: z.array(z.enum(["in_app", "email", "telegram"])).min(1).max(3),
+  channels: z.array(z.enum(["in_app", "email", "telegram", "push"])).min(1).max(4),
 });
 
 export const saveEscalationPolicy = createServerFn({ method: "POST" })
