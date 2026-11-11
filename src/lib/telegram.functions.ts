@@ -49,3 +49,21 @@ export const unlinkTelegram = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+/** Sends a test message to the signed-in user's own Telegram only. Nothing is written to the organisation. */
+export const sendTelegramTest = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const db = await admin();
+    const { data } = await db.from("user_telegram").select("chat_id").eq("user_id", context.userId).maybeSingle();
+    if (!data?.chat_id) throwSafeError("telegram.test", new Error("not linked"), "Link your Telegram first.");
+    const { tg } = await import("./telegram.server");
+    const r = await tg("sendMessage", {
+      chat_id: data.chat_id,
+      text: "🧪 <b>Test alert from Lemtik</b>\n\nThis is what a real alert looks like. Real alerts have an Acknowledge button that stops the escalation chain.",
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [[{ text: "Open Lemtik", url: "https://app.lemtik.com.ng/app/alerts#escalation" }]] },
+    });
+    if (!r.ok) throwSafeError("telegram.test", new Error(r.description ?? "send failed"), `Telegram refused the message: ${r.description ?? "unknown error"}`);
+    return { ok: true };
+  });

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { Notice, Switch } from "@/components/nw";
 import { getEscalationPolicy, listAlertDeliveries, saveEscalationPolicy, type EscalationStep } from "@/lib/escalation.functions";
-import { getMyTelegram, startTelegramLink, unlinkTelegram } from "@/lib/telegram.functions";
+import { getMyTelegram, sendTelegramTest, startTelegramLink, unlinkTelegram } from "@/lib/telegram.functions";
 
 const ROLE_LABEL: Record<string, string> = { supervisor: "Supervisors", manager: "Security managers", client_admin: "Client admins" };
 const CHANNEL_LABEL: Record<string, string> = { in_app: "In-app", email: "Email", telegram: "Telegram" };
@@ -126,6 +126,8 @@ function TelegramCard() {
     onSuccess: (r) => setPending(r),
     onError: (e) => toast.error((e as Error).message),
   });
+  const testFn = useServerFn(sendTelegramTest);
+  const test = useMutation({ mutationFn: () => testFn(), onSuccess: () => toast.success("Test sent. Check Telegram."), onError: (e) => toast.error((e as Error).message) });
   const stop = useMutation({ mutationFn: () => stopFn(), onSuccess: () => { q.refetch(); toast.success("Telegram unlinked"); }, onError: (e) => toast.error((e as Error).message) });
   const t = q.data;
   if (!t) return null;
@@ -139,7 +141,10 @@ function TelegramCard() {
         </span>
       </span>
       {t.configured && (t.linked ? (
-        <button type="button" className="b b-sm b-sec" disabled={stop.isPending} onClick={() => stop.mutate()}>Unlink</button>
+        <span className="row g6">
+          <button type="button" className="b b-sm b-pri" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Send test</button>
+          <button type="button" className="b b-sm b-sec" disabled={stop.isPending} onClick={() => stop.mutate()}>Unlink</button>
+        </span>
       ) : (
         <button type="button" className="b b-sm b-pri" disabled={start.isPending} onClick={() => start.mutate()}>{start.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Connect Telegram</button>
       ))}
