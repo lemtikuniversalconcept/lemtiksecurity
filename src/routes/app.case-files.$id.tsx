@@ -1,11 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+import { basemapOptions } from "@/lib/basemap";
+import { useMapboxToken } from "@/components/LocationPicker";
 import { ArrowLeft, Download, Loader2, Printer, ShieldCheck } from "lucide-react";
 import { requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, Panel, Status, type Tone } from "@/components/nw";
-import { getCaseFile, type CaseEvidence } from "@/lib/casefile.functions";
+import { getCaseFile, getCaseFileAccessLog, logCaseFileAccess, type CaseEvidence, type CaseManifest, type CaseMap } from "@/lib/casefile.functions";
 
 export const Route = createFileRoute("/app/case-files/$id")({
   head: () => ({ meta: [{ title: "Case file · Lemtik SOD" }] }),
@@ -36,6 +40,15 @@ function CaseFilePage() {
   const { id } = Route.useParams();
   const fn = useServerFn(getCaseFile);
   const q = useQuery({ queryKey: ["case-file", id], queryFn: () => fn({ data: { id } }), staleTime: 50 * 60_000 });
+  const logFn = useServerFn(logCaseFileAccess);
+  const accessFn = useServerFn(getCaseFileAccessLog);
+  const logged = useRef(false);
+  useEffect(() => {
+    if (q.data && !logged.current) {
+      logged.current = true;
+      logFn({ data: { id, action: "view" } }).catch(() => null);
+    }
+  }, [q.data, id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [qr, setQr] = useState<string | null>(null);
   const [zip, setZip] = useState<{ busy: boolean; note: string | null; tone: "ok" | "warn" | "fail" | "blue" }>({ busy: false, note: null, tone: "blue" });
   const verifyUrl = `${typeof window === "undefined" ? "https://app.lemtik.com.ng" : window.location.origin}/verify/${id}`;
@@ -59,6 +72,7 @@ function CaseFilePage() {
     try {
       const { zipSync, strToU8 } = await import("fflate");
       const enc = (s: string) => strToU8(s);
+      await logFn({ data: { id: row.id, action: "download_bundle" } }).catch(() => null);
       const files: Record<string, Uint8Array> = { "manifest.json": enc(row.manifest_text) };
       for (const f of extra_files) files[f.file] = enc(f.content);
       const failed: string[] = [];
@@ -73,6 +87,13 @@ function CaseFilePage() {
         if (e.sha256 && h !== e.sha256) failed.push(`${e.file}: the stored file no longer matches its fingerprint`);
         files[e.file] = bytes;
       }
+      files["chain-of-custody.csv"] = enc(custodyCsv(m));
+      const access = await accessFn({ data: { id: row.id } }).catch(() => []);
+      files["who-viewed.csv"] = enc(["at,who,email,action,ip", ...access.map((a) => [a.at, a.who, a.email, a.action, a.ip].map(csvCell).join(","))].join("\n") + "\n");
+      // Fingerprint list in the standard format `shasum -a 256 -c SHA256SUMS.txt` reads.
+      const sums: string[] = [];
+      for (const [name, bytes] of Object.entries(files)) sums.push(`${await sha256(bytes)}  ${name}`);
+      files["SHA256SUMS.txt"] = enc(sums.sort((a, b) => a.slice(66).localeCompare(b.slice(66))).join("\n") + "\n");
       files["README.txt"] = enc(readme(row.id, row.manifest_sha256, verifyUrl, failed));
       const blob = new Blob([zipSync(files, { level: 0 }) as BlobPart], { type: "application/zip" });
       const a = document.createElement("a");
@@ -102,7 +123,7 @@ function CaseFilePage() {
         <button type="button" className="b b-sm b-sec" onClick={downloadBundle} disabled={zip.busy}>
           {zip.busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Evidence bundle (.zip)
         </button>
-        <button type="button" className="b b-sm b-pri" onClick={() => window.print()}><Printer size={14} /> Print or save as PDF</button>
+        <button type="button" className="b b-sm b-pri" onClick={() => { logFn({ data: { id: row.id, action: "print" } }).catch(() => null); window.print(); }}><Printer size={14} /> Print or save as PDF</button>
       </div>
       {zip.note && <div className="no-print"><Notice tone={zip.tone}>{zip.note}</Notice></div>}
 
@@ -129,6 +150,8 @@ function CaseFilePage() {
           {qr && <img src={qr} alt="QR code linking to the verify page for this case file" width={128} height={128} style={{ background: "#fff", borderRadius: 6, padding: 4 }} />}
         </div>
       </Panel>
+
+      {m.maritime && <MaritimeSections m={m} />}
 
       <Panel title={m.kind === "incident" ? "The incident" : m.kind === "consignment" ? "The consignment" : "The voyage"}>
         <div className="col g6" style={{ fontSize: 13 }}>
@@ -228,6 +251,109 @@ function CaseFilePage() {
   );
 }
 
+function MaritimeSections({ m }: { m: CaseManifest }) {
+  const x = m.maritime!;
+  return (
+    <>
+      <Panel title="Summary">
+        <p style={{ fontSize: 13.5, lineHeight: 1.6, maxWidth: "75ch" }}>{x.summary}</p>
+        <span className="t3" style={{ fontSize: 12 }}>Written automatically from the record below. It states only what the system recorded.</span>
+      </Panel>
+      <div className="grid g16 cf-two">
+        <Panel title="Plan against what happened" bodyClassName="">
+          <div style={{ overflowX: "auto" }}>
+            <table className="tbl w-full" style={{ fontSize: 12.5, fontVariantNumeric: "tabular-nums" }}>
+              <thead><tr><th className="text-left"> </th><th className="text-left">Planned</th><th className="text-left">Actual</th><th className="text-left">Difference</th></tr></thead>
+              <tbody>
+                {x.plan_vs_actual.map((r) => (
+                  <tr key={r.item}>
+                    <td><b>{r.item}</b></td>
+                    <td>{r.planned ? (isIso(r.planned) ? when(r.planned) : r.planned) : <span className="t3">Not set</span>}</td>
+                    <td>{r.actual ? (isIso(r.actual) ? when(r.actual) : r.actual) : <span className="t3">Not recorded</span>}</td>
+                    <td style={{ fontWeight: r.note?.includes("MISMATCH") || r.note?.includes("late") || r.note?.includes("outside") ? 600 : 400 }}>{r.note ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+        <Panel title="People and safety equipment">
+          <div className="col g6" style={{ fontSize: 13 }}>
+            {x.counts.map((c) => <KV key={c.label} k={c.label} v={c.value} />)}
+          </div>
+        </Panel>
+      </div>
+      <Panel title="Track" meta="Dashed: planned route · Solid: positions reported · Dots: where alerts were raised">
+        <TrackMap map={x.map} />
+        <span className="t3" style={{ fontSize: 12 }}>The full position log is in the bundle as data/positions.csv. AIS: {String(m.record["AIS"] ?? "not stored")}</span>
+      </Panel>
+      <Panel title="Statements" meta={x.statements.length}>
+        {x.statements.length === 0 ? (
+          <Empty>No statements were recorded. Add them on the voyage report before making the case file.</Empty>
+        ) : (
+          <div className="col g12">
+            {x.statements.map((st, i) => (
+              <section key={st.file} className="col g4" style={{ borderTop: i ? "1px solid var(--line-1)" : undefined, paddingTop: i ? 12 : 0, fontSize: 13 }}>
+                <b>{i + 1}. {st.given_by}{st.role ? <span className="t3"> · {st.role}</span> : null}</b>
+                <span className="t3" style={{ fontSize: 12 }}>Taken {when(st.taken_at)}{st.recorded_by ? ` · recorded by ${st.recorded_by}` : ""}{st.contact ? ` · contact ${st.contact}` : ""}</span>
+                <p style={{ whiteSpace: "pre-wrap", maxWidth: "75ch" }}>{st.text}</p>
+                <KV k="SHA-256 when recorded" v={<span className="mono" style={{ wordBreak: "break-all", fontSize: 12 }}>{st.sha256}</span>} />
+              </section>
+            ))}
+          </div>
+        )}
+      </Panel>
+      <style>{`.cf-two{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}@media (max-width:900px){.cf-two{grid-template-columns:minmax(0,1fr)}}`}</style>
+    </>
+  );
+}
+
+function TrackMap({ map: d }: { map: CaseMap }) {
+  const { data: tokenData } = useMapboxToken();
+  const token = tokenData?.token ?? "";
+  const el = useRef<HTMLDivElement | null>(null);
+  const has = d.track.length > 0 || d.route.length > 1;
+  useEffect(() => {
+    if (!token || !el.current || !has) return;
+    mapboxgl.accessToken = token;
+    const first = d.track[0] ?? d.route[0];
+    const map = new mapboxgl.Map({ container: el.current, ...basemapOptions("day"), center: first, zoom: 12, preserveDrawingBuffer: true } as any);
+    map.on("load", () => {
+      map.addSource("route", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: d.route.length > 1 ? d.route : [] } } as any });
+      map.addSource("track", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: d.track.length > 1 ? d.track : [] } } as any });
+      map.addSource("pts", { type: "geojson", data: { type: "FeatureCollection", features: d.points.map((p) => ({ type: "Feature", properties: { sev: p.severity, label: p.label }, geometry: { type: "Point", coordinates: [p.lng, p.lat] } })) } as any });
+      map.addLayer({ id: "route", type: "line", source: "route", paint: { "line-color": "#4F8BFF", "line-width": 2.5, "line-dasharray": [3, 2] } });
+      map.addLayer({ id: "track", type: "line", source: "track", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#111827", "line-width": 3 } });
+      map.addLayer({ id: "pts", type: "circle", source: "pts", paint: { "circle-radius": 6, "circle-color": ["case", [">=", ["get", "sev"], 5], "#F2384B", [">=", ["get", "sev"], 4], "#E8590C", "#F5A524"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+      map.addLayer({ id: "pts-l", type: "symbol", source: "pts", layout: { "text-field": ["get", "label"], "text-size": 10, "text-offset": [0, 1.2], "text-anchor": "top", "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"] }, paint: { "text-color": "#111", "text-halo-color": "#fff", "text-halo-width": 1.2 } });
+      const b = new mapboxgl.LngLatBounds(first, first);
+      [...d.route, ...d.track].forEach((c) => b.extend(c));
+      d.points.forEach((p) => b.extend([p.lng, p.lat]));
+      map.fitBounds(b, { padding: 40, maxZoom: 15, duration: 0 });
+    });
+    return () => map.remove();
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!has) return <Empty>No route was planned and no positions were reported.</Empty>;
+  return (
+    <div className="map" style={{ height: 420, position: "relative", breakInside: "avoid" }}>
+      <div ref={el} style={{ position: "absolute", inset: 0 }} />
+      {!token && <div className="absolute inset-0 grid place-items-center t3"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+    </div>
+  );
+}
+
+const csvCell = (x: unknown) => (x == null ? "" : /[",\n]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : String(x));
+
+function custodyCsv(m: CaseManifest) {
+  const rows = [["file", "name", "at", "by", "action", "note"]];
+  for (const e of m.evidence) {
+    rows.push([e.file, e.name, e.added_at ?? "", e.added_by ?? "", "added", `SHA-256 on receipt ${e.sha256_on_receipt ?? "not taken"}`]);
+    for (const c of e.custody) rows.push([e.file, e.name, c.at, c.by ?? "", c.action, c.note ?? ""]);
+    rows.push([e.file, e.name, m.generated_at, m.generated_by, "fingerprinted for this case file", `SHA-256 ${e.sha256 ?? "unreadable"} (${e.integrity.replace(/_/g, " ")})`]);
+  }
+  return rows.map((r) => r.map(csvCell).join(",")).join("\n") + "\n";
+}
+
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="row g10" style={{ alignItems: "baseline" }}>
@@ -247,7 +373,12 @@ function readme(id: string, manifestSha: string, verifyUrl: string, problems: st
     "What is in here",
     "  manifest.json   The frozen case record: details, timeline, every file's SHA-256 fingerprint and chain of custody.",
     "  evidence/       The evidence files, exactly as stored.",
-    "  data/           Raw data such as a voyage's position log.",
+    "  data/           Raw data such as a voyage's position log, passenger list and who was told.",
+    "  statements/     Written statements, exactly as recorded (fingerprinted when they were taken).",
+    "  SHA256SUMS.txt  The SHA-256 of every file in this bundle. Check them all with: shasum -a 256 -c SHA256SUMS.txt",
+    "  chain-of-custody.csv  Who added each evidence file and when, and its fingerprint on receipt and now.",
+    "  who-viewed.csv  Everyone who generated, opened, printed or downloaded this case file, up to this download.",
+    "                  (It keeps growing after the case file is made, so it is not part of the manifest.)",
     "",
     "How to check nothing has changed",
     `  1. Open ${verifyUrl} and drop these files on the page. Each one is checked in your browser; nothing is uploaded.`,

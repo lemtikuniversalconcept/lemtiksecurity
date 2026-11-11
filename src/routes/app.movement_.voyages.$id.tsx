@@ -12,12 +12,15 @@ import { Empty, Notice, PageHeader, Panel, Status } from "@/components/nw";
 import { getVoyageReport, type VoyageReport } from "@/lib/voyages.functions";
 import { routeLengthM, VOYAGE_STATUS } from "@/components/movement/Voyages";
 import { CaseFileButton } from "@/components/CaseFileButton";
+import { VoyageRecords } from "@/components/movement/VoyageRecords";
+import { movementPerms } from "@/components/movement/perms";
 
 export const Route = createFileRoute("/app/movement_/voyages/$id")({
   head: () => ({ meta: [{ title: "Voyage report · Lemtik SOD" }] }),
   beforeLoad: async ({ context }) => {
     requireSectionAccess(context.appAccess, ["security_manager", "operator", "client_admin"]);
     requireFeature(context.appAccess, "movement");
+    return { appAccess: context.appAccess };
   },
   component: VoyageReportPage,
 });
@@ -59,6 +62,7 @@ const ALERT_LABEL: Record<string, string> = {
 
 function VoyageReportPage() {
   const { id } = Route.useParams();
+  const { appAccess } = Route.useRouteContext();
   const fn = useServerFn(getVoyageReport);
   const q = useQuery({ queryKey: ["voyage-report", id], queryFn: () => fn({ data: { id } }) });
 
@@ -127,6 +131,8 @@ function VoyageReportPage() {
       <Panel title="Route" meta="Dashed: planned · Solid: actual track">
         <ReportMap report={r} />
       </Panel>
+
+      <VoyageRecords voyageId={id} orgId={appAccess.orgId} canAdd={movementPerms(appAccess.specRole).canOperate} />
 
       <Panel title="Events" meta={r.alerts.length}>
         {r.alerts.length ? (

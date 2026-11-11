@@ -229,6 +229,10 @@ export async function ingestFix(s: SubjectRow, fix: Fix, source: "phone" | "devi
 
 async function checkInPatch(s: SubjectRow, at: Pick<Fix, "lat" | "lng"> | null, voyageId: string | null) {
   if (s.checkin_overdue) await alert(s, "checkin", 1, `${s.name} checked in: all OK`, at, { voyageId });
+  await db()
+    .from("movement_checkins")
+    .insert({ organisation_id: s.organisation_id, subject_id: s.id, voyage_id: voyageId, lat: at?.lat ?? null, lng: at?.lng ?? null, was_overdue: !!s.checkin_overdue })
+    .then(() => undefined, () => undefined);
   return { last_checkin_at: new Date().toISOString(), checkin_overdue: false };
 }
 
