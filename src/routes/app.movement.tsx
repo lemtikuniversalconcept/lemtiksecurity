@@ -31,6 +31,7 @@ import {
 import { getNearbyShips, listVoyages, type NearbyShip, type Voyage } from "@/lib/voyages.functions";
 import { VoyagesView } from "@/components/movement/Voyages";
 import { CorridorsView, HandoffPanel, RespondersView } from "@/components/movement/Corridors";
+import { reviewPossibleHijack } from "@/lib/hijack.functions";
 import { listCorridors, listResponders } from "@/lib/corridor.functions";
 import { createSarCase, listSarCases, type SarCase } from "@/lib/sar.functions";
 import { MovementPermsContext, movementPerms, useMovementPerms } from "@/components/movement/perms";
@@ -421,8 +422,27 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
     },
     onError: (e) => toast.error((e as Error).message),
   });
+  const reviewFn = useServerFn(reviewPossibleHijack);
+  const [hj, setHj] = useState<null | "dismiss" | "handoff">(null);
+  const [hjNote, setHjNote] = useState("");
+  const review = useMutation({
+    mutationFn: (decision: "confirmed" | "dismissed") => reviewFn({ data: { alert_id: a.id, decision, note: hjNote.trim() || undefined } }),
+    onSuccess: (_r, decision) => {
+      qc.invalidateQueries({ queryKey: ["movement-alerts"] });
+      if (decision === "confirmed") {
+        setHj("handoff");
+        toast.success("Confirmed. Choose the responder to hand off to.");
+      } else {
+        setHj(null);
+        toast.success("Dismissed as a false alarm. Your reason is on the record.");
+      }
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const hijackOpen = a.kind === "possible_hijack" && !a.acknowledged_at && canOperate;
   const tone: Tone = a.severity >= 5 ? "fail" : a.severity >= 3 ? "warn" : "blue";
   return (
+    <div className="col g8">
     <div className="card row g10" style={{ padding: compact ? "8px 10px" : "10px 12px", alignItems: "center" }}>
       <span className={`dot d-${tone === "blue" ? "ok" : tone}${a.kind === "sos" && !a.acknowledged_at ? " pulse-dot" : ""}`} />
       <button type="button" className="col f1 text-left" style={{ minWidth: 0 }} onClick={() => subject && onFocus?.(subject)} disabled={!onFocus}>
@@ -434,7 +454,14 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
           {sar.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Search plan
         </button>
       )}
-      {a.acknowledged_at ? (
+      {hijackOpen ? (
+        <span className="row g6">
+          <button type="button" className="b b-sm b-pri" onClick={() => review.mutate("confirmed")} disabled={review.isPending}>
+            {review.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Confirm and hand off
+          </button>
+          <button type="button" className="b b-sm b-sec" onClick={() => setHj(hj === "dismiss" ? null : "dismiss")}>False alarm</button>
+        </span>
+      ) : a.acknowledged_at ? (
         <span className="tg tg-ok"><Check size={12} /> Seen</span>
       ) : !canOperate ? (
         <span className="tg tg-warn">Open</span>
@@ -443,6 +470,14 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
           {m.isPending ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Acknowledge
         </button>
       )}
+    </div>
+    {hj === "dismiss" && hijackOpen && (
+      <div className="card col g8" style={{ padding: "10px 12px" }}>
+        <label className="fl"><span>Why is this a false alarm? (kept on the record)</span><input className="in" value={hjNote} onChange={(e) => setHjNote(e.target.value)} maxLength={1000} placeholder="e.g. Called the master: engine fault, stopped to repair, all passengers safe" /></label>
+        <button type="button" className="b b-sm b-sec" style={{ alignSelf: "flex-start" }} disabled={hjNote.trim().length < 5 || review.isPending} onClick={() => review.mutate("dismissed")}>Dismiss as false alarm</button>
+      </div>
+    )}
+    {hj === "handoff" && <div className="card" style={{ padding: "10px 12px" }}><HandoffPanel subjectId={a.subject_id} onClose={() => setHj(null)} /></div>}
     </div>
   );
 }

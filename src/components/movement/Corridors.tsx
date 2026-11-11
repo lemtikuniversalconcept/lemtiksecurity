@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CloudLightning, ExternalLink, Loader2, MessageCircle, Phone, Plus, QrCode, Save, Trash2, Undo2, UserPlus, Wind, X } from "lucide-react";
+import { CloudLightning, Copy, ExternalLink, Link2Off, Loader2, MessageCircle, Phone, Plus, QrCode, Save, Trash2, Undo2, UserPlus, Wind, X } from "lucide-react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Empty, Notice, Panel, Status } from "@/components/nw";
 import {
@@ -20,6 +20,7 @@ import {
   type Responder,
 } from "@/lib/corridor.functions";
 import { startVoyage, type Voyage } from "@/lib/voyages.functions";
+import { RESPONDER_STATUS_LABEL, withdrawResponderLink } from "@/lib/respond.functions";
 import { RouteDrawer, routeLengthM } from "./Voyages";
 import { useMovementPerms } from "./perms";
 
@@ -315,7 +316,7 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
   const ctxFn = useServerFn(getHandoffContext);
   const recordFn = useServerFn(recordHandoff);
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["handoff", subjectId], queryFn: () => ctxFn({ data: { subject_id: subjectId } }) });
+  const q = useQuery({ queryKey: ["handoff", subjectId], queryFn: () => ctxFn({ data: { subject_id: subjectId } }), refetchInterval: 20_000 });
   const [summary, setSummary] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => {
@@ -323,6 +324,19 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
     if (q.data && !picked) setPicked(q.data.responders[0]?.id ?? null);
   }, [q.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const withdrawFn = useServerFn(withdrawResponderLink);
+  const withdraw = useMutation({
+    mutationFn: (handoff_id: string) => withdrawFn({ data: { handoff_id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["handoff", subjectId] });
+      toast.success("Link withdrawn. It stops working now.");
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+  const copyLink = (token: string) => {
+    const url = `${window.location.origin}/respond/${token}`;
+    navigator.clipboard?.writeText(url).then(() => toast.success("Responder link copied"), () => toast.message(url));
+  };
   const go = useMutation({
     mutationFn: (channel: "call" | "whatsapp") => recordFn({ data: { subject_id: subjectId, voyage_id: q.data?.voyage_id ?? null, responder_id: picked!, channel, summary } }),
     onSuccess: (r) => {
@@ -365,11 +379,28 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
         <button type="button" className="b b-pri" disabled={!r || go.isPending || summary.trim().length < 10 || !(r.whatsapp || r.phone)} onClick={() => go.mutate("whatsapp")}><MessageCircle size={14} /> Approve and send on WhatsApp</button>
         <button type="button" className="b b-sec" disabled={!r || go.isPending || !(r.phone || r.whatsapp)} onClick={() => go.mutate("call")}><Phone size={14} /> Approve and call</button>
       </div>
-      <span className="t3" style={{ fontSize: 11.5 }}>WhatsApp opens on your device with the message filled in; you press send. The hand-off is logged with your name either way.</span>
+      <span className="t3" style={{ fontSize: 11.5 }}>WhatsApp opens on your device with the message and a responder link filled in; you press send. The link works for 24 hours without an account: the responder sees the boat's live position and track and can confirm receipt, dispatch and arrival. If you call instead, copy the link below and send it. The hand-off is logged with your name either way.</span>
       {d.previous.length > 0 && (
         <div className="col g2" style={{ fontSize: 12 }}>
           <span className="t3">Already handed off</span>
-          {d.previous.map((p, i) => <span key={i}>{new Date(p.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · {p.responder_name} by {p.channel === "whatsapp" ? "WhatsApp" : "phone"} · {p.approved_by_name}</span>)}
+          {d.previous.map((p) => {
+            const live = !p.withdrawn_at && !!p.share_token && (!p.share_expires_at || Date.parse(p.share_expires_at) > Date.now());
+            const shown = p.status === "sent" && p.first_viewed_at ? "viewed" : p.status;
+            return (
+              <div key={p.id} className="row g8 wrap" style={{ alignItems: "center" }}>
+                <span className="f1" style={{ minWidth: 0 }}>
+                  {new Date(p.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · {p.responder_name} by {p.channel === "whatsapp" ? "WhatsApp" : "phone"} · {p.approved_by_name}
+                  {p.share_token ? <> · <b>{RESPONDER_STATUS_LABEL[shown] ?? shown}</b></> : null}
+                </span>
+                {live && (
+                  <>
+                    <button type="button" className="b b-sec" style={{ padding: "2px 8px", fontSize: 11.5 }} onClick={() => copyLink(p.share_token!)}><Copy size={12} /> Copy link</button>
+                    <button type="button" className="b b-sec" style={{ padding: "2px 8px", fontSize: 11.5 }} disabled={withdraw.isPending} onClick={() => withdraw.mutate(p.id)}><Link2Off size={12} /> Withdraw</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

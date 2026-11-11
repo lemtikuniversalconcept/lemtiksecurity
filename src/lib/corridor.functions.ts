@@ -271,7 +271,10 @@ export type HandoffContext = {
   voyage_id: string | null;
   responders: (Responder & { distance_m: number | null })[];
   draft: string;
-  previous: { responder_name: string; channel: string; approved_by_name: string | null; created_at: string }[];
+  previous: {
+    id: string; responder_name: string; channel: string; approved_by_name: string | null; created_at: string;
+    status: string; status_at: string | null; first_viewed_at: string | null; share_token: string | null; share_expires_at: string | null; withdrawn_at: string | null;
+  }[];
 };
 
 export const getHandoffContext = createServerFn({ method: "POST" })
@@ -287,7 +290,7 @@ export const getHandoffContext = createServerFn({ method: "POST" })
       sb(context).from("movement_responders").select("id, name, kind, phone, whatsapp, lat, lng, notes, active").eq("organisation_id", orgId).eq("active", true),
       sb(context).from("movement_alerts").select("kind, message, created_at").eq("subject_id", s.id).gte("created_at", since).gte("severity", 3).order("created_at", { ascending: false }).limit(6),
       v ? sb(context).from("voyage_passengers").select("id", { count: "exact", head: true }).eq("voyage_id", v.id) : Promise.resolve({ data: null, count: null } as any),
-      sb(context).from("movement_handoffs").select("responder_name, channel, approved_by_name, created_at").eq("subject_id", s.id).gte("created_at", since).order("created_at", { ascending: false }),
+      sb(context).from("movement_handoffs").select("id, responder_name, channel, approved_by_name, created_at, status, status_at, first_viewed_at, share_token, share_expires_at, withdrawn_at").eq("subject_id", s.id).gte("created_at", since).order("created_at", { ascending: false }),
     ]);
     const { metres } = await import("./corridor.server");
     const ranked = ((responders ?? []) as Responder[])
@@ -331,7 +334,7 @@ export const recordHandoff = createServerFn({ method: "POST" })
     const [{ data: r }, { data: s }, { data: me }] = await Promise.all([
       supabase.from("movement_responders").select("id, name, phone, whatsapp, lat, lng").eq("id", data.responder_id).eq("organisation_id", orgId).maybeSingle(),
       supabase.from("movement_subjects").select("id, organisation_id, name, last_lat, last_lng").eq("id", data.subject_id).eq("organisation_id", orgId).maybeSingle(),
-      supabase.from("profiles").select("display_name").eq("user_id", context.userId).maybeSingle(),
+      supabase.from("profiles").select("display_name, phone").eq("user_id", context.userId).maybeSingle(),
     ]);
     if (!r || !s) throwSafeError("handoff.record", new Error("not found"), "Responder or boat not found.");
     const number = (data.channel === "whatsapp" ? r.whatsapp || r.phone : r.phone || r.whatsapp) as string | null;
@@ -339,6 +342,12 @@ export const recordHandoff = createServerFn({ method: "POST" })
     const { metres } = await import("./corridor.server");
     const distance = s.last_lat != null && r.lat != null ? Math.round(metres(s.last_lat, s.last_lng, r.lat, r.lng)) : null;
     const who = (me?.display_name as string | undefined)?.trim() || "Operator";
+    // The responder link: no account needed, valid for 24 hours, can be withdrawn.
+    const { randomBytes } = await import("node:crypto");
+    const shareToken = randomBytes(24).toString("base64url");
+    const { getSiteUrl } = await import("./orgs.server");
+    const respondUrl = `${getSiteUrl().replace(/\/$/, "")}/respond/${shareToken}`;
+    const message = `${data.summary}\n\nLive position and to confirm you've received this: ${respondUrl}`;
     const { error } = await supabase.from("movement_handoffs").insert({
       organisation_id: orgId,
       voyage_id: data.voyage_id,
@@ -350,6 +359,9 @@ export const recordHandoff = createServerFn({ method: "POST" })
       summary: data.summary,
       approved_by: context.userId,
       approved_by_name: who,
+      share_token: shareToken,
+      share_expires_at: new Date(Date.now() + 24 * 3600_000).toISOString(),
+      operator_phone: ((me as any)?.phone as string | null) ?? null,
     });
     if (error) throwSafeError("handoff.record", error, "Unable to record the hand-off. Only managers and operators can hand off.");
     const { raiseAlert } = await import("./movement.server");
@@ -357,7 +369,7 @@ export const recordHandoff = createServerFn({ method: "POST" })
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_handoff", resourceId: s.id, actionType: "handoff", actionDetail: { responder: r.name, channel: data.channel, voyage_id: data.voyage_id } });
     const digits = number.replace(/[^\d+]/g, "");
     const intl = digits.startsWith("+") ? digits.slice(1) : digits.startsWith("0") ? `234${digits.slice(1)}` : digits;
-    return { url: data.channel === "whatsapp" ? `https://wa.me/${intl}?text=${encodeURIComponent(data.summary)}` : `tel:${digits}` };
+    return { url: data.channel === "whatsapp" ? `https://wa.me/${intl}?text=${encodeURIComponent(message)}` : `tel:${digits}`, respond_url: respondUrl };
   });
 
 export type { BoardingProblem, Weather };

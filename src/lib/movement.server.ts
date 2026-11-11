@@ -296,12 +296,65 @@ export async function sweepOrg(orgId: string) {
     }
   }
 
+  await checkPossibleHijack(orgId);
+
   // Cargo in transit with no custody record for too long. Ignored until the cargo tables exist.
   try {
     const { sweepCargo } = await import("./cargo.server");
     await sweepCargo(orgId);
   } catch {
     /* cargo custody not set up */
+  }
+}
+
+const HIJACK_SIGNAL: Record<string, string> = {
+  off_route: "left the planned route",
+  unexpected_stop: "stopped outside a safe zone",
+  silent: "tracker went silent",
+  checkin_missed: "missed a check-in",
+  zone_enter: "entered a restricted or exclusion zone",
+};
+const HIJACK_WINDOW_MS = 90 * 60_000;
+
+/**
+ * Possible hijack: an underway voyage showing two or more different warning signs within
+ * 90 minutes. It is only a flag for the operator, who confirms it (and hands off to a
+ * responder) or dismisses it as a false alarm. Raised once per voyage; nothing is sent
+ * outside the organisation automatically.
+ */
+async function checkPossibleHijack(orgId: string) {
+  const { data: vs } = await db().from("movement_voyages").select("id, name, subject_id, departed_at, departure_count, off_route").eq("organisation_id", orgId).eq("status", "underway").is("hijack_flagged_at", null);
+  for (const v of (vs ?? []) as { id: string; name: string; subject_id: string; departed_at: string | null; departure_count: number | null; off_route: boolean }[]) {
+    const from = Math.max(Date.now() - HIJACK_WINDOW_MS, v.departed_at ? Date.parse(v.departed_at) : 0);
+    const { data: al } = await db()
+      .from("movement_alerts")
+      .select("kind, severity, created_at")
+      .eq("subject_id", v.subject_id)
+      .gte("created_at", new Date(from).toISOString())
+      .in("kind", Object.keys(HIJACK_SIGNAL))
+      .order("created_at", { ascending: true });
+    const seen = new Map<string, string>();
+    for (const a of (al ?? []) as { kind: string; severity: number; created_at: string }[]) {
+      if (a.kind === "zone_enter" && a.severity < 4) continue; // arriving at a safe zone isn't a warning sign
+      if (!seen.has(a.kind)) seen.set(a.kind, a.created_at);
+    }
+    if (!v.off_route) seen.delete("off_route"); // back on route since
+    if (seen.size < 2) continue;
+    const signals = [...seen.entries()].map(([kind, at]) => ({ kind, at }));
+    const { data: flipped } = await db().from("movement_voyages").update({ hijack_flagged_at: new Date().toISOString(), hijack_signals: signals }).eq("id", v.id).is("hijack_flagged_at", null).select("id");
+    if (!flipped?.length) continue;
+    const { data: subj } = await db().from("movement_subjects").select("id, organisation_id, name, last_lat, last_lng").eq("id", v.subject_id).maybeSingle();
+    if (!subj) continue;
+    const t = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Africa/Lagos", hour: "2-digit", minute: "2-digit" });
+    const list = signals.map((x) => `${HIJACK_SIGNAL[x.kind]} (${t(x.at)})`).join(", ");
+    await alert(
+      subj,
+      "possible_hijack",
+      5,
+      `POSSIBLE HIJACK: ${subj.name} on "${v.name}" ${list}${v.departure_count != null ? `; ${v.departure_count} aboard at departure` : ""}. Confirm and hand off to a responder, or dismiss as a false alarm.`.slice(0, 500),
+      subj.last_lat != null ? { lat: subj.last_lat, lng: subj.last_lng } : null,
+      { voyageId: v.id },
+    );
   }
 }
 

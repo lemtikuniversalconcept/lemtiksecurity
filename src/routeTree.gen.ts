@@ -58,6 +58,7 @@ import { Route as OfficerNotificationsRouteImport } from './routes/officer.notif
 import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
 import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
+import { Route as RespondTokenRouteImport } from './routes/respond.$token'
 import { Route as TrackTokenRouteImport } from './routes/track.$token'
 import { Route as TrackerOsmandRouteImport } from './routes/tracker.osmand'
 import { Route as VerifyIdRouteImport } from './routes/verify.$id'
@@ -327,6 +328,11 @@ const OfficerSosRoute = OfficerSosRouteImport.update({
   path: '/sos',
   getParentRoute: () => OfficerRoute,
 } as any)
+const RespondTokenRoute = RespondTokenRouteImport.update({
+  id: '/respond/$token',
+  path: '/respond/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TrackTokenRoute = TrackTokenRouteImport.update({
   id: '/track/$token',
   path: '/track/$token',
@@ -489,6 +495,7 @@ export interface FileRoutesByFullPath {
   '/officer/patrol': typeof OfficerPatrolRoute
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
+  '/respond/$token': typeof RespondTokenRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
   '/verify/$id': typeof VerifyIdRoute
@@ -559,6 +566,7 @@ export interface FileRoutesByTo {
   '/officer/patrol': typeof OfficerPatrolRoute
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
+  '/respond/$token': typeof RespondTokenRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
   '/verify/$id': typeof VerifyIdRoute
@@ -634,6 +642,7 @@ export interface FileRoutesById {
   '/officer/patrol': typeof OfficerPatrolRoute
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
+  '/respond/$token': typeof RespondTokenRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
   '/verify/$id': typeof VerifyIdRoute
@@ -710,6 +719,7 @@ export interface FileRouteTypes {
     | '/officer/patrol'
     | '/officer/schedule'
     | '/officer/sos'
+    | '/respond/$token'
     | '/track/$token'
     | '/tracker/osmand'
     | '/verify/$id'
@@ -780,6 +790,7 @@ export interface FileRouteTypes {
     | '/officer/patrol'
     | '/officer/schedule'
     | '/officer/sos'
+    | '/respond/$token'
     | '/track/$token'
     | '/tracker/osmand'
     | '/verify/$id'
@@ -854,6 +865,7 @@ export interface FileRouteTypes {
     | '/officer/patrol'
     | '/officer/schedule'
     | '/officer/sos'
+    | '/respond/$token'
     | '/track/$token'
     | '/tracker/osmand'
     | '/verify/$id'
@@ -897,6 +909,7 @@ export interface RootRouteChildren {
   CronSweepRoute: typeof CronSweepRoute
   CustodyTokenRoute: typeof CustodyTokenRoute
   DosTokenRoute: typeof DosTokenRoute
+  RespondTokenRoute: typeof RespondTokenRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
   VerifyIdRoute: typeof VerifyIdRoute
@@ -1246,6 +1259,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/officer/sos'
       preLoaderRoute: typeof OfficerSosRouteImport
       parentRoute: typeof OfficerRoute
+    }
+    '/respond/$token': {
+      id: '/respond/$token'
+      path: '/respond/$token'
+      fullPath: '/respond/$token'
+      preLoaderRoute: typeof RespondTokenRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/track/$token': {
       id: '/track/$token'
@@ -1635,6 +1655,7 @@ const rootRouteChildren: RootRouteChildren = {
   CronSweepRoute: CronSweepRoute,
   CustodyTokenRoute: CustodyTokenRoute,
   DosTokenRoute: DosTokenRoute,
+  RespondTokenRoute: RespondTokenRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,
   VerifyIdRoute: VerifyIdRoute,
