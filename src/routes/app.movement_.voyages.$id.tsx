@@ -4,7 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { ArrowLeft, Loader2, Printer } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Printer } from "lucide-react";
 import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { basemapOptions } from "@/lib/basemap";
 import { useMapboxToken } from "@/components/LocationPicker";
@@ -12,6 +12,8 @@ import { Empty, Notice, PageHeader, Panel, Status } from "@/components/nw";
 import { getVoyageReport, type VoyageReport } from "@/lib/voyages.functions";
 import { routeLengthM, VOYAGE_STATUS } from "@/components/movement/Voyages";
 import { CaseFileButton } from "@/components/CaseFileButton";
+import { voyageExport } from "@/lib/map.export";
+import { download } from "@/lib/sar.export";
 import { ShareButton } from "@/components/shares/RecordShares";
 import { VoyageRecords } from "@/components/movement/VoyageRecords";
 import { movementPerms } from "@/components/movement/perms";
@@ -87,6 +89,8 @@ function VoyageReportPage() {
         <Link to="/app/movement" className="b b-sm b-gh"><ArrowLeft size={14} /> Protected movement</Link>
         <span className="f1" />
         {(appAccess?.specRole === "security_manager" || appAccess?.specRole === "operator") && appAccess?.features?.includes("links") && <ShareButton kind="voyage" id={id} />}
+        <button type="button" className="b b-sm b-sec" title="Planned route, allowed band, recorded track with times, and where alerts were raised. Opens in Google Earth and most chartplotters." onClick={() => { const f = voyageExport(r, "kml"); download(f.name, f.body, f.type); }}><Download size={14} /> KML</button>
+        <button type="button" className="b b-sm b-gh" title="The same, for GIS tools" onClick={() => { const f = voyageExport(r, "geojson"); download(f.name, f.body, f.type); }}>GeoJSON</button>
         <CaseFileButton kind="voyage" id={id} />
         <button type="button" className="b b-sm b-pri" onClick={() => window.print()}><Printer size={14} /> Print or save as PDF</button>
       </div>

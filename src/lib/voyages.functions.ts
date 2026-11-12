@@ -209,8 +209,10 @@ export type VoyageReport = {
   subject: { name: string; kind: string; category: string; reference: string | null; mmsi: string | null } | null;
   organisation: string;
   track: [number, number][];
+  /** Time of each track point, in the same order. */
+  track_at: string[];
   stats: { distance_m: number; duration_s: number | null; max_speed_kn: number | null; avg_speed_kn: number | null; positions: number };
-  alerts: { kind: string; severity: number; message: string; created_at: string; acknowledged_at: string | null }[];
+  alerts: { kind: string; severity: number; message: string; created_at: string; acknowledged_at: string | null; lat: number | null; lng: number | null }[];
   generated_at: string;
 };
 
@@ -226,19 +228,23 @@ export const getVoyageReport = createServerFn({ method: "POST" })
     ]);
 
     let track: [number, number][] = [];
+    let trackAt: string[] = [];
     let distance = 0;
     let maxSpeed: number | null = null;
     let count = 0;
     if (v.departed_at) {
       const until = v.arrived_at ?? new Date().toISOString();
-      const { data: rows } = await sb(context)
-        .from("movement_positions")
-        .select("lat, lng, accuracy_m, speed_mps, recorded_at")
-        .eq("subject_id", v.subject_id)
-        .gte("recorded_at", v.departed_at)
-        .lte("recorded_at", until)
-        .order("recorded_at", { ascending: true })
-        .limit(5000);
+      const { fetchAll } = await import("./fetch-all.server");
+      const rows = await fetchAll(() =>
+        sb(context)
+          .from("movement_positions")
+          .select("lat, lng, accuracy_m, speed_mps, recorded_at")
+          .eq("subject_id", v.subject_id)
+          .gte("recorded_at", v.departed_at)
+          .lte("recorded_at", until)
+          .order("recorded_at", { ascending: true }),
+        50_000,
+      ).catch(() => [] as any[]);
       const { metres } = await import("./movement.server");
       const good = ((rows ?? []) as { lat: number; lng: number; accuracy_m: number | null; speed_mps: number | null; recorded_at: string }[]).filter((r) => r.accuracy_m == null || r.accuracy_m <= 100);
       count = good.length;
@@ -252,13 +258,17 @@ export const getVoyageReport = createServerFn({ method: "POST" })
         }
         if (good[i].speed_mps != null && good[i].speed_mps! <= MAX_MPS) maxSpeed = Math.max(maxSpeed ?? 0, good[i].speed_mps!);
       }
-      track = good.map((r) => [r.lng, r.lat]);
+      // Distance uses every fix; the track sent to the page keeps at most 5,000 points.
+      const step = Math.max(1, Math.ceil(good.length / 5000));
+      const kept = good.filter((_, i) => i % step === 0 || i === good.length - 1);
+      track = kept.map((r) => [r.lng, r.lat]);
+      trackAt = kept.map((r) => r.recorded_at);
     }
     const durationS = v.departed_at ? ((v.arrived_at ? Date.parse(v.arrived_at) : Date.now()) - Date.parse(v.departed_at)) / 1000 : null;
 
     const { data: alerts } = await sb(context)
       .from("movement_alerts")
-      .select("kind, severity, message, created_at, acknowledged_at")
+      .select("kind, severity, message, created_at, acknowledged_at, lat, lng")
       .eq("voyage_id", v.id)
       .order("created_at", { ascending: true })
       .limit(500);
@@ -269,6 +279,7 @@ export const getVoyageReport = createServerFn({ method: "POST" })
       subject: subj ?? null,
       organisation: org?.name ?? "",
       track,
+      track_at: trackAt,
       stats: {
         distance_m: Math.round(distance),
         duration_s: durationS,

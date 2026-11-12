@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CloudLightning, Send, Copy, ExternalLink, Link2Off, Loader2, MessageCircle, Phone, Plus, QrCode, Save, Trash2, Undo2, UserPlus, Wind, X } from "lucide-react";
+import { CloudLightning, Download, Send, Copy, ExternalLink, Link2Off, Loader2, MessageCircle, Phone, Plus, QrCode, Save, Trash2, Undo2, UserPlus, Wind, X } from "lucide-react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Empty, Notice, Panel, Status } from "@/components/nw";
 import {
@@ -22,6 +22,8 @@ import {
 import { startVoyage, type Voyage } from "@/lib/voyages.functions";
 import { RESPONDER_STATUS_LABEL, withdrawResponderLink } from "@/lib/respond.functions";
 import { listLinkDirectory } from "@/lib/links.functions";
+import { corridorsExport } from "@/lib/map.export";
+import { download } from "@/lib/sar.export";
 import { RouteDrawer, routeLengthM } from "./Voyages";
 import { useMovementPerms } from "./perms";
 
@@ -32,6 +34,20 @@ const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.r
 
 type CForm = { id?: string; name: string; route: LngLat[]; corridor_m: number; curfew_start: string; curfew_end: string; max_wind_kn: string; active: boolean; notes: string };
 const NEW_C: CForm = { name: "", route: [], corridor_m: 1000, curfew_start: "", curfew_end: "", max_wind_kn: "25", active: true, notes: "" };
+
+/** Download corridors as KML (Google Earth, chartplotters) or GeoJSON (GIS tools). */
+function ExportButtons({ list, label }: { list: Corridor[]; label: string }) {
+  const go = (format: "kml" | "geojson") => {
+    const f = corridorsExport(list, "", format);
+    download(f.name, f.body, f.type);
+  };
+  return (
+    <span className="row g4" title="The route and the band boats must keep to, with curfew and wind limit">
+      <button type="button" className="b b-sm b-gh" onClick={() => go("kml")}><Download size={13} /> {label}: KML</button>
+      <button type="button" className="b b-sm b-gh" onClick={() => go("geojson")}>GeoJSON</button>
+    </span>
+  );
+}
 
 export function CorridorsView({ corridors }: { corridors: Corridor[] }) {
   const { canManage } = useMovementPerms();
@@ -54,7 +70,16 @@ export function CorridorsView({ corridors }: { corridors: Corridor[] }) {
 
   return (
     <div className="grid g16" style={{ gridTemplateColumns: form ? "minmax(0,1fr) 480px" : "minmax(0,1fr)" }}>
-      <Panel title="Approved corridors" meta={corridors.length} actions={canManage ? <button type="button" className="b b-sm b-pri" onClick={() => setForm({ ...NEW_C })}><Plus size={14} /> Add corridor</button> : undefined}>
+      <Panel
+        title="Approved corridors"
+        meta={corridors.length}
+        actions={
+          <>
+            {corridors.some((c) => c.route.length >= 2) && <ExportButtons list={corridors.filter((c) => c.route.length >= 2)} label="Export all" />}
+            {canManage && <button type="button" className="b b-sm b-pri" onClick={() => setForm({ ...NEW_C })}><Plus size={14} /> Add corridor</button>}
+          </>
+        }
+      >
         {corridors.length === 0 ? (
           <Empty>An approved corridor is a waterway route boats must keep to, with its curfew hours and a wind limit. Voyages planned on it inherit the route, and departures are checked against its curfew and the weather.</Empty>
         ) : (
@@ -75,7 +100,15 @@ export function CorridorsView({ corridors }: { corridors: Corridor[] }) {
         )}
       </Panel>
       {form && (
-        <Panel title={form.id ? "Edit corridor" : "New corridor"} actions={<button type="button" className="ibtn" aria-label="Close" onClick={() => setForm(null)}><X size={14} /></button>}>
+        <Panel
+          title={form.id ? "Edit corridor" : "New corridor"}
+          actions={
+            <>
+              {form.id && (() => { const c = corridors.find((x) => x.id === form.id); return c && c.route.length >= 2 ? <ExportButtons list={[c]} label="Export" /> : null; })()}
+              <button type="button" className="ibtn" aria-label="Close" onClick={() => setForm(null)}><X size={14} /></button>
+            </>
+          }
+        >
           <form className="col g10" onSubmit={(e) => { e.preventDefault(); if (form.name.trim() && !halfCurfew) saveM.mutate(form); }}>
             <label className="fl"><span>Name</span><input className="in" required maxLength={160} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Ikorodu – CMS ferry corridor" /></label>
             <span className="o-lbl">ROUTE</span>
