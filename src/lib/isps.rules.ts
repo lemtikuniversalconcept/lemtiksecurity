@@ -119,3 +119,22 @@ export function violationClock(f: {
   const days = Math.floor((now - since) / DAY);
   return { since: causes[0].since, days, past_mark: days >= CLOCK_MARK_DAYS, mark_on: at(since + CLOCK_MARK_DAYS * DAY), causes };
 }
+
+// ───────────── Checklists for each security level ─────────────
+
+export type IspsPost = { id: string; name: string };
+export type LevelMeasure = { text: string; post_id: string | null };
+export type LevelMeasures = Partial<Record<"1" | "2" | "3", LevelMeasure[]>>;
+
+/**
+ * What each post must do at a level: measures for every post, plus the post's own. With no
+ * posts set up, one checklist for the whole facility. Posts with nothing to do are left out.
+ */
+export function checklistsFor(posts: IspsPost[], measures: LevelMeasures, level: number): { post_id: string | null; post_name: string; items: string[] }[] {
+  const list = (measures[String(level) as "1" | "2" | "3"] ?? []).filter((m) => m.text.trim());
+  if (!list.length) return [];
+  if (!posts.length) return [{ post_id: null, post_name: "Whole facility", items: list.map((m) => m.text.trim()) }];
+  return posts
+    .map((p) => ({ post_id: p.id, post_name: p.name, items: list.filter((m) => !m.post_id || m.post_id === p.id).map((m) => m.text.trim()) }))
+    .filter((c) => c.items.length);
+}

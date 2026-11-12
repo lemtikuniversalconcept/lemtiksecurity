@@ -7,6 +7,7 @@ import { getOwnDutyStatus, setDutyStatus, reportOwnLocation } from "@/lib/office
 import { useOfficerPermissions } from "@/hooks/use-officer-permissions";
 import { Notice, Sev, timeAgo } from "@/components/nw";
 import { MyIspsAcks } from "@/components/isps/Broadcasts";
+import { OpenChecklists } from "@/components/isps/Checklists";
 import { fmtTime, getPosition, NetPill, playAlertTone, useMe, useMyDispatch, useMyNotifications, useMyShifts, usePendingUploads } from "@/components/officer/kit";
 
 // Proximity treats a location older than 300 s as stale and drops the officer from dispatch
@@ -100,6 +101,7 @@ function OfficerHome() {
 
       <div className="o-b">
         <MyIspsAcks />
+        <OpenChecklists />
         {!completed && currentStep && (
           <div className="o-card col g10" style={{ borderColor: "var(--warn)" }}>
             <span className="row g8">

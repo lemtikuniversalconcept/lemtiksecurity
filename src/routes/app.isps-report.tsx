@@ -189,8 +189,8 @@ function FacilitySection({ f }: { f: IspsFacilityReport }) {
       <Panel title="Security level changes" meta={f.level_changes.length || undefined}>
         {f.level_changes.length === 0 ? <Empty>No changes in the period.</Empty> : (
           <table className="tbl w-full" style={{ fontSize: 12.5 }}>
-            <thead><tr><th className="text-left">When</th><th className="text-left">Change</th><th className="text-left">Reason</th><th className="text-left">By</th></tr></thead>
-            <tbody>{f.level_changes.map((c, i) => <tr key={i} style={{ verticalAlign: "top" }}><td>{dt(c.at)}</td><td>{c.from} → {c.to}</td><td>{c.reason}</td><td>{c.by ?? "—"}</td></tr>)}</tbody>
+            <thead><tr><th className="text-left">When</th><th className="text-left">Change</th><th className="text-left">Reason</th><th className="text-left">By</th><th className="text-left">Post checklists</th></tr></thead>
+            <tbody>{f.level_changes.map((c, i) => <tr key={i} style={{ verticalAlign: "top" }}><td>{dt(c.at)}</td><td>{c.from} → {c.to}</td><td>{c.reason}</td><td>{c.by ?? "—"}</td><td>{c.checklist ? <>{c.checklist.completed} of {c.checklist.posts} posts done{c.checklist.slowest_min != null ? `, slowest ${c.checklist.slowest_min} min` : ""}{c.checklist.open_posts.length ? <div className="t3">Not finished: {c.checklist.open_posts.join(", ")}</div> : null}</> : <span className="t3">No checklist set up</span>}</td></tr>)}</tbody>
           </table>
         )}
       </Panel>
@@ -252,8 +252,8 @@ function downloadCsv(r: IspsReport) {
     ["Facility", "Breach occurred (UTC)", "Category", "Description", "Reported", "Reported at (UTC)", "Hours to report", "Closed at (UTC)", "Days to close", "Incident"],
     ...r.facilities.flatMap((f) => f.breaches.map((b) => [f.name, b.occurred_at, b.category, b.description, b.reported_to_authority ? "yes" : "no", b.reported_at, b.hours_to_report, b.closed_at, b.days_to_close, b.incident_code])),
     [],
-    ["Facility", "Level change at (UTC)", "From", "To", "Reason", "By"],
-    ...r.facilities.flatMap((f) => f.level_changes.map((c) => [f.name, c.at, c.from, c.to, c.reason, c.by])),
+    ["Facility", "Level change at (UTC)", "From", "To", "Reason", "By", "Posts with a checklist", "Posts done", "Slowest post (min)", "Posts not finished"],
+    ...r.facilities.flatMap((f) => f.level_changes.map((c) => [f.name, c.at, c.from, c.to, c.reason, c.by, c.checklist?.posts ?? "", c.checklist?.completed ?? "", c.checklist?.slowest_min ?? "", c.checklist?.open_posts.join("; ") ?? ""])),
     [],
     ["Facility", "Declaration", "Ship", "IMO", "Level", "Valid from (UTC)", "Valid to (UTC)", "Status"],
     ...r.facilities.flatMap((f) => f.declarations.map((d) => [f.name, d.reference, d.ship_name, d.ship_imo, d.level, d.valid_from, d.valid_to, d.status])),

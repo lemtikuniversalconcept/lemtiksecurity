@@ -28,7 +28,7 @@ export type IspsFacilityReport = {
   plan_lapsed_days: number;
   level_now: number;
   level_days: Record<1 | 2 | 3, number>;
-  level_changes: { at: string; from: number; to: number; reason: string; by: string | null }[];
+  level_changes: { at: string; from: number; to: number; reason: string; by: string | null; checklist: { posts: number; completed: number; slowest_min: number | null; open_posts: string[] } | null }[];
   drills: { id: string; held_on: string; kind: "drill" | "exercise"; scenario: string; participants: number | null; findings: string | null; corrective_actions: string | null; lessons_learned: string | null; attended: number; files: number; by: string | null }[];
   drill_overdue_days: number;
   longest_drill_gap_days: number | null;
@@ -114,7 +114,7 @@ export const getIspsReport = createServerFn({ method: "POST" })
     const [{ data: org }, { data: fac }, { data: changes }, { data: drills }, { data: br }, { data: dos }, { data: bc }, { data: nrec }] = await Promise.all([
       db.from("organisations").select("id, name").eq("id", orgId).maybeSingle(),
       db.from("isps_facilities").select("id, name, kind, identifier, security_level, level_set_at, security_officer_name, security_officer_phone, plan_approved_on, plan_expires_on, created_at").eq("organisation_id", orgId).order("name"),
-      all_(() => db.from("isps_level_changes").select("facility_id, from_level, to_level, reason, changed_by_name, created_at").eq("organisation_id", orgId).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
+      all_(() => db.from("isps_level_changes").select("id, facility_id, from_level, to_level, reason, changed_by_name, created_at").eq("organisation_id", orgId).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_drills").select("id, facility_id, kind, scenario, held_on, participants, findings, corrective_actions, lessons_learned, attendance, evidence, recorded_by_name").eq("organisation_id", orgId).order("held_on", { ascending: true }).order("id")),
       all_(() => db.from("isps_breaches").select("facility_id, incident_id, occurred_at, category, description, security_level, reported_to_authority, reported_at, reported_to, status, closed_at").eq("organisation_id", orgId).gte("occurred_at", A).lt("occurred_at", B).order("occurred_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_declarations").select("facility_id, reference, ship_name, ship_imo, security_level, valid_from, valid_to, status, ship_signed_at, created_at").eq("organisation_id", orgId).gte("created_at", A).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
@@ -133,6 +133,13 @@ export const getIspsReport = createServerFn({ method: "POST" })
       const { data: inc } = await db.from("incidents").select("id, code").in("id", incIds.slice(i, i + 200));
       for (const x of (inc ?? []) as any[]) incCode.set(x.id, x.code);
     }
+    const { data: runs } = await all_(() => db.from("isps_checklist_runs").select("level_change_id, post_name, started_at, completed_at").eq("organisation_id", orgId).gte("started_at", A).lt("started_at", B).order("id"));
+    const checklistOf = (lcId: string) => {
+      const rs = ((runs ?? []) as any[]).filter((r) => r.level_change_id === lcId);
+      if (!rs.length) return null;
+      const took = rs.filter((r) => r.completed_at).map((r) => Math.round((Date.parse(r.completed_at) - Date.parse(r.started_at)) / 60_000));
+      return { posts: rs.length, completed: took.length, slowest_min: took.length ? Math.max(...took) : null, open_posts: rs.filter((r) => !r.completed_at).map((r) => r.post_name as string) };
+    };
     const facilities: IspsFacilityReport[] = ((fac ?? []) as any[]).map((f) => {
       const ch = ((changes ?? []) as any[]).filter((c) => c.facility_id === f.id);
       // Level at the start of the period: the last change before it, else the first change's starting level, else today's level.
@@ -171,7 +178,7 @@ export const getIspsReport = createServerFn({ method: "POST" })
         plan_lapsed_days: lapsed,
         level_now: f.security_level,
         level_days,
-        level_changes: inside.map((c) => ({ at: c.created_at, from: c.from_level, to: c.to_level, reason: c.reason, by: c.changed_by_name })),
+        level_changes: inside.map((c) => ({ at: c.created_at, from: c.from_level, to: c.to_level, reason: c.reason, by: c.changed_by_name, checklist: checklistOf(c.id) })),
         drills: inPeriod.map((d) => ({ id: d.id, held_on: d.held_on, kind: d.kind, scenario: d.scenario, participants: d.participants, findings: d.findings, corrective_actions: d.corrective_actions, lessons_learned: d.lessons_learned ?? null, attended: Array.isArray(d.attendance) ? d.attendance.length : 0, files: Array.isArray(d.evidence) ? d.evidence.length : 0, by: d.recorded_by_name })),
         drill_overdue_days: overdue,
         longest_drill_gap_days: longest,

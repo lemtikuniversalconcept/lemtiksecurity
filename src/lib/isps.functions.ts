@@ -5,7 +5,7 @@ import { getActiveOrgId, getSiteUrl } from "@/lib/orgs.server";
 import { throwSafeError } from "@/lib/server-errors";
 import { recordBlackboxAudit } from "@/lib/audit.server";
 import { admin, logEvent, myName, roleIn } from "@/lib/links.server";
-import { BREACH_INCIDENT, BREACH_LABEL, complianceFlags, violationClock, type ComplianceFlag, type ViolationClock } from "@/lib/isps.rules";
+import { BREACH_INCIDENT, BREACH_LABEL, checklistsFor, complianceFlags, violationClock, type ComplianceFlag, type ViolationClock } from "@/lib/isps.rules";
 
 const sb = (c: { supabase: unknown }) => c.supabase as any;
 const FAC_KIND = z.enum(["port_facility", "terminal", "jetty", "offshore", "ship"]);
@@ -142,17 +142,28 @@ export const setSecurityLevel = createServerFn({ method: "POST" })
     await (await import("./features.server")).assertFeature(orgId, "isps");
     need(role, ["manager"], "Only security managers can change the security level.");
     const db = await admin();
-    const { data: facs } = await db.from("isps_facilities").select("id, name, security_level").eq("organisation_id", orgId).in("id", data.facility_ids);
+    const { data: facs } = await db.from("isps_facilities").select("id, name, security_level, posts, level_measures").eq("organisation_id", orgId).in("id", data.facility_ids);
     if (!facs?.length) throwSafeError("isps.level", new Error("none"), "Facility not found.");
     const name = await myName(db, context.userId);
     const at = new Date().toISOString();
     const changed = facs.filter((f: any) => f.security_level !== data.level);
+    const listsByFacility = new Map<string, { post_name: string; items: string[] }[]>();
     for (const f of changed) {
       await db.from("isps_facilities").update({ security_level: data.level, level_set_at: at, level_set_by_name: name, level_reason: data.reason, updated_at: at }).eq("id", f.id);
-      await db.from("isps_level_changes").insert({ organisation_id: orgId, facility_id: f.id, from_level: f.security_level, to_level: data.level, reason: data.reason, notice_id: data.notice_id, changed_by: context.userId, changed_by_name: name });
+      const { data: lc } = await db.from("isps_level_changes").insert({ organisation_id: orgId, facility_id: f.id, from_level: f.security_level, to_level: data.level, reason: data.reason, notice_id: data.notice_id, changed_by: context.userId, changed_by_name: name }).select("id").single();
+      // The new level's checklist for each post; any open checklist from the old level is set aside.
+      await db.from("isps_checklist_runs").update({ superseded_at: at }).eq("facility_id", f.id).is("completed_at", null).is("superseded_at", null);
+      const lists = checklistsFor(f.posts ?? [], f.level_measures ?? {}, data.level);
+      if (lists.length) await db.from("isps_checklist_runs").insert(lists.map((c) => ({ organisation_id: orgId, facility_id: f.id, level_change_id: lc?.id ?? null, level: data.level, post_id: c.post_id, post_name: c.post_name, items: c.items.map((text) => ({ text, done_at: null, done_by: null, done_by_name: null })), started_at: at })));
+      listsByFacility.set(f.id, lists);
       await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "isps_facility", resourceId: f.id, actionType: "security_level", actionDetail: { from: f.security_level, to: data.level, reason: data.reason } });
     }
     if (changed.length) {
+      // The measures in the message itself, so they reach Telegram and phones too.
+      const checklistText = (fs: any[]) => {
+        const parts = fs.flatMap((f) => (listsByFacility.get(f.id) ?? []).map((c) => `${fs.length > 1 ? `${f.name}, ` : ""}${c.post_name}:\n${c.items.map((t) => `☐ ${t}`).join("\n")}`));
+        return parts.length ? `\n\nChecklist (tick each item off in Lemtik once it's in place):\n\n${parts.join("\n\n")}`.slice(0, 2500) : "";
+      };
       const { createBroadcast } = await import("./isps-broadcast.server");
       const { LEVEL_LABEL } = await import("./isps.rules");
       const names = changed.map((f: any) => f.name).join(", ");
@@ -161,7 +172,7 @@ export const setSecurityLevel = createServerFn({ method: "POST" })
         orgId,
         kind: "level_change",
         title: `Security ${LEVEL_LABEL[data.level]} at ${names}`,
-        body: `${raised ? "Raised" : "Lowered"} by ${name}: ${data.reason}\n\n${data.level >= 2 ? `Apply the level ${data.level} measures in the facility security plan now and brief your team.` : "Return to normal (level 1) measures."}${data.notice_id ? "\n\nThis follows a notice from the authority." : ""}`,
+        body: `${raised ? "Raised" : "Lowered"} by ${name}: ${data.reason}\n\n${data.level >= 2 ? `Apply the level ${data.level} measures in the facility security plan now and brief your team.` : "Return to normal (level 1) measures."}${checklistText(changed)}${data.notice_id ? "\n\nThis follows a notice from the authority." : ""}`,
         level: data.level,
         facilityIds: changed.map((f: any) => f.id),
         requireAck: data.level >= 2,

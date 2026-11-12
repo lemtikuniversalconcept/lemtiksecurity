@@ -26,6 +26,7 @@ import { AuthorityView } from "@/components/isps/Authority";
 import { BroadcastsPanel, MyIspsAcks } from "@/components/isps/Broadcasts";
 import { DrillEvidenceButton, TrainingTab } from "@/components/isps/Evidence";
 import { ClosureClock } from "@/components/isps/Clock";
+import { FacilityChecklistStatus, LevelMeasuresEditor, OpenChecklists, useRecentChecklists } from "@/components/isps/Checklists";
 
 export const Route = createFileRoute("/app/isps")({
   head: () => ({ meta: [{ title: "ISPS Watch · Lemtik SOD" }] }),
@@ -77,6 +78,7 @@ function IspsPage() {
         {!isAuthority && <Link to="/app/isps-report" className="b b-sec b-sm"><FileText size={13} /> Compliance report</Link>}
       </PageHeader>
       {!isAuthority && <MyIspsAcks />}
+      {!isAuthority && <OpenChecklists />}
       {!isAuthority && unacked > 0 && tab !== "notices" && (
         <Notice tone="fail">{unacked} notice{unacked === 1 ? "" : "s"} from the authority waiting for acknowledgement. <button type="button" className="b b-sm b-gh" onClick={() => setTab("notices")}>Read now</button></Notice>
       )}
@@ -122,17 +124,20 @@ function useRefresh() {
 function Facilities({ data }: { data: Overview }) {
   const [editing, setEditing] = useState<Facility | "new" | null>(null);
   const [levelFor, setLevelFor] = useState<Facility | null>(null);
+  const [measuresFor, setMeasuresFor] = useState<Facility | null>(null);
+  const recent = useRecentChecklists();
   return (
     <div className="col g16">
       {data.can_manage && !editing && <button type="button" className="b b-pri" style={{ alignSelf: "flex-start" }} onClick={() => setEditing("new")}><Plus size={14} /> Add a facility or ship</button>}
       {editing && <FacilityForm facility={editing === "new" ? null : editing} onDone={() => setEditing(null)} />}
       {levelFor && <LevelForm facilities={[levelFor]} onDone={() => setLevelFor(null)} />}
+      {measuresFor && <LevelMeasuresEditor facilityId={measuresFor.id} facilityName={measuresFor.name} onDone={() => setMeasuresFor(null)} />}
       {data.facilities.length === 0 ? (
         <Panel><Empty>No facilities yet. Add your port facility, terminal, jetty or ship to start keeping ISPS records.</Empty></Panel>
       ) : (
         data.facilities.map((f) => (
           <Panel key={f.id} title={<span className="row g8" style={{ alignItems: "center" }}><Anchor size={15} /> {f.name}</span>} meta={`${FACILITY_KIND[f.kind] ?? f.kind}${f.identifier ? ` · ${f.identifier}` : ""}`}
-            actions={data.can_manage ? <div className="row g6"><button type="button" className="b b-sm b-gh" onClick={() => setLevelFor(f)}>Change level</button><button type="button" className="b b-sm b-gh" onClick={() => setEditing(f)}>Edit</button></div> : undefined}>
+            actions={data.can_manage ? <div className="row g6"><button type="button" className="b b-sm b-gh" onClick={() => setLevelFor(f)}>Change level</button><button type="button" className="b b-sm b-gh" onClick={() => setMeasuresFor(f)}>Level measures</button><button type="button" className="b b-sm b-gh" onClick={() => setEditing(f)}>Edit</button></div> : undefined}>
             <div className="col g10" style={{ fontSize: 13 }}>
               <div className="row g8 wrap" style={{ alignItems: "center" }}>
                 <Status tone={levelTone(f.security_level)}>{LEVEL_LABEL[f.security_level]}</Status>
@@ -149,6 +154,7 @@ function Facilities({ data }: { data: Overview }) {
                 <div className="col g4">{f.flags.map((x, i) => <Status key={i} tone={x.tone}>{x.text}</Status>)}</div>
               )}
               {f.clock.since && <ClosureClock clock={f.clock} />}
+              <FacilityChecklistStatus facilityId={f.id} runs={recent.data ?? []} />
             </div>
           </Panel>
         ))
