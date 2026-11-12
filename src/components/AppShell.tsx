@@ -34,6 +34,7 @@ import {
   Ship,
   Warehouse,
   LifeBuoy,
+  ClipboardCheck,
 } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -104,6 +105,7 @@ const CLIENT_NAV: NavGroup[] = [
     items: [
       { to: "/app/reports", label: "Analytics", icon: ChartColumn, allowed: ALL },
       { to: "/app/report-centre", label: "Report centre", icon: FileText, allowed: ALL },
+      { to: "/app/safety-report", label: "Safety report", icon: ClipboardCheck, allowed: ALL, kinds: OPERATORS, feature: "movement" },
       { to: "/app/audit", label: "Audit log", icon: History, allowed: ADMINS },
     ],
   },

@@ -38,6 +38,7 @@ import { Route as AppPatrolsRouteImport } from './routes/app.patrols'
 import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
 import { Route as AppResponderRouteImport } from './routes/app.responder'
+import { Route as AppSafetyReportRouteImport } from './routes/app.safety-report'
 import { Route as AppSensorsRouteImport } from './routes/app.sensors'
 import { Route as AppUsersRouteImport } from './routes/app.users'
 import { Route as BoardTokenRouteImport } from './routes/board.$token'
@@ -233,6 +234,11 @@ const AppReportsRoute = AppReportsRouteImport.update({
 const AppResponderRoute = AppResponderRouteImport.update({
   id: '/responder',
   path: '/responder',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSafetyReportRoute = AppSafetyReportRouteImport.update({
+  id: '/safety-report',
+  path: '/safety-report',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSensorsRoute = AppSensorsRouteImport.update({
@@ -520,6 +526,7 @@ export interface FileRoutesByFullPath {
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
   '/app/responder': typeof AppResponderRoute
+  '/app/safety-report': typeof AppSafetyReportRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/board/$token': typeof BoardTokenRoute
@@ -598,6 +605,7 @@ export interface FileRoutesByTo {
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
   '/app/responder': typeof AppResponderRoute
+  '/app/safety-report': typeof AppSafetyReportRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/board/$token': typeof BoardTokenRoute
@@ -681,6 +689,7 @@ export interface FileRoutesById {
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
   '/app/responder': typeof AppResponderRoute
+  '/app/safety-report': typeof AppSafetyReportRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/board/$token': typeof BoardTokenRoute
@@ -765,6 +774,7 @@ export interface FileRouteTypes {
     | '/app/report-centre'
     | '/app/reports'
     | '/app/responder'
+    | '/app/safety-report'
     | '/app/sensors'
     | '/app/users'
     | '/board/$token'
@@ -843,6 +853,7 @@ export interface FileRouteTypes {
     | '/app/report-centre'
     | '/app/reports'
     | '/app/responder'
+    | '/app/safety-report'
     | '/app/sensors'
     | '/app/users'
     | '/board/$token'
@@ -925,6 +936,7 @@ export interface FileRouteTypes {
     | '/app/report-centre'
     | '/app/reports'
     | '/app/responder'
+    | '/app/safety-report'
     | '/app/sensors'
     | '/app/users'
     | '/board/$token'
@@ -1204,6 +1216,13 @@ declare module '@tanstack/react-router' {
       path: '/responder'
       fullPath: '/app/responder'
       preLoaderRoute: typeof AppResponderRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/safety-report': {
+      id: '/app/safety-report'
+      path: '/safety-report'
+      fullPath: '/app/safety-report'
+      preLoaderRoute: typeof AppSafetyReportRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/sensors': {
@@ -1635,6 +1654,7 @@ interface AppRouteChildren {
   AppReportCentreRoute: typeof AppReportCentreRoute
   AppReportsRoute: typeof AppReportsRoute
   AppResponderRoute: typeof AppResponderRoute
+  AppSafetyReportRoute: typeof AppSafetyReportRoute
   AppSensorsRoute: typeof AppSensorsRoute
   AppUsersRoute: typeof AppUsersRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
@@ -1672,6 +1692,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppReportCentreRoute: AppReportCentreRoute,
   AppReportsRoute: AppReportsRoute,
   AppResponderRoute: AppResponderRoute,
+  AppSafetyReportRoute: AppSafetyReportRoute,
   AppSensorsRoute: AppSensorsRoute,
   AppUsersRoute: AppUsersRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
