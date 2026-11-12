@@ -26,6 +26,23 @@ async function handle(request: Request) {
   if (cb?.data && typeof cb.data === "string") {
     const chatId = cb.message?.chat?.id;
     const answer = (text: string) => tg("answerCallbackQuery", { callback_query_id: cb.id, text, show_alert: false });
+    // "I've read this" on an ISPS security level change.
+    const isa = /^isa:([0-9a-f-]{36})$/.exec(cb.data);
+    if (isa && chatId) {
+      const { data: who } = await db.from("user_telegram").select("user_id").eq("chat_id", chatId).maybeSingle();
+      if (!who) {
+        await answer("This Telegram account isn't linked to Lemtik any more.");
+        return ok();
+      }
+      const { acknowledgeRecipient } = await import("@/lib/isps-broadcast.server");
+      const done = await acknowledgeRecipient(isa[1], who.user_id, "telegram");
+      await answer(done ? "Acknowledged. Thank you." : "Already acknowledged.");
+      if (cb.message?.message_id) {
+        await tg("editMessageReplyMarkup", { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
+        if (done) await tg("sendMessage", { chat_id: chatId, reply_to_message_id: cb.message.message_id, text: `✅ Read and acknowledged at ${new Date().toLocaleTimeString("en-GB", { timeZone: "Africa/Lagos", hour: "2-digit", minute: "2-digit" })}` });
+      }
+      return ok();
+    }
     const m = /^ack:([0-9a-f-]{36})$/.exec(cb.data);
     if (!m || !chatId) {
       await answer("This button isn't valid any more.");

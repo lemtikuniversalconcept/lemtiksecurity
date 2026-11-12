@@ -150,12 +150,22 @@ export const setSecurityLevel = createServerFn({ method: "POST" })
       await db.from("isps_level_changes").insert({ organisation_id: orgId, facility_id: f.id, from_level: f.security_level, to_level: data.level, reason: data.reason, notice_id: data.notice_id, changed_by: context.userId, changed_by_name: name });
       await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "isps_facility", resourceId: f.id, actionType: "security_level", actionDetail: { from: f.security_level, to: data.level, reason: data.reason } });
     }
-    if (changed.length && data.level >= 2) {
-      await db.from("alerts").insert({
-        organisation_id: orgId, severity: data.level === 3 ? 5 : 4, channel: "in-app", channels: ["in-app"], alert_type: "isps_level", status: "delivered",
-        title: `Security level ${data.level} set at ${changed.map((f: any) => f.name).join(", ")}`.slice(0, 200),
-        body: `${name}: ${data.reason}`, action: "Open ISPS Watch", recipients: 1, delivered_count: 1, failed_count: 0, recipient_user_ids: [], acknowledged: false,
-      });
+    if (changed.length) {
+      const { createBroadcast } = await import("./isps-broadcast.server");
+      const { LEVEL_LABEL } = await import("./isps.rules");
+      const names = changed.map((f: any) => f.name).join(", ");
+      const raised = changed.some((f: any) => f.security_level < data.level);
+      await createBroadcast({
+        orgId,
+        kind: "level_change",
+        title: `Security ${LEVEL_LABEL[data.level]} at ${names}`,
+        body: `${raised ? "Raised" : "Lowered"} by ${name}: ${data.reason}\n\n${data.level >= 2 ? `Apply the level ${data.level} measures in the facility security plan now and brief your team.` : "Return to normal (level 1) measures."}${data.notice_id ? "\n\nThis follows a notice from the authority." : ""}`,
+        level: data.level,
+        facilityIds: changed.map((f: any) => f.id),
+        requireAck: data.level >= 2,
+        createdBy: context.userId,
+        createdByName: name,
+      }).catch((e) => console.error("[isps.broadcast]", e));
     }
     return { changed: changed.length };
   });
@@ -460,6 +470,7 @@ export const acknowledgeNotice = createServerFn({ method: "POST" })
       .eq("notice_id", data.id).eq("org_id", orgId).is("acknowledged_at", null).select("id");
     if (error || !r?.length) throwSafeError("notice.ack", error ?? new Error("none"), "Already acknowledged, or not found.");
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "authority_notice", resourceId: data.id, actionType: "acknowledge", actionDetail: { response: data.response } });
+    await (await import("./isps-broadcast.server")).closeNoticeBroadcasts(orgId, data.id, context.userId).catch(() => undefined);
     return { ok: true };
   });
 
@@ -562,6 +573,20 @@ export const sendNotice = createServerFn({ method: "POST" })
     );
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "authority_notice", resourceId: n.id, actionType: "issue", actionDetail: { reference, kind: data.kind, recipients: targets.length, sha256: body_sha256 } });
     for (const t of targets) await recordBlackboxAudit({ userId: context.userId, orgId: t, resourceType: "authority_notice", resourceId: n.id, actionType: "received", actionDetail: { reference, from: me?.name ?? "" } });
+    // Reach the receiving organisations' managers on their phones too, and chase until acknowledged.
+    const { createBroadcast } = await import("./isps-broadcast.server");
+    for (const t of targets) {
+      await createBroadcast({
+        orgId: t,
+        kind: "authority_notice",
+        title: `${me?.name ?? "Authority"}: ${data.title}`,
+        body: `${data.kind === "security_level" ? `Set security level ${data.required_level}. ` : ""}${data.body.slice(0, 1500)}${data.respond_by ? `\n\nRespond by ${new Date(data.respond_by).toLocaleString("en-GB", { timeZone: "Africa/Lagos", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} (Lagos time).` : ""}\n\nRef ${reference}. Open ISPS Watch to acknowledge for your organisation.`,
+        level: data.kind === "security_level" ? data.required_level : null,
+        noticeId: n.id,
+        chaseEveryMin: data.kind === "security_level" ? 15 : 30,
+        maxChases: 4,
+      }).catch((e) => console.error("[isps.broadcast]", e));
+    }
     return { id: n.id as string, reference, recipients: targets.length };
   });
 
@@ -583,4 +608,49 @@ export const listSentNotices = createServerFn({ method: "GET" })
       id: string; reference: string; kind: string; title: string; body: string; required_level: number | null; respond_by: string | null; issued_by_name: string | null; issued_at: string; body_sha256: string;
       recipients: { org: string; delivered_at: string; first_read_at: string | null; first_read_by_name: string | null; acknowledged_at: string | null; acknowledged_by_name: string | null; response: string | null }[];
     }[];
+  });
+
+// ───────────────────────────── Broadcasts ─────────────────────────────
+
+export type MyBroadcast = { recipient_id: string; broadcast_id: string; kind: string; title: string; body: string; level: number | null; created_at: string; notice_id: string | null };
+
+/** Level changes waiting for the signed-in person to acknowledge. */
+export const listMyIspsBroadcasts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<MyBroadcast[]> => {
+    const supabase = sb(context);
+    const { data: rec } = await supabase.from("isps_broadcast_recipients").select("id, broadcast_id").eq("user_id", context.userId).is("acknowledged_at", null).order("first_sent_at", { ascending: false }).limit(20);
+    if (!rec?.length) return [];
+    const { data: bs } = await supabase.from("isps_broadcasts").select("id, kind, title, body, level, created_at, notice_id, require_ack, closed_at").in("id", rec.map((r: any) => r.broadcast_id));
+    return (bs ?? [])
+      .filter((b: any) => b.require_ack && b.kind === "level_change" && !b.closed_at)
+      .map((b: any) => ({ recipient_id: rec.find((r: any) => r.broadcast_id === b.id)!.id, broadcast_id: b.id, kind: b.kind, title: b.title, body: b.body, level: b.level, created_at: b.created_at, notice_id: b.notice_id }));
+  });
+
+export const acknowledgeIspsBroadcast = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ recipient_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { acknowledgeRecipient } = await import("./isps-broadcast.server");
+    const ok = await acknowledgeRecipient(data.recipient_id, context.userId, "app");
+    if (!ok) throwSafeError("isps.broadcast.ack", new Error("none"), "Already acknowledged.");
+    return { ok: true };
+  });
+
+export type BroadcastLog = {
+  id: string; kind: string; title: string; level: number | null; created_at: string; created_by_name: string | null; require_ack: boolean; chases_sent: number; closed_at: string | null;
+  recipients: { name: string | null; role: string | null; channels_sent: string[]; channels_failed: string[]; first_sent_at: string; acknowledged_at: string | null; acknowledged_via: string | null }[];
+};
+
+/** Recent broadcasts with each person's acknowledgement time, for managers. */
+export const listIspsBroadcasts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<BroadcastLog[]> => {
+    const { orgId, role } = await ctxRole(context);
+    if (!role || !["manager", "supervisor", "client_admin"].includes(role)) return [];
+    const supabase = sb(context);
+    const { data: bs } = await supabase.from("isps_broadcasts").select("id, kind, title, level, created_at, created_by_name, require_ack, chases_sent, closed_at").eq("organisation_id", orgId).order("created_at", { ascending: false }).limit(30);
+    if (!bs?.length) return [];
+    const { data: rec } = await supabase.from("isps_broadcast_recipients").select("broadcast_id, name, role, channels_sent, channels_failed, first_sent_at, acknowledged_at, acknowledged_via").in("broadcast_id", bs.map((b: any) => b.id)).limit(5000);
+    return bs.map((b: any) => ({ ...b, recipients: (rec ?? []).filter((r: any) => r.broadcast_id === b.id) }));
   });

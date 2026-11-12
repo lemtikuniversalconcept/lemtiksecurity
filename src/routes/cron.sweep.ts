@@ -26,22 +26,36 @@ async function handle(request: Request) {
   let orgs: string[] = [];
   const errors: string[] = [];
   try {
-    const [subj, voy, cargo] = await Promise.all([
+    const [subj, voy, cargo, isps, bcast] = await Promise.all([
       db.from("movement_subjects").select("organisation_id").eq("tracking_enabled", true).limit(5000),
       db.from("movement_voyages").select("organisation_id").eq("status", "underway").limit(5000),
       db.from("cargo_consignments").select("organisation_id").eq("status", "in_transit").limit(5000),
+      db.from("isps_facilities").select("organisation_id").limit(5000),
+      db.from("isps_broadcasts").select("organisation_id").is("closed_at", null).limit(5000),
     ]);
-    orgs = [...new Set([...(subj.data ?? []), ...(voy.data ?? []), ...(cargo.data ?? [])].map((r: any) => r.organisation_id as string))];
+    const moving = new Set([...(subj.data ?? []), ...(voy.data ?? []), ...(cargo.data ?? [])].map((r: any) => r.organisation_id as string));
+    const ispsOrgs = new Set([...(isps.data ?? []), ...(bcast.data ?? [])].map((r: any) => r.organisation_id as string));
+    orgs = [...new Set([...moving, ...ispsOrgs])];
     const { sweepOrg } = await import("@/lib/movement.server");
+    const { sweepIsps } = await import("@/lib/isps-broadcast.server");
     for (const orgId of orgs) {
       if (Date.now() - t0 > 45_000) {
         errors.push(`time budget reached after ${orgs.indexOf(orgId)} of ${orgs.length} organisations`);
         break;
       }
-      try {
-        await sweepOrg(orgId);
-      } catch (e) {
-        errors.push(`${orgId}: ${(e as Error).message}`.slice(0, 300));
+      if (moving.has(orgId)) {
+        try {
+          await sweepOrg(orgId);
+        } catch (e) {
+          errors.push(`${orgId}: ${(e as Error).message}`.slice(0, 300));
+        }
+      }
+      if (ispsOrgs.has(orgId)) {
+        try {
+          await sweepIsps(orgId);
+        } catch (e) {
+          errors.push(`${orgId} isps: ${(e as Error).message}`.slice(0, 300));
+        }
       }
     }
   } catch (e) {

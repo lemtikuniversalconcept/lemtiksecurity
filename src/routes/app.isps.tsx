@@ -22,6 +22,7 @@ import {
 } from "@/lib/isps.functions";
 import { BREACH_LABEL, FACILITY_KIND, LEVEL_LABEL } from "@/lib/isps.rules";
 import { AuthorityView } from "@/components/isps/Authority";
+import { BroadcastsPanel, MyIspsAcks } from "@/components/isps/Broadcasts";
 
 export const Route = createFileRoute("/app/isps")({
   head: () => ({ meta: [{ title: "ISPS Watch · Lemtik SOD" }] }),
@@ -70,6 +71,7 @@ function IspsPage() {
         title="ISPS Watch"
         sub={isAuthority ? "Security levels, drills, declarations and breaches at the organisations that share ISPS records with you, and formal notices with read receipts." : "Your ISPS Code records in one place: security levels, drills and exercises, Declarations of Security and the breach register, plus notices from the authority."}
       />
+      {!isAuthority && <MyIspsAcks />}
       {!isAuthority && unacked > 0 && tab !== "notices" && (
         <Notice tone="fail">{unacked} notice{unacked === 1 ? "" : "s"} from the authority waiting for acknowledgement. <button type="button" className="b b-sm b-gh" onClick={() => setTab("notices")}>Read now</button></Notice>
       )}
@@ -82,7 +84,12 @@ function IspsPage() {
         <AuthorityView tab={tab === "sent" ? "sent" : "regulated"} />
       ) : (
         <>
-          {tab === "facilities" && <Facilities data={d} />}
+          {tab === "facilities" && (
+            <>
+              <Facilities data={d} />
+              <BroadcastsPanel />
+            </>
+          )}
           {tab === "notices" && <Notices notices={notices.data ?? []} loading={notices.isLoading} facilities={d.facilities} canManage={d.can_manage} />}
           {tab === "drills" && <Drills data={d} />}
           {tab === "declarations" && <Declarations data={d} />}
