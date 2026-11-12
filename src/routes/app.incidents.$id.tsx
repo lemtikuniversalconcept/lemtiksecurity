@@ -26,6 +26,7 @@ import { Avatar, Confidence, Notice, Sev, elapsed, timeAgo, useNow } from "@/com
 import { IncidentProposals } from "@/components/AiProposals";
 import { LocationPicker } from "@/components/LocationPicker";
 import { CaseFileButton } from "@/components/CaseFileButton";
+import { ShareButton } from "@/components/shares/RecordShares";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -120,7 +121,9 @@ function percentOrNull(value: unknown) {
 
 function IncidentDetailPage() {
   const { id } = Route.useParams();
-  const canCaseFile = Route.useRouteContext().appAccess?.specRole !== "field_officer";
+  const incAccess = Route.useRouteContext().appAccess;
+  const canCaseFile = incAccess?.specRole !== "field_officer";
+  const canShare = (incAccess?.specRole === "security_manager" || incAccess?.specRole === "operator") && !!incAccess?.features?.includes("links");
   const { appAccess } = Route.useRouteContext();
   const qc = useQueryClient();
   const now = useNow(1000);
@@ -386,6 +389,7 @@ function IncidentDetailPage() {
         <span>/</span>
         <span className="mono">{inc.code}</span>
         <span className="f1" />
+        {canShare && <ShareButton kind="incident" id={id} />}
         {canCaseFile && <CaseFileButton kind="incident" id={id} />}
       </div>
 

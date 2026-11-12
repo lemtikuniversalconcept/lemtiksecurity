@@ -60,6 +60,7 @@ import { Route as OfficerPatrolRouteImport } from './routes/officer.patrol'
 import { Route as OfficerScheduleRouteImport } from './routes/officer.schedule'
 import { Route as OfficerSosRouteImport } from './routes/officer.sos'
 import { Route as RespondTokenRouteImport } from './routes/respond.$token'
+import { Route as SharedTokenRouteImport } from './routes/shared.$token'
 import { Route as TelegramWebhookRouteImport } from './routes/telegram.webhook'
 import { Route as TrackTokenRouteImport } from './routes/track.$token'
 import { Route as TrackerOsmandRouteImport } from './routes/tracker.osmand'
@@ -73,6 +74,7 @@ import { Route as AppCaseFilesIdRouteImport } from './routes/app.case-files.$id'
 import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
 import { Route as AppLinksIdRouteImport } from './routes/app.links_.$id'
 import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
+import { Route as AppSharedIdRouteImport } from './routes/app.shared.$id'
 import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
 import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id'
 import { Route as OfficerIncidentIdRouteImport } from './routes/officer.incident.$id'
@@ -340,6 +342,11 @@ const RespondTokenRoute = RespondTokenRouteImport.update({
   path: '/respond/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SharedTokenRoute = SharedTokenRouteImport.update({
+  id: '/shared/$token',
+  path: '/shared/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TelegramWebhookRoute = TelegramWebhookRouteImport.update({
   id: '/telegram/webhook',
   path: '/telegram/webhook',
@@ -404,6 +411,11 @@ const AppPatrolsIdRoute = AppPatrolsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => AppPatrolsRoute,
+} as any)
+const AppSharedIdRoute = AppSharedIdRouteImport.update({
+  id: '/shared/$id',
+  path: '/shared/$id',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppUsersIdRoute = AppUsersIdRouteImport.update({
   id: '/$id',
@@ -509,6 +521,7 @@ export interface FileRoutesByFullPath {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/respond/$token': typeof RespondTokenRoute
+  '/shared/$token': typeof SharedTokenRoute
   '/telegram/webhook': typeof TelegramWebhookRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
@@ -526,6 +539,7 @@ export interface FileRoutesByFullPath {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
+  '/app/shared/$id': typeof AppSharedIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
@@ -582,6 +596,7 @@ export interface FileRoutesByTo {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/respond/$token': typeof RespondTokenRoute
+  '/shared/$token': typeof SharedTokenRoute
   '/telegram/webhook': typeof TelegramWebhookRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
@@ -599,6 +614,7 @@ export interface FileRoutesByTo {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
+  '/app/shared/$id': typeof AppSharedIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
@@ -660,6 +676,7 @@ export interface FileRoutesById {
   '/officer/schedule': typeof OfficerScheduleRoute
   '/officer/sos': typeof OfficerSosRoute
   '/respond/$token': typeof RespondTokenRoute
+  '/shared/$token': typeof SharedTokenRoute
   '/telegram/webhook': typeof TelegramWebhookRoute
   '/track/$token': typeof TrackTokenRoute
   '/tracker/osmand': typeof TrackerOsmandRoute
@@ -677,6 +694,7 @@ export interface FileRoutesById {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links_/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
+  '/app/shared/$id': typeof AppSharedIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
   '/officer/incident/$id': typeof OfficerIncidentIdRoute
@@ -739,6 +757,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/respond/$token'
+    | '/shared/$token'
     | '/telegram/webhook'
     | '/track/$token'
     | '/tracker/osmand'
@@ -756,6 +775,7 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/links/$id'
     | '/app/patrols/$id'
+    | '/app/shared/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
     | '/officer/incident/$id'
@@ -812,6 +832,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/respond/$token'
+    | '/shared/$token'
     | '/telegram/webhook'
     | '/track/$token'
     | '/tracker/osmand'
@@ -829,6 +850,7 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/links/$id'
     | '/app/patrols/$id'
+    | '/app/shared/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
     | '/officer/incident/$id'
@@ -889,6 +911,7 @@ export interface FileRouteTypes {
     | '/officer/schedule'
     | '/officer/sos'
     | '/respond/$token'
+    | '/shared/$token'
     | '/telegram/webhook'
     | '/track/$token'
     | '/tracker/osmand'
@@ -906,6 +929,7 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/links_/$id'
     | '/app/patrols/$id'
+    | '/app/shared/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
     | '/officer/incident/$id'
@@ -934,6 +958,7 @@ export interface RootRouteChildren {
   CustodyTokenRoute: typeof CustodyTokenRoute
   DosTokenRoute: typeof DosTokenRoute
   RespondTokenRoute: typeof RespondTokenRoute
+  SharedTokenRoute: typeof SharedTokenRoute
   TelegramWebhookRoute: typeof TelegramWebhookRoute
   TrackTokenRoute: typeof TrackTokenRoute
   TrackerOsmandRoute: typeof TrackerOsmandRoute
@@ -1299,6 +1324,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RespondTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/shared/$token': {
+      id: '/shared/$token'
+      path: '/shared/$token'
+      fullPath: '/shared/$token'
+      preLoaderRoute: typeof SharedTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/telegram/webhook': {
       id: '/telegram/webhook'
       path: '/telegram/webhook'
@@ -1389,6 +1421,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/patrols/$id'
       preLoaderRoute: typeof AppPatrolsIdRouteImport
       parentRoute: typeof AppPatrolsRoute
+    }
+    '/app/shared/$id': {
+      id: '/app/shared/$id'
+      path: '/shared/$id'
+      fullPath: '/app/shared/$id'
+      preLoaderRoute: typeof AppSharedIdRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/users/$id': {
       id: '/app/users/$id'
@@ -1547,6 +1586,7 @@ interface AppRouteChildren {
   AppCargoIdRoute: typeof AppCargoIdRoute
   AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
   AppLinksIdRoute: typeof AppLinksIdRoute
+  AppSharedIdRoute: typeof AppSharedIdRoute
   AppIspsDosIdRoute: typeof AppIspsDosIdRoute
   AppMovementSarIdRoute: typeof AppMovementSarIdRoute
   AppMovementVoyagesIdRoute: typeof AppMovementVoyagesIdRoute
@@ -1580,6 +1620,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCargoIdRoute: AppCargoIdRoute,
   AppCaseFilesIdRoute: AppCaseFilesIdRoute,
   AppLinksIdRoute: AppLinksIdRoute,
+  AppSharedIdRoute: AppSharedIdRoute,
   AppIspsDosIdRoute: AppIspsDosIdRoute,
   AppMovementSarIdRoute: AppMovementSarIdRoute,
   AppMovementVoyagesIdRoute: AppMovementVoyagesIdRoute,
@@ -1697,6 +1738,7 @@ const rootRouteChildren: RootRouteChildren = {
   CustodyTokenRoute: CustodyTokenRoute,
   DosTokenRoute: DosTokenRoute,
   RespondTokenRoute: RespondTokenRoute,
+  SharedTokenRoute: SharedTokenRoute,
   TelegramWebhookRoute: TelegramWebhookRoute,
   TrackTokenRoute: TrackTokenRoute,
   TrackerOsmandRoute: TrackerOsmandRoute,

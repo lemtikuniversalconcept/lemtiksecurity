@@ -12,6 +12,7 @@ import { Empty, Notice, PageHeader, Panel, Status } from "@/components/nw";
 import { getVoyageReport, type VoyageReport } from "@/lib/voyages.functions";
 import { routeLengthM, VOYAGE_STATUS } from "@/components/movement/Voyages";
 import { CaseFileButton } from "@/components/CaseFileButton";
+import { ShareButton } from "@/components/shares/RecordShares";
 import { VoyageRecords } from "@/components/movement/VoyageRecords";
 import { movementPerms } from "@/components/movement/perms";
 
@@ -85,6 +86,7 @@ function VoyageReportPage() {
       <div className="row g8 no-print">
         <Link to="/app/movement" className="b b-sm b-gh"><ArrowLeft size={14} /> Protected movement</Link>
         <span className="f1" />
+        {(appAccess?.specRole === "security_manager" || appAccess?.specRole === "operator") && appAccess?.features?.includes("links") && <ShareButton kind="voyage" id={id} />}
         <CaseFileButton kind="voyage" id={id} />
         <button type="button" className="b b-sm b-pri" onClick={() => window.print()}><Printer size={14} /> Print or save as PDF</button>
       </div>

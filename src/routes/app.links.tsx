@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Check, Eye, Loader2, Share2, X } from "lucide-react";
 import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
+import { IncomingRecordShares, OutgoingRecordShares } from "@/components/shares/SharesPanels";
 import { listLinkDirectory, listLinks, offerLink, respondLink, revokeLink, SCOPE_LABEL, SCOPES, type LinkEvent, type OrgLink, type Scope } from "@/lib/links.functions";
 
 export const Route = createFileRoute("/app/links")({
@@ -56,6 +57,8 @@ function LinksPage() {
         </Panel>
       )}
 
+      <IncomingRecordShares />
+
       {(isPartnerOrg || incoming.length > 0) && (
         <Panel title="Shared with us">
           {incoming.filter((l) => l.status !== "pending").length === 0 ? (
@@ -73,6 +76,8 @@ function LinksPage() {
           <div className="col g12">{outgoing.map((l) => <LinkRow key={l.id} link={l} canManage={can_manage} events={events} />)}</div>
         )}
       </Panel>
+
+      {!isPartnerOrg && <OutgoingRecordShares />}
     </div>
   );
 }

@@ -35,6 +35,7 @@ import { reviewPossibleHijack } from "@/lib/hijack.functions";
 import { DeliveryLog } from "@/components/alerts/Escalation";
 import { listCorridors, listResponders } from "@/lib/corridor.functions";
 import { createSarCase, listSarCases, type SarCase } from "@/lib/sar.functions";
+import { ShareButton } from "@/components/shares/RecordShares";
 import { MovementPermsContext, movementPerms, useMovementPerms } from "@/components/movement/perms";
 
 export const Route = createFileRoute("/app/movement")({
@@ -416,6 +417,7 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
   const sarFn = useServerFn(createSarCase);
   const navigate = useNavigate();
   const { canOperate } = useMovementPerms();
+  const canShare = !!Route.useRouteContext().appAccess?.features?.includes("links");
   const sar = useMutation({
     mutationFn: () => sarFn({ data: { alert_id: a.id } }),
     onSuccess: (r) => navigate({ to: "/app/movement/sar/$id", params: { id: r.id } }),
@@ -464,6 +466,7 @@ function AlertRow({ a, subject, onFocus, compact }: { a: MovementAlert; subject?
           {sar.isPending ? <Loader2 size={13} className="animate-spin" /> : null} Search plan
         </button>
       )}
+      {a.severity >= 3 && canOperate && canShare && <ShareButton kind="movement_alert" id={a.id} className="b b-sm b-gh" />}
       {a.severity >= 3 && canOperate && (
         <button type="button" className="b b-sm b-gh" onClick={() => setShowLog((v) => !v)} aria-expanded={showLog} title="Who was told about this alert, how and when">Who was told</button>
       )}
