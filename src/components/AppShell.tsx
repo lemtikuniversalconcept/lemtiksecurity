@@ -32,6 +32,7 @@ import {
   Users,
   X,
   Ship,
+  Warehouse,
 } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -69,6 +70,7 @@ const CLIENT_NAV: NavGroup[] = [
     label: "Operate",
     items: [
       { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true, allowed: ALL },
+      { to: "/app/facility", label: "Facility overview", icon: Warehouse, allowed: ALL, kinds: ["port_facility"] },
       { to: "/app/fleet", label: "Fleet overview", icon: Ship, allowed: ALL, kinds: ["maritime_operator", "port_facility"], feature: "movement" },
       { to: "/app/map", label: "Live map", icon: Map, allowed: ALL },
       { to: "/app/incidents", label: "Incidents", icon: Siren, allowed: ALL, count: "incidents" },
