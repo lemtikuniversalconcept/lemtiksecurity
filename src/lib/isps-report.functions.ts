@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveOrgId } from "@/lib/orgs.server";
 import { throwSafeError } from "@/lib/server-errors";
-import type { ComplianceFlag, TrainingState } from "./isps.rules";
+import type { ComplianceFlag, TrainingState, ViolationClock } from "./isps.rules";
 
 // ISPS compliance report for one organisation over a period: each facility's security level
 // history and time at each level, drills against the three-month rule, exercises, the plan
@@ -33,9 +33,10 @@ export type IspsFacilityReport = {
   drill_overdue_days: number;
   longest_drill_gap_days: number | null;
   exercises_in_period: number;
-  breaches: { occurred_at: string; category: string; description: string; level: number | null; reported_to_authority: boolean; reported_at: string | null; reported_to: string | null; hours_to_report: number | null; status: string; closed_at: string | null; days_to_close: number | null }[];
+  breaches: { occurred_at: string; category: string; description: string; level: number | null; reported_to_authority: boolean; reported_at: string | null; reported_to: string | null; hours_to_report: number | null; status: string; closed_at: string | null; days_to_close: number | null; incident_code: string | null }[];
   declarations: { reference: string; ship_name: string; ship_imo: string | null; level: number; valid_from: string; valid_to: string; status: string; ship_signed_at: string | null }[];
   flags_now: ComplianceFlag[];
+  clock_now: ViolationClock;
 };
 export type IspsReport = {
   org: { id: string; name: string };
@@ -115,14 +116,23 @@ export const getIspsReport = createServerFn({ method: "POST" })
       db.from("isps_facilities").select("id, name, kind, identifier, security_level, level_set_at, security_officer_name, security_officer_phone, plan_approved_on, plan_expires_on, created_at").eq("organisation_id", orgId).order("name"),
       all_(() => db.from("isps_level_changes").select("facility_id, from_level, to_level, reason, changed_by_name, created_at").eq("organisation_id", orgId).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_drills").select("id, facility_id, kind, scenario, held_on, participants, findings, corrective_actions, lessons_learned, attendance, evidence, recorded_by_name").eq("organisation_id", orgId).order("held_on", { ascending: true }).order("id")),
-      all_(() => db.from("isps_breaches").select("facility_id, occurred_at, category, description, security_level, reported_to_authority, reported_at, reported_to, status, closed_at").eq("organisation_id", orgId).gte("occurred_at", A).lt("occurred_at", B).order("occurred_at", { ascending: true }).order("id")),
+      all_(() => db.from("isps_breaches").select("facility_id, incident_id, occurred_at, category, description, security_level, reported_to_authority, reported_at, reported_to, status, closed_at").eq("organisation_id", orgId).gte("occurred_at", A).lt("occurred_at", B).order("occurred_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_declarations").select("facility_id, reference, ship_name, ship_imo, security_level, valid_from, valid_to, status, ship_signed_at, created_at").eq("organisation_id", orgId).gte("created_at", A).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_broadcasts").select("id, created_at").eq("organisation_id", orgId).eq("kind", "level_change").gte("created_at", A).lt("created_at", B).order("id")),
       all_(() => db.from("authority_notice_recipients").select("notice_id, from_org_id, first_read_at, acknowledged_at, acknowledged_by_name").eq("org_id", orgId).gte("delivered_at", A).lt("delivered_at", B).order("id")),
     ]);
     if (!org) throwSafeError("isps.report", new Error("org"), "Organisation not found.");
 
-    const { complianceFlags } = await import("./isps.rules");
+    const { complianceFlags, violationClock } = await import("./isps.rules");
+    // Unreported breaches for today's flags and clock count every breach, not only those in the period.
+    const { data: unrep } = await all_(() => db.from("isps_breaches").select("facility_id, occurred_at").eq("organisation_id", orgId).eq("reported_to_authority", false).order("id"));
+    const oldestUnrep = (id: string) => ((unrep ?? []) as any[]).filter((x) => x.facility_id === id).map((x) => x.occurred_at as string).sort()[0] ?? null;
+    const incIds = [...new Set(((br ?? []) as any[]).map((x) => x.incident_id).filter(Boolean))] as string[];
+    const incCode = new Map<string, string>();
+    for (let i = 0; i < incIds.length; i += 200) {
+      const { data: inc } = await db.from("incidents").select("id, code").in("id", incIds.slice(i, i + 200));
+      for (const x of (inc ?? []) as any[]) incCode.set(x.id, x.code);
+    }
     const facilities: IspsFacilityReport[] = ((fac ?? []) as any[]).map((f) => {
       const ch = ((changes ?? []) as any[]).filter((c) => c.facility_id === f.id);
       // Level at the start of the period: the last change before it, else the first change's starting level, else today's level.
@@ -172,6 +182,7 @@ export const getIspsReport = createServerFn({ method: "POST" })
           hours_to_report: x.reported_at ? Math.round(((Date.parse(x.reported_at) - Date.parse(x.occurred_at)) / 3600_000) * 10) / 10 : null,
           status: x.status, closed_at: x.closed_at,
           days_to_close: x.closed_at ? Math.round(((Date.parse(x.closed_at) - Date.parse(x.occurred_at)) / DAY) * 10) / 10 : null,
+          incident_code: x.incident_id ? incCode.get(x.incident_id) ?? null : null,
         })),
         declarations: ((dos ?? []) as any[]).filter((d) => d.facility_id === f.id).map((d) => ({ reference: d.reference, ship_name: d.ship_name, ship_imo: d.ship_imo, level: d.security_level, valid_from: d.valid_from, valid_to: d.valid_to, status: d.status, ship_signed_at: d.ship_signed_at })),
         flags_now: complianceFlags({
@@ -183,13 +194,14 @@ export const getIspsReport = createServerFn({ method: "POST" })
           unreported_breaches: 0,
           created_at: f.created_at,
         }),
+        clock_now: violationClock({ last_drill_on: lastDrill != null ? new Date(lastDrill).toISOString().slice(0, 10) : null, last_exercise_on: lastEx, plan_expires_on: f.plan_expires_on, created_at: f.created_at, oldest_unreported_breach_at: oldestUnrep(f.id) }),
       };
     });
 
-    // Unreported breaches for today's flags count every breach, not only those in the period.
-    const { data: unrep } = await all_(() => db.from("isps_breaches").select("facility_id").eq("organisation_id", orgId).eq("reported_to_authority", false).order("id"));
     for (const f of facilities) {
-      const n = ((unrep ?? []) as any[]).filter((x) => x.facility_id === f.id).length;
+      const mine = ((unrep ?? []) as any[]).filter((x) => x.facility_id === f.id);
+      const n = mine.length;
+
       if (n) f.flags_now.push({ code: "breach_unreported", tone: "fail", text: `${n} breach${n === 1 ? "" : "es"} not yet reported to the authority` });
     }
 

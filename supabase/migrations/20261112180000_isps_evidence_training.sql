@@ -41,3 +41,13 @@ CREATE POLICY "isps_training_read" ON public.isps_training FOR SELECT TO authent
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('isps-evidence', 'isps-evidence', false, 26214400, ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'])
 ON CONFLICT (id) DO UPDATE SET public = false, file_size_limit = EXCLUDED.file_size_limit, allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- Breaches linked to incidents: the column existed without a foreign key.
+UPDATE public.isps_breaches b SET incident_id = NULL
+  WHERE incident_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.incidents i WHERE i.id = b.incident_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'isps_breaches_incident_id_fkey') THEN
+    ALTER TABLE public.isps_breaches ADD CONSTRAINT isps_breaches_incident_id_fkey FOREIGN KEY (incident_id) REFERENCES public.incidents(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS isps_breaches_incident_idx ON public.isps_breaches (incident_id) WHERE incident_id IS NOT NULL;

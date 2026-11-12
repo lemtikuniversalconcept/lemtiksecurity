@@ -5,7 +5,7 @@ import { getActiveOrgId, getSiteUrl } from "@/lib/orgs.server";
 import { throwSafeError } from "@/lib/server-errors";
 import { recordBlackboxAudit } from "@/lib/audit.server";
 import { admin, logEvent, myName, roleIn } from "@/lib/links.server";
-import { complianceFlags, type ComplianceFlag } from "@/lib/isps.rules";
+import { BREACH_INCIDENT, BREACH_LABEL, complianceFlags, violationClock, type ComplianceFlag, type ViolationClock } from "@/lib/isps.rules";
 
 const sb = (c: { supabase: unknown }) => c.supabase as any;
 const FAC_KIND = z.enum(["port_facility", "terminal", "jetty", "offshore", "ship"]);
@@ -50,6 +50,7 @@ export type Facility = {
   open_breaches: number;
   unreported_breaches: number;
   flags: ComplianceFlag[];
+  clock: ViolationClock;
 };
 const FAC_COLS = "id, organisation_id, name, kind, identifier, security_level, level_set_at, level_set_by_name, level_reason, security_officer_name, security_officer_phone, plan_approved_on, plan_expires_on, notes, created_at";
 
@@ -59,7 +60,7 @@ async function facilitiesFor(db: any, orgIds: string[]): Promise<(Facility & { o
   const [{ data: fac }, { data: drills }, { data: br }] = await Promise.all([
     db.from("isps_facilities").select(FAC_COLS).in("organisation_id", orgIds).order("name"),
     db.from("isps_drills").select("facility_id, kind, held_on").in("organisation_id", orgIds).order("held_on", { ascending: false }).limit(2000),
-    db.from("isps_breaches").select("facility_id, status, reported_to_authority").in("organisation_id", orgIds).limit(5000),
+    db.from("isps_breaches").select("facility_id, status, reported_to_authority, occurred_at").in("organisation_id", orgIds).limit(5000),
   ]);
   return (fac ?? []).map((f: any) => {
     const d = (drills ?? []).filter((x: any) => x.facility_id === f.id);
@@ -71,7 +72,8 @@ async function facilitiesFor(db: any, orgIds: string[]): Promise<(Facility & { o
       open_breaches: b.filter((x: any) => x.status === "open").length,
       unreported_breaches: b.filter((x: any) => !x.reported_to_authority).length,
     };
-    return { ...row, flags: complianceFlags(row) };
+    const unrep = b.filter((x: any) => !x.reported_to_authority).map((x: any) => x.occurred_at as string).sort();
+    return { ...row, flags: complianceFlags(row), clock: violationClock({ ...row, oldest_unreported_breach_at: unrep[0] ?? null }) };
   });
 }
 
@@ -85,7 +87,7 @@ export const getIspsOverview = createServerFn({ method: "GET" })
       facilitiesFor(supabase, [orgId]),
       supabase.from("isps_drills").select("id, facility_id, kind, scenario, held_on, participants, findings, corrective_actions, lessons_learned, attendance, evidence, recorded_by_name, created_at").eq("organisation_id", orgId).order("held_on", { ascending: false }).limit(100),
       supabase.from("isps_declarations").select("id, facility_id, reference, ship_name, ship_imo, security_level, valid_from, valid_to, status, port_signatory_name, ship_signatory_name, ship_signed_at, created_at").eq("organisation_id", orgId).order("created_at", { ascending: false }).limit(100),
-      supabase.from("isps_breaches").select("id, facility_id, occurred_at, category, description, action_taken, security_level, reported_to_authority, reported_at, reported_to, status, closed_at, recorded_by_name, created_at").eq("organisation_id", orgId).order("occurred_at", { ascending: false }).limit(200),
+      supabase.from("isps_breaches").select("id, facility_id, incident_id, incidents(code, status), occurred_at, category, description, action_taken, security_level, reported_to_authority, reported_at, reported_to, status, closed_at, recorded_by_name, created_at").eq("organisation_id", orgId).order("occurred_at", { ascending: false }).limit(200),
       supabase.from("isps_level_changes").select("id, facility_id, from_level, to_level, reason, changed_by_name, notice_id, created_at").eq("organisation_id", orgId).order("created_at", { ascending: false }).limit(50),
       supabase.from("organisations").select("name, type").eq("id", orgId).maybeSingle(),
     ]);
@@ -97,7 +99,7 @@ export const getIspsOverview = createServerFn({ method: "GET" })
       facilities: facilities as Facility[],
       drills: ((drills.data ?? []) as any[]).map(({ attendance, evidence, ...x }) => ({ ...x, attended: Array.isArray(attendance) ? attendance.length : 0, files: Array.isArray(evidence) ? evidence.length : 0 })) as { id: string; facility_id: string; kind: "drill" | "exercise"; scenario: string; held_on: string; participants: number | null; findings: string | null; corrective_actions: string | null; lessons_learned: string | null; attended: number; files: number; recorded_by_name: string | null; created_at: string }[],
       declarations: (dos.data ?? []) as { id: string; facility_id: string; reference: string; ship_name: string; ship_imo: string | null; security_level: number; valid_from: string; valid_to: string; status: "awaiting_ship" | "signed" | "cancelled"; port_signatory_name: string; ship_signatory_name: string | null; ship_signed_at: string | null; created_at: string }[],
-      breaches: (breaches.data ?? []) as { id: string; facility_id: string; occurred_at: string; category: string; description: string; action_taken: string | null; security_level: number | null; reported_to_authority: boolean; reported_at: string | null; reported_to: string | null; status: "open" | "closed"; closed_at: string | null; recorded_by_name: string | null; created_at: string }[],
+      breaches: (breaches.data ?? []) as { id: string; facility_id: string; incident_id: string | null; incidents: { code: string; status: string } | null; occurred_at: string; category: string; description: string; action_taken: string | null; security_level: number | null; reported_to_authority: boolean; reported_at: string | null; reported_to: string | null; status: "open" | "closed"; closed_at: string | null; recorded_by_name: string | null; created_at: string }[],
       level_changes: (levels.data ?? []) as { id: string; facility_id: string; from_level: number; to_level: number; reason: string; changed_by_name: string | null; notice_id: string | null; created_at: string }[],
     };
   });
@@ -195,6 +197,42 @@ export const recordDrill = createServerFn({ method: "POST" })
     return { id: r.id as string };
   });
 
+const INCIDENT_CHOICE = z.union([z.object({ mode: z.literal("none") }), z.object({ mode: z.literal("new") }), z.object({ mode: z.literal("link"), id: z.string().uuid() })]);
+
+/** Opens an incident for a breach, in the matching category. Inserted directly (no outside calls). */
+async function openIncidentForBreach(orgId: string, userId: string, b: { id: string; facility_id: string; category: string; description: string; action_taken: string | null; occurred_at: string; security_level: number | null }) {
+  const db = await admin();
+  const { data: f } = await db.from("isps_facilities").select("name, kind, identifier").eq("id", b.facility_id).maybeSingle();
+  const map = BREACH_INCIDENT[b.category] ?? BREACH_INCIDENT.other;
+  const severity = Math.min(5, map.severity + ((b.security_level ?? 1) >= 2 ? 1 : 0));
+  const { data: inc, error } = await db.from("incidents").insert({
+    organisation_id: orgId,
+    type: map.type,
+    severity,
+    status: "reported",
+    title: `ISPS breach: ${BREACH_LABEL[b.category] ?? b.category}`,
+    description: [b.description, b.action_taken ? `Action taken: ${b.action_taken}` : null, b.security_level ? `Security level at the time: ${b.security_level}` : null].filter(Boolean).join("\n\n"),
+    location: f?.name ?? "Port facility",
+    zone: f?.identifier ? `ISPS · ${f.identifier}` : "ISPS",
+    occurred_at: b.occurred_at,
+    reported_by: userId,
+    source: "isps_breach",
+  }).select("id, code").single();
+  if (error) throwSafeError("isps.breach.incident", error, "The breach was saved, but the incident couldn't be opened. Try \"Open an incident\" on the breach.");
+  await db.from("isps_breaches").update({ incident_id: inc.id }).eq("id", b.id);
+  await recordBlackboxAudit({ userId, orgId, resourceType: "isps_breach", resourceId: b.id, actionType: "incident_opened", actionDetail: { incident: inc.code } });
+  return inc as { id: string; code: string };
+}
+async function linkIncident(orgId: string, userId: string, breachId: string, incidentId: string) {
+  const db = await admin();
+  const { data: inc } = await db.from("incidents").select("id, code").eq("id", incidentId).eq("organisation_id", orgId).maybeSingle();
+  if (!inc) throwSafeError("isps.breach.incident", new Error("incident"), "That incident isn't in your organisation.");
+  const { error } = await db.from("isps_breaches").update({ incident_id: inc.id }).eq("id", breachId).eq("organisation_id", orgId);
+  if (error) throwSafeError("isps.breach.incident", error, "Unable to link the incident.");
+  await recordBlackboxAudit({ userId, orgId, resourceType: "isps_breach", resourceId: breachId, actionType: "incident_linked", actionDetail: { incident: inc.code } });
+  return inc as { id: string; code: string };
+}
+
 export const recordBreach = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) =>
@@ -204,9 +242,11 @@ export const recordBreach = createServerFn({ method: "POST" })
       category: BREACH,
       description: z.string().trim().min(3).max(4000),
       action_taken: opt(4000),
+      incident: INCIDENT_CHOICE.default({ mode: "none" }),
     }).parse(d),
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data: input, context }) => {
+    const { incident, ...data } = input;
     const { orgId, role } = await ctxRole(context);
     need(role, ["manager", "supervisor"], "Only managers and operators can record a breach.");
     if (Date.parse(data.occurred_at) > Date.now() + 60_000) throwSafeError("isps.breach", new Error("future"), "The time can't be in the future.");
@@ -216,15 +256,25 @@ export const recordBreach = createServerFn({ method: "POST" })
     const { data: r, error } = await supabase.from("isps_breaches").insert({ ...data, organisation_id: orgId, security_level: f.security_level, recorded_by: context.userId, recorded_by_name: await myName(supabase, context.userId) }).select("id").single();
     if (error) throwSafeError("isps.breach", error, "Unable to record the breach.");
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "isps_breach", resourceId: r.id, actionType: "create", actionDetail: { category: data.category } });
-    return { id: r.id as string };
+    let inc: { id: string; code: string } | null = null;
+    if (incident.mode === "new") inc = await openIncidentForBreach(orgId, context.userId, { id: r.id, ...data, security_level: f.security_level });
+    if (incident.mode === "link") inc = await linkIncident(orgId, context.userId, r.id, incident.id);
+    return { id: r.id as string, incident: inc };
   });
 
 export const updateBreach = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), reported_to: z.string().trim().min(2).max(200).optional(), close: z.boolean().optional() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), reported_to: z.string().trim().min(2).max(200).optional(), close: z.boolean().optional(), incident: INCIDENT_CHOICE.optional() }).parse(d))
   .handler(async ({ data, context }) => {
     const { orgId, role } = await ctxRole(context);
     need(role, ["manager", "supervisor"], "Only managers and operators can update a breach.");
+    if (data.incident && data.incident.mode !== "none") {
+      const { data: b } = await sb(context).from("isps_breaches").select("id, facility_id, category, description, action_taken, occurred_at, security_level, incident_id").eq("id", data.id).eq("organisation_id", orgId).maybeSingle();
+      if (!b) throwSafeError("isps.breach.update", new Error("missing"), "Breach not found.");
+      if (b.incident_id) throwSafeError("isps.breach.update", new Error("linked"), "This breach is already linked to an incident.");
+      const inc = data.incident.mode === "new" ? await openIncidentForBreach(orgId, context.userId, b) : await linkIncident(orgId, context.userId, b.id, data.incident.id);
+      return { ok: true, incident: inc };
+    }
     const patch: Record<string, unknown> = {};
     if (data.reported_to) Object.assign(patch, { reported_to_authority: true, reported_at: new Date().toISOString(), reported_to: data.reported_to });
     if (data.close) Object.assign(patch, { status: "closed", closed_at: new Date().toISOString() });
@@ -233,6 +283,25 @@ export const updateBreach = createServerFn({ method: "POST" })
     if (error) throwSafeError("isps.breach.update", error, "Unable to update the breach.");
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "isps_breach", resourceId: data.id, actionType: data.close ? "close" : "reported", actionDetail: { reported_to: data.reported_to ?? null } });
     return { ok: true };
+  });
+
+/** Recent incidents a breach can be linked to. */
+export const listLinkableIncidents = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { orgId } = await ctxRole(context);
+    const { data } = await sb(context).from("incidents").select("id, code, title, type, occurred_at, status").eq("organisation_id", orgId).order("occurred_at", { ascending: false }).limit(60);
+    return (data ?? []) as { id: string; code: string; title: string | null; type: string; occurred_at: string; status: string }[];
+  });
+
+/** The ISPS breach(es) recorded against an incident, for the incident page. */
+export const getBreachesForIncident = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ incident_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { orgId } = await ctxRole(context);
+    const { data: rows } = await sb(context).from("isps_breaches").select("id, category, occurred_at, status, reported_to_authority, reported_to, reported_at, security_level, isps_facilities(name)").eq("organisation_id", orgId).eq("incident_id", data.incident_id).order("occurred_at");
+    return ((rows ?? []) as any[]).map((r) => ({ id: r.id as string, category: r.category as string, occurred_at: r.occurred_at as string, status: r.status as string, reported_to_authority: !!r.reported_to_authority, reported_to: r.reported_to as string | null, reported_at: r.reported_at as string | null, security_level: r.security_level as number | null, facility: (r.isps_facilities?.name ?? "—") as string }));
   });
 
 // ───────────────────────── Declarations of Security ─────────────────────────

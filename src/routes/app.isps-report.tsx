@@ -8,6 +8,7 @@ import { Empty, Kpi, Notice, PageHeader, Panel, Status } from "@/components/nw";
 import { getIspsReport, type IspsFacilityReport, type IspsReport } from "@/lib/isps-report.functions";
 import { BREACH_LABEL, FACILITY_KIND, LEVEL_LABEL } from "@/lib/isps.rules";
 import { DrillEvidenceButton, TRAINING_STATE } from "@/components/isps/Evidence";
+import { CLOCK_NOTE, ClosureClock } from "@/components/isps/Clock";
 
 type Search = { org?: string };
 export const Route = createFileRoute("/app/isps-report")({
@@ -91,7 +92,7 @@ function Body({ r }: { r: IspsReport }) {
         {r.facilities.length === 0 ? <Empty>No facilities registered.</Empty> : (
           <div style={{ overflowX: "auto" }}>
             <table className="tbl w-full" style={{ fontSize: 12.5, fontVariantNumeric: "tabular-nums" }}>
-              <thead><tr><th className="text-left">Facility</th><th className="text-right">Days at level 1 / 2 / 3</th><th className="text-right">Drills</th><th className="text-right">Days drill overdue</th><th className="text-right">Exercises</th><th className="text-right">Breaches</th><th className="text-right">Unreported</th><th className="text-left">Today</th></tr></thead>
+              <thead><tr><th className="text-left">Facility</th><th className="text-right">Days at level 1 / 2 / 3</th><th className="text-right">Drills</th><th className="text-right">Days drill overdue</th><th className="text-right">Exercises</th><th className="text-right">Breaches</th><th className="text-right">Unreported</th><th className="text-left">Today</th><th className="text-left">Closure clock today</th></tr></thead>
               <tbody>
                 {r.facilities.map((f) => (
                   <tr key={f.id} style={{ verticalAlign: "top" }}>
@@ -103,6 +104,7 @@ function Body({ r }: { r: IspsReport }) {
                     <td className="text-right">{f.breaches.length}</td>
                     <td className="text-right">{f.breaches.filter((b) => !b.reported_to_authority).length}</td>
                     <td>{f.flags_now.some((x) => x.tone === "fail") ? <Status tone="fail">Overdue item</Status> : f.flags_now.length ? <Status tone="warn">Due soon</Status> : <Status tone="ok">In order</Status>}</td>
+                    <td>{f.clock_now.since ? <ClosureClock clock={f.clock_now} compact /> : <span className="t3">—</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -163,7 +165,7 @@ function Body({ r }: { r: IspsReport }) {
       </Panel>
 
       <p className="t3" style={{ fontSize: 12 }}>
-        Counted from the records in Lemtik for {day(r.from)} to {day(r.to)}, Lagos time. A drill is due every 3 months (92 days); before a facility's first drill, the 92 days run from the day it was registered on Lemtik. An exercise is due at least once a calendar year and never more than 18 months apart. "Today" reflects the position when the report was produced.
+        Counted from the records in Lemtik for {day(r.from)} to {day(r.to)}, Lagos time. A drill is due every 3 months (92 days); before a facility's first drill, the 92 days run from the day it was registered on Lemtik. An exercise is due at least once a calendar year and never more than 18 months apart. "Today" reflects the position when the report was produced. {CLOCK_NOTE}
       </p>
       <style>{`.print-only{display:none}@media print{.print-only{display:inline}}.ir-two{grid-template-columns:repeat(2,minmax(0,1fr))}@media (max-width:1000px){.ir-two{grid-template-columns:minmax(0,1fr)}}`}</style>
     </>
@@ -210,7 +212,7 @@ function FacilitySection({ f }: { f: IspsFacilityReport }) {
               <tbody>{f.breaches.map((b, i) => (
                 <tr key={i} style={{ verticalAlign: "top" }}>
                   <td>{dt(b.occurred_at)}{b.level ? <div className="t3">at level {b.level}</div> : null}</td>
-                  <td><b>{BREACH_LABEL[b.category] ?? b.category}</b><div className="t3">{b.description}</div></td>
+                  <td><b>{BREACH_LABEL[b.category] ?? b.category}</b><div className="t3">{b.description}</div>{b.incident_code ? <div className="t3">Incident {b.incident_code}</div> : null}</td>
                   <td>{b.reported_to_authority ? `${b.reported_at ? dt(b.reported_at) : "Yes"}${b.hours_to_report != null ? ` (after ${b.hours_to_report} h)` : ""}${b.reported_to ? ` · ${b.reported_to}` : ""}` : <b>Not reported</b>}</td>
                   <td>{b.closed_at ? `${dt(b.closed_at)}${b.days_to_close != null ? ` (${b.days_to_close} days)` : ""}` : "Open"}</td>
                 </tr>
@@ -238,8 +240,8 @@ function downloadCsv(r: IspsReport) {
   const rows: unknown[][] = [
     ["ISPS compliance report", r.org.name, r.from, r.to, `produced ${r.generated_at} by ${r.generated_by}`],
     [],
-    ["Facility", "Days at level 1", "Days at level 2", "Days at level 3", "Drills", "Days drill overdue", "Longest drill gap (days)", "Exercises", "Breaches", "Unreported", "Plan valid until", "PFSO"],
-    ...r.facilities.map((f) => [f.name, f.level_days[1], f.level_days[2], f.level_days[3], f.drills.filter((d) => d.kind === "drill").length, f.drill_overdue_days, f.longest_drill_gap_days, f.exercises_in_period, f.breaches.length, f.breaches.filter((b) => !b.reported_to_authority).length, f.plan_expires_on, f.pfso]),
+    ["Facility", "Days at level 1", "Days at level 2", "Days at level 3", "Drills", "Days drill overdue", "Longest drill gap (days)", "Exercises", "Breaches", "Unreported", "Plan valid until", "PFSO", "Days failing a rule (today)", "Failing since"],
+    ...r.facilities.map((f) => [f.name, f.level_days[1], f.level_days[2], f.level_days[3], f.drills.filter((d) => d.kind === "drill").length, f.drill_overdue_days, f.longest_drill_gap_days, f.exercises_in_period, f.breaches.length, f.breaches.filter((b) => !b.reported_to_authority).length, f.plan_expires_on, f.pfso, f.clock_now.days, f.clock_now.since]),
     [],
     ["Facility", "Drill or exercise", "Date", "Scenario", "Participants", "Findings", "Corrective actions", "Lessons learned", "On attendance list", "Evidence files"],
     ...r.facilities.flatMap((f) => f.drills.map((d) => [f.name, d.kind, d.held_on, d.scenario, d.participants, d.findings, d.corrective_actions, d.lessons_learned, d.attended, d.files])),
@@ -247,8 +249,8 @@ function downloadCsv(r: IspsReport) {
     ["Person", "Role", "Facility", "Course", "Provider", "Certificate no.", "Completed", "Expires", "State at end of period", "State today", "Certificate on file"],
     ...r.training.map((t) => [t.person, t.role, t.facility, t.course, t.provider, t.certificate_no, t.completed_on, t.expires_on, t.at_end, t.now, t.certificate ? "yes" : "no"]),
     [],
-    ["Facility", "Breach occurred (UTC)", "Category", "Description", "Reported", "Reported at (UTC)", "Hours to report", "Closed at (UTC)", "Days to close"],
-    ...r.facilities.flatMap((f) => f.breaches.map((b) => [f.name, b.occurred_at, b.category, b.description, b.reported_to_authority ? "yes" : "no", b.reported_at, b.hours_to_report, b.closed_at, b.days_to_close])),
+    ["Facility", "Breach occurred (UTC)", "Category", "Description", "Reported", "Reported at (UTC)", "Hours to report", "Closed at (UTC)", "Days to close", "Incident"],
+    ...r.facilities.flatMap((f) => f.breaches.map((b) => [f.name, b.occurred_at, b.category, b.description, b.reported_to_authority ? "yes" : "no", b.reported_at, b.hours_to_report, b.closed_at, b.days_to_close, b.incident_code])),
     [],
     ["Facility", "Level change at (UTC)", "From", "To", "Reason", "By"],
     ...r.facilities.flatMap((f) => f.level_changes.map((c) => [f.name, c.at, c.from, c.to, c.reason, c.by])),

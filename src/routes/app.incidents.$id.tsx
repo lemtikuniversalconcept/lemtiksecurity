@@ -27,6 +27,7 @@ import { IncidentProposals } from "@/components/AiProposals";
 import { LocationPicker } from "@/components/LocationPicker";
 import { CaseFileButton } from "@/components/CaseFileButton";
 import { ShareButton } from "@/components/shares/RecordShares";
+import { BreachForIncident } from "@/components/isps/BreachForIncident";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -392,6 +393,8 @@ function IncidentDetailPage() {
         {canShare && <ShareButton kind="incident" id={id} />}
         {canCaseFile && <CaseFileButton kind="incident" id={id} />}
       </div>
+
+      {appAccess.features?.includes("isps") && <BreachForIncident incidentId={id} />}
 
       <div className="row g16 wrap" style={{ alignItems: "center" }}>
         <div className="col g6 min-w-0">

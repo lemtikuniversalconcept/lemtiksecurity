@@ -12,6 +12,7 @@ import {
   getIspsOverview,
   listReceivedNotices,
   markNoticeRead,
+  listLinkableIncidents,
   recordBreach,
   recordDrill,
   saveFacility,
@@ -24,6 +25,7 @@ import { BREACH_LABEL, FACILITY_KIND, LEVEL_LABEL } from "@/lib/isps.rules";
 import { AuthorityView } from "@/components/isps/Authority";
 import { BroadcastsPanel, MyIspsAcks } from "@/components/isps/Broadcasts";
 import { DrillEvidenceButton, TrainingTab } from "@/components/isps/Evidence";
+import { ClosureClock } from "@/components/isps/Clock";
 
 export const Route = createFileRoute("/app/isps")({
   head: () => ({ meta: [{ title: "ISPS Watch · Lemtik SOD" }] }),
@@ -146,6 +148,7 @@ function Facilities({ data }: { data: Overview }) {
               {f.flags.length === 0 ? <Notice tone="ok">Records up to date.</Notice> : (
                 <div className="col g4">{f.flags.map((x, i) => <Status key={i} tone={x.tone}>{x.text}</Status>)}</div>
               )}
+              {f.clock.since && <ClosureClock clock={f.clock} />}
             </div>
           </Panel>
         ))
@@ -414,13 +417,29 @@ function Breaches({ data }: { data: Overview }) {
   const [show, setShow] = useState(false);
   const [reportFor, setReportFor] = useState<string | null>(null);
   const [reportTo, setReportTo] = useState("");
-  const [f, setF] = useState({ facility_id: data.facilities[0]?.id ?? "", occurred_at: localNow(), category: "unauthorised_access", description: "", action_taken: "" });
+  const [f, setF] = useState({ facility_id: data.facilities[0]?.id ?? "", occurred_at: localNow(), category: "unauthorised_access", description: "", action_taken: "", incident: "new" });
+  const [linkFor, setLinkFor] = useState<string | null>(null);
+  const [linkTo, setLinkTo] = useState("new");
+  const incFn = useServerFn(listLinkableIncidents);
+  const incidents = useQuery({ queryKey: ["isps-linkable-incidents"], queryFn: () => incFn(), enabled: show || !!linkFor });
+  const choice = (v: string) => (v === "new" ? { mode: "new" as const } : v === "none" ? { mode: "none" as const } : { mode: "link" as const, id: v });
   const m = useMutation({
-    mutationFn: () => fn({ data: { ...f, category: f.category as any, occurred_at: iso(f.occurred_at), action_taken: f.action_taken || null } }),
-    onSuccess: () => { toast.success("Recorded in the breach register."); refresh(); setShow(false); setF({ ...f, description: "", action_taken: "" }); },
+    mutationFn: () => fn({ data: { facility_id: f.facility_id, description: f.description, category: f.category as any, occurred_at: iso(f.occurred_at), action_taken: f.action_taken || null, incident: choice(f.incident) } }),
+    onSuccess: (r) => { toast.success(r.incident ? `Recorded in the breach register and linked to incident ${r.incident.code}.` : "Recorded in the breach register."); refresh(); setShow(false); setF({ ...f, description: "", action_taken: "", incident: "new" }); },
+    onError: (e: Error) => { toast.error(e.message); refresh(); },
+  });
+  const u = useMutation({
+    mutationFn: (v: { id: string; reported_to?: string; close?: boolean; incident?: ReturnType<typeof choice> }) => upd({ data: v }),
+    onSuccess: (r: any) => { if (r?.incident) toast.success(`Linked to incident ${r.incident.code}.`); refresh(); setReportFor(null); setReportTo(""); setLinkFor(null); },
     onError: (e: Error) => toast.error(e.message),
   });
-  const u = useMutation({ mutationFn: (v: { id: string; reported_to?: string; close?: boolean }) => upd({ data: v }), onSuccess: () => { refresh(); setReportFor(null); setReportTo(""); }, onError: (e: Error) => toast.error(e.message) });
+  const incidentOptions = (
+    <>
+      <option value="new">Open a new incident for it</option>
+      <option value="none">Don't link an incident</option>
+      {(incidents.data ?? []).length > 0 && <optgroup label="Link to an existing incident">{(incidents.data ?? []).map((i) => <option key={i.id} value={i.id}>{i.code} · {i.title || i.type.replace(/_/g, " ")} · {dateOnly(i.occurred_at)}</option>)}</optgroup>}
+    </>
+  );
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   if (!data.facilities.length) return <Panel><Empty>Add a facility first.</Empty></Panel>;
   return (
@@ -434,7 +453,8 @@ function Breaches({ data }: { data: Overview }) {
             <label className="fl"><span>What kind</span><select className="in" value={f.category} onChange={set("category")}>{Object.entries(BREACH_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
             <label className="fl" style={{ gridColumn: "1 / -1" }}><span>What happened</span><textarea className="in" rows={3} value={f.description} onChange={set("description")} maxLength={4000} required /></label>
             <label className="fl" style={{ gridColumn: "1 / -1" }}><span>Action taken</span><textarea className="in" rows={2} value={f.action_taken} onChange={set("action_taken")} maxLength={4000} /></label>
-            <span className="t3" style={{ fontSize: 12, gridColumn: "1 / -1" }}>The facility's current security level is recorded with the breach.</span>
+            <label className="fl" style={{ gridColumn: "1 / -1" }}><span>Incident</span><select className="in" value={f.incident} onChange={set("incident")}>{incidentOptions}</select></label>
+            <span className="t3" style={{ fontSize: 12, gridColumn: "1 / -1" }}>The facility's current security level is recorded with the breach. A new incident is opened in the matching category (an armed attack at severity 5, for example; one higher at security level 2 or 3), so it goes through your normal incident response.</span>
             <div className="row g8" style={{ gridColumn: "1 / -1" }}>
               <button type="submit" className="b b-pri" disabled={m.isPending || f.description.trim().length < 3}>{m.isPending && <Loader2 size={14} className="animate-spin" />} Record</button>
               <button type="button" className="b b-gh" onClick={() => setShow(false)}>Cancel</button>
@@ -456,8 +476,17 @@ function Breaches({ data }: { data: Overview }) {
                 </div>
                 <span className="t2">{b.description}</span>
                 {b.action_taken && <span className="t2"><b>Action:</b> {b.action_taken}</span>}
+                {b.incident_id && <span className="t2"><b>Incident:</b> <Link to="/app/incidents/$id" params={{ id: b.incident_id }}>{b.incidents?.code ?? "Open"}</Link>{b.incidents?.status ? <span className="t3"> · {b.incidents.status}</span> : null}</span>}
                 {data.can_record && (
                   <div className="row g6 wrap">
+                    {!b.incident_id && linkFor !== b.id && <button type="button" className="b b-sm b-gh" onClick={() => { setLinkFor(b.id); setLinkTo("new"); }}>Link an incident</button>}
+                    {linkFor === b.id && (
+                      <form className="row g6 wrap" onSubmit={(e) => { e.preventDefault(); if (linkTo !== "none") u.mutate({ id: b.id, incident: choice(linkTo) }); }}>
+                        <select className="in" style={{ minWidth: 240 }} value={linkTo} onChange={(e) => setLinkTo(e.target.value)} aria-label="Incident">{incidentOptions}</select>
+                        <button type="submit" className="b b-sm b-pri" disabled={u.isPending || linkTo === "none"}>Save</button>
+                        <button type="button" className="b b-sm b-gh" onClick={() => setLinkFor(null)}>Cancel</button>
+                      </form>
+                    )}
                     {!b.reported_to_authority && reportFor !== b.id && <button type="button" className="b b-sm b-gh" onClick={() => setReportFor(b.id)}>Mark as reported</button>}
                     {reportFor === b.id && (
                       <form className="row g6 wrap" onSubmit={(e) => { e.preventDefault(); u.mutate({ id: b.id, reported_to: reportTo }); }}>

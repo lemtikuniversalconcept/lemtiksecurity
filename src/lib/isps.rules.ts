@@ -68,3 +68,54 @@ export function trainingState(expires_on: string | null, today: string): { state
   return { state: days < 0 ? "expired" : days <= TRAINING_WARN_DAYS ? "expiring" : "valid", days_left: days };
 }
 export const ROLE_SUGGESTIONS = ["Port Facility Security Officer (PFSO)", "Deputy PFSO", "Company Security Officer (CSO)", "Ship Security Officer (SSO)", "Security supervisor", "Security guard", "Access control officer", "CCTV operator"];
+
+// ───────────── Breach → incident ─────────────
+
+/** The incident type and starting severity for each ISPS breach category. */
+export const BREACH_INCIDENT: Record<string, { type: string; severity: number }> = {
+  unauthorised_access: { type: "intrusion", severity: 3 },
+  stowaway: { type: "stowaway", severity: 3 },
+  theft: { type: "theft", severity: 3 },
+  tampering: { type: "vandalism", severity: 3 },
+  suspicious_activity: { type: "suspicious", severity: 2 },
+  armed_attack: { type: "armed_attack", severity: 5 },
+  smuggling: { type: "other", severity: 4 },
+  cyber: { type: "cyber_incident", severity: 3 },
+  other: { type: "other", severity: 2 },
+};
+
+// ───────────── Closure clock ─────────────
+
+export const CLOCK_MARK_DAYS = 90;
+export type ClockCause = { code: "drill" | "exercise" | "plan" | "breach_unreported"; since: string; text: string };
+export type ViolationClock = { since: string | null; days: number; past_mark: boolean; mark_on: string | null; causes: ClockCause[] };
+
+/**
+ * How long a facility has been continuously failing at least one rule that is still failing
+ * now, and when (or whether) that passes three months. Every cause counted is still open, so
+ * the run is unbroken from the earliest one's start.
+ */
+export function violationClock(f: {
+  last_drill_on: string | null;
+  last_exercise_on: string | null;
+  plan_expires_on: string | null;
+  created_at: string;
+  oldest_unreported_breach_at: string | null;
+}, now = Date.now()): ViolationClock {
+  const causes: ClockCause[] = [];
+  const at = (ms: number) => new Date(ms).toISOString();
+  const drillDue = (f.last_drill_on ? Date.parse(f.last_drill_on) : Date.parse(f.created_at)) + 92 * DAY;
+  if (drillDue < now) causes.push({ code: "drill", since: at(drillDue), text: f.last_drill_on ? "Drill overdue (every 3 months)" : "No drill within 3 months of registering" });
+  const exDue = f.last_exercise_on ? Date.parse(f.last_exercise_on) + 548 * DAY : Date.parse(f.created_at) + 365 * DAY;
+  if (exDue < now) causes.push({ code: "exercise", since: at(exDue), text: f.last_exercise_on ? "Exercise overdue (max 18 months apart)" : "No exercise within a year of registering" });
+  if (f.plan_expires_on) {
+    const lapsed = Date.parse(`${f.plan_expires_on}T00:00:00+01:00`) + DAY;
+    if (lapsed <= now) causes.push({ code: "plan", since: at(lapsed), text: "Security plan approval lapsed" });
+  }
+  if (f.oldest_unreported_breach_at) causes.push({ code: "breach_unreported", since: f.oldest_unreported_breach_at, text: "Breach not reported to the authority" });
+  causes.sort((a, b) => a.since.localeCompare(b.since));
+  if (!causes.length) return { since: null, days: 0, past_mark: false, mark_on: null, causes };
+  const since = Date.parse(causes[0].since);
+  const days = Math.floor((now - since) / DAY);
+  return { since: causes[0].since, days, past_mark: days >= CLOCK_MARK_DAYS, mark_on: at(since + CLOCK_MARK_DAYS * DAY), causes };
+}

@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Loader2, Send } from "lucide-react";
 import { Empty, Notice, Panel, Status, type Tone } from "@/components/nw";
 import { getRegulatedOverview, listSentNotices, sendNotice } from "@/lib/isps.functions";
-import { BREACH_LABEL, FACILITY_KIND, LEVEL_LABEL } from "@/lib/isps.rules";
+import { BREACH_LABEL, CLOCK_MARK_DAYS, FACILITY_KIND, LEVEL_LABEL } from "@/lib/isps.rules";
+import { CLOCK_NOTE, ClosureClock } from "@/components/isps/Clock";
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-GB", { timeZone: "Africa/Lagos", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 const dateOnly = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—");
@@ -24,6 +25,31 @@ export function AuthorityView({ tab }: { tab: "regulated" | "sent" }) {
 
 type Reg = Awaited<ReturnType<typeof getRegulatedOverview>>;
 
+/** Facilities failing a rule right now, longest first, against the three-month mark. */
+function ClockPanel({ data }: { data: Reg }) {
+  const rows = data.organisations.filter((o) => o.shares_isps).flatMap((o) => o.facilities.filter((f) => f.clock.since).map((f) => ({ org: o, f }))).sort((a, b) => b.f.clock.days - a.f.clock.days);
+  const past = rows.filter((r) => r.f.clock.past_mark).length;
+  return (
+    <Panel title="Closure clock" meta={rows.length ? `${rows.length} facilit${rows.length === 1 ? "y" : "ies"} failing a rule${past ? ` · ${past} past ${CLOCK_MARK_DAYS / 30} months` : ""}` : undefined}>
+      {rows.length === 0 ? <Empty>No facility is failing a rule today.</Empty> : (
+        <div className="col g8" style={{ fontSize: 13 }}>
+          {rows.map(({ org, f }) => (
+            <div key={f.id} className="col g4" style={{ borderTop: "1px solid var(--line, rgba(127,127,127,.2))", paddingTop: 8 }}>
+              <div className="row g8 wrap" style={{ alignItems: "center" }}>
+                <b>{f.name}</b><span className="t3">{org.name}</span>
+                <span className="f1" />
+                <Link to="/app/isps-report" search={{ org: org.id }} className="b b-sm b-gh">Compliance report</Link>
+              </div>
+              <ClosureClock clock={f.clock} />
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="t3" style={{ fontSize: 12, marginTop: 8 }}>{CLOCK_NOTE}</p>
+    </Panel>
+  );
+}
+
 function Regulated({ data }: { data: Reg }) {
   const [openOrg, setOpenOrg] = useState<string | null>(null);
   const isps = data.organisations.filter((o) => o.shares_isps);
@@ -39,6 +65,8 @@ function Regulated({ data }: { data: Reg }) {
         <Stat k="Facilities with overdue records" v={`${facilities.filter((f) => f.flags.some((x) => x.tone === "fail")).length}`} tone={facilities.some((f) => f.flags.some((x) => x.tone === "fail")) ? "fail" : "ok"} />
         <Stat k="Breaches, last 90 days" v={`${data.breaches.length}`} sub={unreported ? `${unreported} not reported to you` : "all reported"} tone={unreported ? "fail" : undefined} />
       </div>
+
+      <ClockPanel data={data} />
 
       <Panel title="Organisations">
         <div className="col g8" style={{ fontSize: 13 }}>
@@ -63,6 +91,7 @@ function Regulated({ data }: { data: Reg }) {
                 <div key={f.id} className="col g4" style={{ paddingLeft: 12 }}>
                   <div className="row g8 wrap"><Status tone={levelTone(f.security_level)}>{LEVEL_LABEL[f.security_level]}</Status><b>{f.name}</b><span className="t3">{FACILITY_KIND[f.kind] ?? f.kind}{f.identifier ? ` · ${f.identifier}` : ""} · officer {f.security_officer_name ?? "not named"} · last drill {dateOnly(f.last_drill_on)} · last exercise {dateOnly(f.last_exercise_on)}</span></div>
                   {f.flags.length > 0 && <div className="row g6 wrap">{f.flags.map((x, i) => <Status key={i} tone={x.tone}>{x.text}</Status>)}</div>}
+                  {f.clock.since && <ClosureClock clock={f.clock} compact />}
                 </div>
               ))}
             </div>
