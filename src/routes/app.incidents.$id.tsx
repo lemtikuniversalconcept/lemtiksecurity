@@ -28,6 +28,7 @@ import { LocationPicker } from "@/components/LocationPicker";
 import { CaseFileButton } from "@/components/CaseFileButton";
 import { ShareButton } from "@/components/shares/RecordShares";
 import { BreachForIncident } from "@/components/isps/BreachForIncident";
+import { CommunityReporterStrip } from "@/components/alerts/BlockReporter";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -395,6 +396,7 @@ function IncidentDetailPage() {
       </div>
 
       {appAccess.features?.includes("isps") && <BreachForIncident incidentId={id} />}
+      {(inc as any).source === "telegram_community" && <CommunityReporterStrip description={inc.description ?? null} canBlock={appAccess.dbRole === "manager"} />}
 
       <div className="row g16 wrap" style={{ alignItems: "center" }}>
         <div className="col g6 min-w-0">

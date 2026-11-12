@@ -7,6 +7,7 @@ import { Notice, Switch } from "@/components/nw";
 import { getEscalationPolicy, listAlertDeliveries, saveEscalationPolicy, type EscalationStep } from "@/lib/escalation.functions";
 import { getPushStatus, removePushSubscription, savePushSubscription, sendPushTest } from "@/lib/push.functions";
 import { getMyTelegram, sendTelegramTest, startTelegramLink, unlinkTelegram } from "@/lib/telegram.functions";
+import { TelegramReportsCard } from "@/components/alerts/TelegramReports";
 
 const ROLE_LABEL: Record<string, string> = { supervisor: "Supervisors", manager: "Security managers", client_admin: "Client admins" };
 const CHANNEL_LABEL: Record<string, string> = { in_app: "In-app", push: "Push", email: "Email", telegram: "Telegram" };
@@ -64,6 +65,7 @@ export function EscalationPanel({ canConfigure }: { canConfigure: boolean }) {
           {!q.data.email_configured && <Notice tone="warn">Email isn't set up on this system yet, so email steps are logged as skipped.</Notice>}
           <PushCard />
           <TelegramCard />
+          <TelegramReportsCard />
           <div className="row g12 wrap" style={{ alignItems: "center" }}>
             <Switch on={enabled} onChange={(v) => canConfigure && setEnabled(v)} label="Escalation on" />
             <b>{enabled ? "On" : "Off"}</b>

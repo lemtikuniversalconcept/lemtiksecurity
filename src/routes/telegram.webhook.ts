@@ -4,6 +4,8 @@ import { createFileRoute } from "@tanstack/react-router";
  * Telegram sends every message to the Lemtik bot here. Handles:
  *  - /start <code>  links the chat to the Lemtik user who generated the code
  *  - /stop          unlinks it
+ *  - /start rpt_<code>, /report, /send, /cancel, and report messages: reports by Telegram
+ *    (see telegram-reports.server.ts)
  *  - the Acknowledge button on an alert message
  *  - anything else  a short explanation of what the bot does
  * Only requests carrying the webhook secret (set when the webhook was registered) are accepted.
@@ -26,6 +28,10 @@ async function handle(request: Request) {
   if (cb?.data && typeof cb.data === "string") {
     const chatId = cb.message?.chat?.id;
     const answer = (text: string) => tg("answerCallbackQuery", { callback_query_id: cb.id, text, show_alert: false });
+    if (chatId && /^r(org|cat):/.test(cb.data)) {
+      const { reportCallback } = await import("@/lib/telegram-reports.server");
+      if (await reportCallback(db, chatId, cb.data, answer, cb.message?.message_id)) return ok();
+    }
     // "I've read this" on an ISPS security level change.
     const isa = /^isa:([0-9a-f-]{36})$/.exec(cb.data);
     if (isa && chatId) {
@@ -86,6 +92,26 @@ async function handle(request: Request) {
   const text: string = (msg.text ?? "").trim();
   const reply = (t: string) => tg("sendMessage", { chat_id: chatId, text: t, parse_mode: "HTML", disable_web_page_preview: true });
 
+  const R = await import("@/lib/telegram-reports.server");
+  const rpt = /^\/start(?:@\w+)?\s+rpt_([A-Za-z0-9_-]{16,40})$/.exec(text);
+  if (rpt) {
+    await R.startCommunity(db, chatId, rpt[1]);
+    return ok();
+  }
+  if (/^\/report(?:@\w+)?$/.test(text)) {
+    await R.startReport(db, chatId);
+    return ok();
+  }
+  if (/^\/send(?:@\w+)?$/.test(text)) {
+    await R.sendReport(db, chatId);
+    return ok();
+  }
+  if (/^\/cancel(?:@\w+)?$/.test(text)) {
+    await R.cancelReport(db, chatId);
+    return ok();
+  }
+  if (!text.startsWith("/") && (await R.draftMessage(db, chatId, msg))) return ok();
+
   const start = /^\/start(?:@\w+)?\s+([A-Za-z0-9_-]{16,64})$/.exec(text);
   if (start) {
     const { data: code } = await db.from("telegram_link_codes").select("code, user_id, expires_at, used_at").eq("code", start[1]).maybeSingle();
@@ -118,7 +144,7 @@ async function handle(request: Request) {
   const { data: linked } = await db.from("user_telegram").select("user_id").eq("chat_id", chatId).maybeSingle();
   await reply(
     linked
-      ? "This chat is linked to Lemtik. Alerts arrive here automatically; you don't need to send anything. Send /stop to unlink."
+      ? "This chat is linked to Lemtik. Alerts arrive here automatically. Send /report to report an incident, or /stop to unlink."
       : `This is the Lemtik alerts bot. To get alerts here, open Lemtik → Alerts → <b>Connect Telegram</b>.\n${site}/app/alerts#escalation`,
   );
   return ok();
