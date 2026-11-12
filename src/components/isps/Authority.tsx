@@ -54,6 +54,7 @@ function Regulated({ data }: { data: Reg }) {
                   </>
                 ) : <span className="t3">Doesn't share ISPS records with you</span>}
                 <span className="f1" />
+                {o.shares_isps && <Link to="/app/isps-report" search={{ org: o.id }} className="b b-sm b-gh">Compliance report</Link>}
                 <span className="t3" style={{ fontSize: 12 }}>access until {dateOnly(o.expires_at)}</span>
                 <Link to="/app/links/$id" params={{ id: o.link_id }} className="b b-sm b-gh">Shared view</Link>
                 {o.shares_isps && o.facilities.length > 0 && <button type="button" className="b b-sm b-gh" onClick={() => setOpenOrg(openOrg === o.id ? null : o.id)}>{openOrg === o.id ? "Hide" : "Facilities"}</button>}

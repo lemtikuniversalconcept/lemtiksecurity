@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Anchor, Check, Copy, FileSignature, Loader2, Plus, ShieldAlert } from "lucide-react";
+import { Anchor, Check, Copy, FileSignature, FileText, Loader2, Plus, ShieldAlert } from "lucide-react";
 import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
 import {
@@ -70,7 +70,9 @@ function IspsPage() {
       <PageHeader
         title="ISPS Watch"
         sub={isAuthority ? "Security levels, drills, declarations and breaches at the organisations that share ISPS records with you, and formal notices with read receipts." : "Your ISPS Code records in one place: security levels, drills and exercises, Declarations of Security and the breach register, plus notices from the authority."}
-      />
+           >
+        {!isAuthority && <Link to="/app/isps-report" className="b b-sec b-sm"><FileText size={13} /> Compliance report</Link>}
+      </PageHeader>
       {!isAuthority && <MyIspsAcks />}
       {!isAuthority && unacked > 0 && tab !== "notices" && (
         <Notice tone="fail">{unacked} notice{unacked === 1 ? "" : "s"} from the authority waiting for acknowledgement. <button type="button" className="b b-sm b-gh" onClick={() => setTab("notices")}>Read now</button></Notice>

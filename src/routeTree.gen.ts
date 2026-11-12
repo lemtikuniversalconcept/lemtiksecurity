@@ -29,6 +29,7 @@ import { Route as AppIncidentsRouteImport } from './routes/app.incidents'
 import { Route as AppIntelligenceRouteImport } from './routes/app.intelligence'
 import { Route as AppInventoryRouteImport } from './routes/app.inventory'
 import { Route as AppIspsRouteImport } from './routes/app.isps'
+import { Route as AppIspsReportRouteImport } from './routes/app.isps-report'
 import { Route as AppLinksRouteImport } from './routes/app.links'
 import { Route as AppLocationsRouteImport } from './routes/app.locations'
 import { Route as AppMapRouteImport } from './routes/app.map'
@@ -189,6 +190,11 @@ const AppInventoryRoute = AppInventoryRouteImport.update({
 const AppIspsRoute = AppIspsRouteImport.update({
   id: '/isps',
   path: '/isps',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIspsReportRoute = AppIspsReportRouteImport.update({
+  id: '/isps-report',
+  path: '/isps-report',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLinksRoute = AppLinksRouteImport.update({
@@ -517,6 +523,7 @@ export interface FileRoutesByFullPath {
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
   '/app/isps': typeof AppIspsRoute
+  '/app/isps-report': typeof AppIspsReportRoute
   '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
@@ -596,6 +603,7 @@ export interface FileRoutesByTo {
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
   '/app/isps': typeof AppIspsRoute
+  '/app/isps-report': typeof AppIspsReportRoute
   '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
@@ -680,6 +688,7 @@ export interface FileRoutesById {
   '/app/intelligence': typeof AppIntelligenceRoute
   '/app/inventory': typeof AppInventoryRoute
   '/app/isps': typeof AppIspsRoute
+  '/app/isps-report': typeof AppIspsReportRoute
   '/app/links': typeof AppLinksRoute
   '/app/locations': typeof AppLocationsRoute
   '/app/map': typeof AppMapRoute
@@ -765,6 +774,7 @@ export interface FileRouteTypes {
     | '/app/intelligence'
     | '/app/inventory'
     | '/app/isps'
+    | '/app/isps-report'
     | '/app/links'
     | '/app/locations'
     | '/app/map'
@@ -844,6 +854,7 @@ export interface FileRouteTypes {
     | '/app/intelligence'
     | '/app/inventory'
     | '/app/isps'
+    | '/app/isps-report'
     | '/app/links'
     | '/app/locations'
     | '/app/map'
@@ -927,6 +938,7 @@ export interface FileRouteTypes {
     | '/app/intelligence'
     | '/app/inventory'
     | '/app/isps'
+    | '/app/isps-report'
     | '/app/links'
     | '/app/locations'
     | '/app/map'
@@ -1153,6 +1165,13 @@ declare module '@tanstack/react-router' {
       path: '/isps'
       fullPath: '/app/isps'
       preLoaderRoute: typeof AppIspsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/isps-report': {
+      id: '/app/isps-report'
+      path: '/isps-report'
+      fullPath: '/app/isps-report'
+      preLoaderRoute: typeof AppIspsReportRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/links': {
@@ -1645,6 +1664,7 @@ interface AppRouteChildren {
   AppIntelligenceRoute: typeof AppIntelligenceRoute
   AppInventoryRoute: typeof AppInventoryRoute
   AppIspsRoute: typeof AppIspsRoute
+  AppIspsReportRoute: typeof AppIspsReportRoute
   AppLinksRoute: typeof AppLinksRoute
   AppLocationsRoute: typeof AppLocationsRoute
   AppMapRoute: typeof AppMapRoute
@@ -1683,6 +1703,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIntelligenceRoute: AppIntelligenceRoute,
   AppInventoryRoute: AppInventoryRoute,
   AppIspsRoute: AppIspsRoute,
+  AppIspsReportRoute: AppIspsReportRoute,
   AppLinksRoute: AppLinksRoute,
   AppLocationsRoute: AppLocationsRoute,
   AppMapRoute: AppMapRoute,
