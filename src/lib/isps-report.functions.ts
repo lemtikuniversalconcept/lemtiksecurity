@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveOrgId } from "@/lib/orgs.server";
 import { throwSafeError } from "@/lib/server-errors";
-import type { ComplianceFlag } from "./isps.rules";
+import type { ComplianceFlag, TrainingState } from "./isps.rules";
 
 // ISPS compliance report for one organisation over a period: each facility's security level
 // history and time at each level, drills against the three-month rule, exercises, the plan
@@ -29,7 +29,7 @@ export type IspsFacilityReport = {
   level_now: number;
   level_days: Record<1 | 2 | 3, number>;
   level_changes: { at: string; from: number; to: number; reason: string; by: string | null }[];
-  drills: { held_on: string; kind: "drill" | "exercise"; scenario: string; participants: number | null; findings: string | null; corrective_actions: string | null; by: string | null }[];
+  drills: { id: string; held_on: string; kind: "drill" | "exercise"; scenario: string; participants: number | null; findings: string | null; corrective_actions: string | null; lessons_learned: string | null; attended: number; files: number; by: string | null }[];
   drill_overdue_days: number;
   longest_drill_gap_days: number | null;
   exercises_in_period: number;
@@ -47,7 +47,8 @@ export type IspsReport = {
   facilities: IspsFacilityReport[];
   acks: { broadcasts: number; recipients: number; acknowledged: number; median_ack_min: number | null; within_30min: number };
   notices: { reference: string; title: string; from: string; issued_at: string; respond_by: string | null; first_read_at: string | null; acknowledged_at: string | null; acknowledged_by: string | null; on_time: boolean | null }[];
-  summary: { facilities: number; failing_now: number; drills: number; exercises: number; breaches: number; unreported: number; declarations_signed: number; days_at_level_2_or_3: number };
+  training: { person: string; role: string; facility: string | null; course: string; provider: string | null; certificate_no: string | null; completed_on: string; expires_on: string | null; at_end: TrainingState; now: TrainingState | "removed"; certificate: boolean }[];
+  summary: { training_records: number; training_expired_at_end: number; facilities: number; failing_now: number; drills: number; exercises: number; breaches: number; unreported: number; declarations_signed: number; days_at_level_2_or_3: number };
 };
 
 const median = (xs: number[]) => {
@@ -113,7 +114,7 @@ export const getIspsReport = createServerFn({ method: "POST" })
       db.from("organisations").select("id, name").eq("id", orgId).maybeSingle(),
       db.from("isps_facilities").select("id, name, kind, identifier, security_level, level_set_at, security_officer_name, security_officer_phone, plan_approved_on, plan_expires_on, created_at").eq("organisation_id", orgId).order("name"),
       all_(() => db.from("isps_level_changes").select("facility_id, from_level, to_level, reason, changed_by_name, created_at").eq("organisation_id", orgId).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
-      all_(() => db.from("isps_drills").select("facility_id, kind, scenario, held_on, participants, findings, corrective_actions, recorded_by_name").eq("organisation_id", orgId).order("held_on", { ascending: true }).order("id")),
+      all_(() => db.from("isps_drills").select("id, facility_id, kind, scenario, held_on, participants, findings, corrective_actions, lessons_learned, attendance, evidence, recorded_by_name").eq("organisation_id", orgId).order("held_on", { ascending: true }).order("id")),
       all_(() => db.from("isps_breaches").select("facility_id, occurred_at, category, description, security_level, reported_to_authority, reported_at, reported_to, status, closed_at").eq("organisation_id", orgId).gte("occurred_at", A).lt("occurred_at", B).order("occurred_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_declarations").select("facility_id, reference, ship_name, ship_imo, security_level, valid_from, valid_to, status, ship_signed_at, created_at").eq("organisation_id", orgId).gte("created_at", A).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
       all_(() => db.from("isps_broadcasts").select("id, created_at").eq("organisation_id", orgId).eq("kind", "level_change").gte("created_at", A).lt("created_at", B).order("id")),
@@ -161,7 +162,7 @@ export const getIspsReport = createServerFn({ method: "POST" })
         level_now: f.security_level,
         level_days,
         level_changes: inside.map((c) => ({ at: c.created_at, from: c.from_level, to: c.to_level, reason: c.reason, by: c.changed_by_name })),
-        drills: inPeriod.map((d) => ({ held_on: d.held_on, kind: d.kind, scenario: d.scenario, participants: d.participants, findings: d.findings, corrective_actions: d.corrective_actions, by: d.recorded_by_name })),
+        drills: inPeriod.map((d) => ({ id: d.id, held_on: d.held_on, kind: d.kind, scenario: d.scenario, participants: d.participants, findings: d.findings, corrective_actions: d.corrective_actions, lessons_learned: d.lessons_learned ?? null, attended: Array.isArray(d.attendance) ? d.attendance.length : 0, files: Array.isArray(d.evidence) ? d.evidence.length : 0, by: d.recorded_by_name })),
         drill_overdue_days: overdue,
         longest_drill_gap_days: longest,
         exercises_in_period: inPeriod.filter((d) => d.kind === "exercise").length,
@@ -210,6 +211,18 @@ export const getIspsReport = createServerFn({ method: "POST" })
       };
     }).sort((x, y) => x.issued_at.localeCompare(y.issued_at));
 
+    // Training held at the end of the period (records completed by then, not removed before it).
+    const { trainingState } = await import("./isps.rules");
+    const { data: tr } = await all_(() => db.from("isps_training").select("person_name, person_role, facility_id, course, provider, certificate_no, completed_on, expires_on, certificate, archived_at").eq("organisation_id", orgId).lte("completed_on", data.to).order("person_name").order("id"));
+    const todayLagos = new Date(Date.now() + 3_600_000).toISOString().slice(0, 10);
+    const facName = new Map(((fac ?? []) as any[]).map((f) => [f.id, f.name as string]));
+    const training = ((tr ?? []) as any[])
+      .filter((t) => !t.archived_at || Date.parse(t.archived_at) >= b)
+      .map((t) => ({
+        person: t.person_name, role: t.person_role, facility: t.facility_id ? facName.get(t.facility_id) ?? null : null, course: t.course, provider: t.provider, certificate_no: t.certificate_no,
+        completed_on: t.completed_on, expires_on: t.expires_on, at_end: trainingState(t.expires_on, data.to).state, now: t.archived_at ? ("removed" as const) : trainingState(t.expires_on, todayLagos).state, certificate: !!t.certificate,
+      }));
+
     const all = <T,>(pick: (f: IspsFacilityReport) => T[]) => facilities.flatMap(pick);
     return {
       org: { id: org.id, name: org.name },
@@ -221,7 +234,10 @@ export const getIspsReport = createServerFn({ method: "POST" })
       facilities,
       acks: { broadcasts: bIds.length, recipients: (recips ?? []).length, acknowledged: ackMins.length, median_ack_min: median(ackMins), within_30min: ackMins.filter((m) => m <= 30).length },
       notices,
+      training,
       summary: {
+        training_records: training.length,
+        training_expired_at_end: training.filter((t) => t.at_end === "expired").length,
         facilities: facilities.length,
         failing_now: facilities.filter((f) => f.flags_now.some((x) => x.tone === "fail")).length,
         drills: all((f) => f.drills).filter((d) => d.kind === "drill").length,

@@ -23,6 +23,7 @@ import {
 import { BREACH_LABEL, FACILITY_KIND, LEVEL_LABEL } from "@/lib/isps.rules";
 import { AuthorityView } from "@/components/isps/Authority";
 import { BroadcastsPanel, MyIspsAcks } from "@/components/isps/Broadcasts";
+import { DrillEvidenceButton, TrainingTab } from "@/components/isps/Evidence";
 
 export const Route = createFileRoute("/app/isps")({
   head: () => ({ meta: [{ title: "ISPS Watch · Lemtik SOD" }] }),
@@ -44,7 +45,7 @@ const localNow = (offsetH = 0) => {
 };
 const iso = (local: string) => new Date(local).toISOString();
 
-type Tab = "facilities" | "notices" | "drills" | "declarations" | "breaches" | "regulated" | "sent";
+type Tab = "facilities" | "notices" | "drills" | "training" | "declarations" | "breaches" | "regulated" | "sent";
 
 function IspsPage() {
   const fn = useServerFn(getIspsOverview);
@@ -63,7 +64,7 @@ function IspsPage() {
   const unacked = (notices.data ?? []).filter((n) => !n.acknowledged_at).length;
   const tabs: [Tab, string][] = isAuthority
     ? [["regulated", "Regulated organisations"], ["sent", "Notices sent"]]
-    : [["facilities", "Facilities and levels"], ["notices", `Notices${unacked ? ` (${unacked})` : ""}`], ["drills", "Drills and exercises"], ["declarations", "Declarations of Security"], ["breaches", "Breach register"]];
+    : [["facilities", "Facilities and levels"], ["notices", `Notices${unacked ? ` (${unacked})` : ""}`], ["drills", "Drills and exercises"], ["training", "Training"], ["declarations", "Declarations of Security"], ["breaches", "Breach register"]];
 
   return (
     <div className="col g16">
@@ -94,6 +95,7 @@ function IspsPage() {
           )}
           {tab === "notices" && <Notices notices={notices.data ?? []} loading={notices.isLoading} facilities={d.facilities} canManage={d.can_manage} />}
           {tab === "drills" && <Drills data={d} />}
+          {tab === "training" && <TrainingTab facilities={d.facilities} />}
           {tab === "declarations" && <Declarations data={d} />}
           {tab === "breaches" && <Breaches data={d} />}
         </>
@@ -326,6 +328,7 @@ function Drills({ data }: { data: Overview }) {
                 <div className="row g8 wrap"><Status tone={x.kind === "exercise" ? "blue" : "neutral"}>{x.kind === "exercise" ? "Exercise" : "Drill"}</Status><b>{x.scenario}</b><span className="t3">{facName(data, x.facility_id)} · {dateOnly(x.held_on)}{x.participants != null ? ` · ${x.participants} people` : ""} · recorded by {x.recorded_by_name ?? "—"}</span></div>
                 {x.findings && <span className="t2"><b>Found:</b> {x.findings}</span>}
                 {x.corrective_actions && <span className="t2"><b>Actions:</b> {x.corrective_actions}</span>}
+                <div className="row g6"><DrillEvidenceButton drillId={x.id} files={x.files} attended={x.attended} hasLessons={!!x.lessons_learned} /></div>
               </div>
             ))}
           </div>

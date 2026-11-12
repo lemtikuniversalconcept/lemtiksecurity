@@ -56,3 +56,15 @@ export const BREACH_LABEL: Record<string, string> = {
   other: "Other",
 };
 export const FACILITY_KIND: Record<string, string> = { port_facility: "Port facility", terminal: "Terminal", jetty: "Jetty", offshore: "Offshore installation", ship: "Ship" };
+
+// ───────────── Training records ─────────────
+
+export const TRAINING_WARN_DAYS = 60;
+export type TrainingState = "valid" | "expiring" | "expired" | "no_expiry";
+/** Where a certificate stands on a given day (YYYY-MM-DD, Lagos). */
+export function trainingState(expires_on: string | null, today: string): { state: TrainingState; days_left: number | null } {
+  if (!expires_on) return { state: "no_expiry", days_left: null };
+  const days = Math.round((Date.parse(`${expires_on}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  return { state: days < 0 ? "expired" : days <= TRAINING_WARN_DAYS ? "expiring" : "valid", days_left: days };
+}
+export const ROLE_SUGGESTIONS = ["Port Facility Security Officer (PFSO)", "Deputy PFSO", "Company Security Officer (CSO)", "Ship Security Officer (SSO)", "Security supervisor", "Security guard", "Access control officer", "CCTV operator"];
