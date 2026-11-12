@@ -37,6 +37,7 @@ import { Route as AppOrgRouteImport } from './routes/app.org'
 import { Route as AppPatrolsRouteImport } from './routes/app.patrols'
 import { Route as AppReportCentreRouteImport } from './routes/app.report-centre'
 import { Route as AppReportsRouteImport } from './routes/app.reports'
+import { Route as AppResponderRouteImport } from './routes/app.responder'
 import { Route as AppSensorsRouteImport } from './routes/app.sensors'
 import { Route as AppUsersRouteImport } from './routes/app.users'
 import { Route as BoardTokenRouteImport } from './routes/board.$token'
@@ -75,6 +76,7 @@ import { Route as AppCaseFilesIdRouteImport } from './routes/app.case-files.$id'
 import { Route as AppIncidentsIdRouteImport } from './routes/app.incidents.$id'
 import { Route as AppLinksIdRouteImport } from './routes/app.links_.$id'
 import { Route as AppPatrolsIdRouteImport } from './routes/app.patrols.$id'
+import { Route as AppResponderIdRouteImport } from './routes/app.responder_.$id'
 import { Route as AppSharedIdRouteImport } from './routes/app.shared.$id'
 import { Route as AppUsersIdRouteImport } from './routes/app.users.$id'
 import { Route as ForensicCasesIdRouteImport } from './routes/forensic.cases.$id'
@@ -226,6 +228,11 @@ const AppReportCentreRoute = AppReportCentreRouteImport.update({
 const AppReportsRoute = AppReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppResponderRoute = AppResponderRouteImport.update({
+  id: '/responder',
+  path: '/responder',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSensorsRoute = AppSensorsRouteImport.update({
@@ -418,6 +425,11 @@ const AppPatrolsIdRoute = AppPatrolsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AppPatrolsRoute,
 } as any)
+const AppResponderIdRoute = AppResponderIdRouteImport.update({
+  id: '/responder_/$id',
+  path: '/responder/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSharedIdRoute = AppSharedIdRouteImport.update({
   id: '/shared/$id',
   path: '/shared/$id',
@@ -507,6 +519,7 @@ export interface FileRoutesByFullPath {
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/responder': typeof AppResponderRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/board/$token': typeof BoardTokenRoute
@@ -546,6 +559,7 @@ export interface FileRoutesByFullPath {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
+  '/app/responder/$id': typeof AppResponderIdRoute
   '/app/shared/$id': typeof AppSharedIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
@@ -583,6 +597,7 @@ export interface FileRoutesByTo {
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/responder': typeof AppResponderRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/board/$token': typeof BoardTokenRoute
@@ -622,6 +637,7 @@ export interface FileRoutesByTo {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
+  '/app/responder/$id': typeof AppResponderIdRoute
   '/app/shared/$id': typeof AppSharedIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
@@ -664,6 +680,7 @@ export interface FileRoutesById {
   '/app/patrols': typeof AppPatrolsRouteWithChildren
   '/app/report-centre': typeof AppReportCentreRoute
   '/app/reports': typeof AppReportsRoute
+  '/app/responder': typeof AppResponderRoute
   '/app/sensors': typeof AppSensorsRoute
   '/app/users': typeof AppUsersRouteWithChildren
   '/board/$token': typeof BoardTokenRoute
@@ -703,6 +720,7 @@ export interface FileRoutesById {
   '/app/incidents/$id': typeof AppIncidentsIdRoute
   '/app/links_/$id': typeof AppLinksIdRoute
   '/app/patrols/$id': typeof AppPatrolsIdRoute
+  '/app/responder_/$id': typeof AppResponderIdRoute
   '/app/shared/$id': typeof AppSharedIdRoute
   '/app/users/$id': typeof AppUsersIdRoute
   '/forensic/cases/$id': typeof ForensicCasesIdRouteWithChildren
@@ -746,6 +764,7 @@ export interface FileRouteTypes {
     | '/app/patrols'
     | '/app/report-centre'
     | '/app/reports'
+    | '/app/responder'
     | '/app/sensors'
     | '/app/users'
     | '/board/$token'
@@ -785,6 +804,7 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/links/$id'
     | '/app/patrols/$id'
+    | '/app/responder/$id'
     | '/app/shared/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
@@ -822,6 +842,7 @@ export interface FileRouteTypes {
     | '/app/patrols'
     | '/app/report-centre'
     | '/app/reports'
+    | '/app/responder'
     | '/app/sensors'
     | '/app/users'
     | '/board/$token'
@@ -861,6 +882,7 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/links/$id'
     | '/app/patrols/$id'
+    | '/app/responder/$id'
     | '/app/shared/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
@@ -902,6 +924,7 @@ export interface FileRouteTypes {
     | '/app/patrols'
     | '/app/report-centre'
     | '/app/reports'
+    | '/app/responder'
     | '/app/sensors'
     | '/app/users'
     | '/board/$token'
@@ -941,6 +964,7 @@ export interface FileRouteTypes {
     | '/app/incidents/$id'
     | '/app/links_/$id'
     | '/app/patrols/$id'
+    | '/app/responder_/$id'
     | '/app/shared/$id'
     | '/app/users/$id'
     | '/forensic/cases/$id'
@@ -1173,6 +1197,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/app/reports'
       preLoaderRoute: typeof AppReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/responder': {
+      id: '/app/responder'
+      path: '/responder'
+      fullPath: '/app/responder'
+      preLoaderRoute: typeof AppResponderRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/sensors': {
@@ -1441,6 +1472,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPatrolsIdRouteImport
       parentRoute: typeof AppPatrolsRoute
     }
+    '/app/responder_/$id': {
+      id: '/app/responder_/$id'
+      path: '/responder/$id'
+      fullPath: '/app/responder/$id'
+      preLoaderRoute: typeof AppResponderIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/shared/$id': {
       id: '/app/shared/$id'
       path: '/shared/$id'
@@ -1596,6 +1634,7 @@ interface AppRouteChildren {
   AppPatrolsRoute: typeof AppPatrolsRouteWithChildren
   AppReportCentreRoute: typeof AppReportCentreRoute
   AppReportsRoute: typeof AppReportsRoute
+  AppResponderRoute: typeof AppResponderRoute
   AppSensorsRoute: typeof AppSensorsRoute
   AppUsersRoute: typeof AppUsersRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
@@ -1606,6 +1645,7 @@ interface AppRouteChildren {
   AppCargoIdRoute: typeof AppCargoIdRoute
   AppCaseFilesIdRoute: typeof AppCaseFilesIdRoute
   AppLinksIdRoute: typeof AppLinksIdRoute
+  AppResponderIdRoute: typeof AppResponderIdRoute
   AppSharedIdRoute: typeof AppSharedIdRoute
   AppIspsDosIdRoute: typeof AppIspsDosIdRoute
   AppMovementSarIdRoute: typeof AppMovementSarIdRoute
@@ -1631,6 +1671,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPatrolsRoute: AppPatrolsRouteWithChildren,
   AppReportCentreRoute: AppReportCentreRoute,
   AppReportsRoute: AppReportsRoute,
+  AppResponderRoute: AppResponderRoute,
   AppSensorsRoute: AppSensorsRoute,
   AppUsersRoute: AppUsersRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
@@ -1641,6 +1682,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCargoIdRoute: AppCargoIdRoute,
   AppCaseFilesIdRoute: AppCaseFilesIdRoute,
   AppLinksIdRoute: AppLinksIdRoute,
+  AppResponderIdRoute: AppResponderIdRoute,
   AppSharedIdRoute: AppSharedIdRoute,
   AppIspsDosIdRoute: AppIspsDosIdRoute,
   AppMovementSarIdRoute: AppMovementSarIdRoute,

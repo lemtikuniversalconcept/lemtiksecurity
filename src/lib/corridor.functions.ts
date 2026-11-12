@@ -34,6 +34,7 @@ export type Responder = {
   lng: number | null;
   notes: string | null;
   active: boolean;
+  responder_org_id: string | null;
 };
 export type Passenger = { id: string; name: string; phone: string | null; next_of_kin_phone: string | null; source: "qr" | "staff"; boarded_at: string };
 
@@ -224,7 +225,7 @@ export const listResponders = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<Responder[]> => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
-    const { data, error } = await sb(context).from("movement_responders").select("id, name, kind, phone, whatsapp, lat, lng, notes, active").eq("organisation_id", orgId).order("name");
+    const { data, error } = await sb(context).from("movement_responders").select("id, name, kind, phone, whatsapp, lat, lng, notes, active, responder_org_id").eq("organisation_id", orgId).order("name");
     if (error) throwSafeError("responders.list", error, "Unable to load responders.");
     return (data ?? []) as Responder[];
   });
@@ -242,11 +243,17 @@ export const saveResponder = createServerFn({ method: "POST" })
       lng: z.number().min(-180).max(180).nullable(),
       notes: z.string().trim().max(1000).nullable(),
       active: z.boolean(),
+      responder_org_id: z.string().uuid().nullable().optional(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const orgId = await getActiveOrgId(context.supabase, context.userId);
     const { id, ...row } = data;
+    if (row.responder_org_id) {
+      const db = (await import("@/integrations/supabase/client.server")).supabaseAdmin as any;
+      const { data: o } = await db.from("organisations").select("id, type").eq("id", row.responder_org_id).maybeSingle();
+      if (!o || !["responder", "authority"].includes(o.type) || o.id === orgId) throwSafeError("responders.save", new Error("org"), "Pick a responder or authority organisation on Lemtik.");
+    }
     const q = id
       ? sb(context).from("movement_responders").update(row).eq("id", id).eq("organisation_id", orgId).select("id").single()
       : sb(context).from("movement_responders").insert({ ...row, organisation_id: orgId }).select("id").single();
@@ -289,7 +296,7 @@ export const getHandoffContext = createServerFn({ method: "POST" })
     const { data: v } = await sb(context).from("movement_voyages").select("id, name, departure_count, departed_at, planned_arrival, corridor_id, route").eq("subject_id", s.id).eq("status", "underway").maybeSingle();
     const since = new Date(Date.now() - 3 * 3600_000).toISOString();
     const [{ data: responders }, { data: alerts }, { data: pax }, { data: prev }] = await Promise.all([
-      sb(context).from("movement_responders").select("id, name, kind, phone, whatsapp, lat, lng, notes, active").eq("organisation_id", orgId).eq("active", true),
+      sb(context).from("movement_responders").select("id, name, kind, phone, whatsapp, lat, lng, notes, active, responder_org_id").eq("organisation_id", orgId).eq("active", true),
       sb(context).from("movement_alerts").select("kind, message, created_at").eq("subject_id", s.id).gte("created_at", since).gte("severity", 3).order("created_at", { ascending: false }).limit(6),
       v ? sb(context).from("voyage_passengers").select("id", { count: "exact", head: true }).eq("voyage_id", v.id) : Promise.resolve({ data: null, count: null } as any),
       sb(context).from("movement_handoffs").select("id, responder_name, channel, approved_by_name, created_at, status, status_at, first_viewed_at, share_token, share_expires_at, withdrawn_at").eq("subject_id", s.id).gte("created_at", since).order("created_at", { ascending: false }),
@@ -326,7 +333,7 @@ export const recordHandoff = createServerFn({ method: "POST" })
       subject_id: z.string().uuid(),
       voyage_id: z.string().uuid().nullable(),
       responder_id: z.string().uuid(),
-      channel: z.enum(["call", "whatsapp"]),
+      channel: z.enum(["call", "whatsapp", "lemtik"]),
       summary: z.string().trim().min(10).max(4000),
     }).parse(d),
   )
@@ -335,13 +342,14 @@ export const recordHandoff = createServerFn({ method: "POST" })
     await (await import("./features.server")).assertFeature(orgId, "corridors");
     const supabase = sb(context);
     const [{ data: r }, { data: s }, { data: me }] = await Promise.all([
-      supabase.from("movement_responders").select("id, name, phone, whatsapp, lat, lng").eq("id", data.responder_id).eq("organisation_id", orgId).maybeSingle(),
+      supabase.from("movement_responders").select("id, name, phone, whatsapp, lat, lng, responder_org_id").eq("id", data.responder_id).eq("organisation_id", orgId).maybeSingle(),
       supabase.from("movement_subjects").select("id, organisation_id, name, last_lat, last_lng").eq("id", data.subject_id).eq("organisation_id", orgId).maybeSingle(),
       supabase.from("profiles").select("display_name, phone").eq("user_id", context.userId).maybeSingle(),
     ]);
     if (!r || !s) throwSafeError("handoff.record", new Error("not found"), "Responder or boat not found.");
     const number = (data.channel === "whatsapp" ? r.whatsapp || r.phone : r.phone || r.whatsapp) as string | null;
-    if (!number) throwSafeError("handoff.record", new Error("no number"), `${r.name} has no ${data.channel === "whatsapp" ? "WhatsApp" : "phone"} number.`);
+    if (data.channel === "lemtik" && !r.responder_org_id) throwSafeError("handoff.record", new Error("not on lemtik"), `${r.name} isn't linked to an organisation on Lemtik.`);
+    if (data.channel !== "lemtik" && !number) throwSafeError("handoff.record", new Error("no number"), `${r.name} has no ${data.channel === "whatsapp" ? "WhatsApp" : "phone"} number.`);
     const { metres } = await import("./corridor.server");
     const distance = s.last_lat != null && r.lat != null ? Math.round(metres(s.last_lat, s.last_lng, r.lat, r.lng)) : null;
     const who = (me?.display_name as string | undefined)?.trim() || "Operator";
@@ -359,6 +367,7 @@ export const recordHandoff = createServerFn({ method: "POST" })
       responder_name: r.name,
       distance_m: distance,
       channel: data.channel,
+      responder_org_id: r.responder_org_id ?? null,
       summary: data.summary,
       approved_by: context.userId,
       approved_by_name: who,
@@ -367,9 +376,14 @@ export const recordHandoff = createServerFn({ method: "POST" })
       operator_phone: ((me as any)?.phone as string | null) ?? null,
     });
     if (error) throwSafeError("handoff.record", error, "Unable to record the hand-off. Only managers and operators can hand off.");
+    if (r.responder_org_id) {
+      const { notifyResponderOrg } = await import("./responder-board.server");
+      await notifyResponderOrg(r.responder_org_id, orgId, s.name, data.summary);
+    }
     const { raiseAlert } = await import("./movement.server");
-    await raiseAlert(s, "handoff", 2, `${who} handed ${s.name} off to ${r.name} by ${data.channel === "whatsapp" ? "WhatsApp" : "phone"}${distance != null ? ` (${(distance / 1000).toFixed(1)} km away)` : ""}`, s.last_lat != null ? { lat: s.last_lat, lng: s.last_lng } : null, data.voyage_id);
+    await raiseAlert(s, "handoff", 2, `${who} handed ${s.name} off to ${r.name} by ${data.channel === "whatsapp" ? "WhatsApp" : data.channel === "lemtik" ? "Lemtik" : "phone"}${distance != null ? ` (${(distance / 1000).toFixed(1)} km away)` : ""}`, s.last_lat != null ? { lat: s.last_lat, lng: s.last_lng } : null, data.voyage_id);
     await recordBlackboxAudit({ userId: context.userId, orgId, resourceType: "movement_handoff", resourceId: s.id, actionType: "handoff", actionDetail: { responder: r.name, channel: data.channel, voyage_id: data.voyage_id } });
+    if (data.channel === "lemtik" || !number) return { url: null as string | null, respond_url: respondUrl };
     const digits = number.replace(/[^\d+]/g, "");
     const intl = digits.startsWith("+") ? digits.slice(1) : digits.startsWith("0") ? `234${digits.slice(1)}` : digits;
     return { url: data.channel === "whatsapp" ? `https://wa.me/${intl}?text=${encodeURIComponent(message)}` : `tel:${digits}`, respond_url: respondUrl };

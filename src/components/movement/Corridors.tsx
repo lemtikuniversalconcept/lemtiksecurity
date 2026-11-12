@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CloudLightning, Copy, ExternalLink, Link2Off, Loader2, MessageCircle, Phone, Plus, QrCode, Save, Trash2, Undo2, UserPlus, Wind, X } from "lucide-react";
+import { CloudLightning, Send, Copy, ExternalLink, Link2Off, Loader2, MessageCircle, Phone, Plus, QrCode, Save, Trash2, Undo2, UserPlus, Wind, X } from "lucide-react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Empty, Notice, Panel, Status } from "@/components/nw";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@/lib/corridor.functions";
 import { startVoyage, type Voyage } from "@/lib/voyages.functions";
 import { RESPONDER_STATUS_LABEL, withdrawResponderLink } from "@/lib/respond.functions";
+import { listLinkDirectory } from "@/lib/links.functions";
 import { RouteDrawer, routeLengthM } from "./Voyages";
 import { useMovementPerms } from "./perms";
 
@@ -115,7 +116,7 @@ export const RESPONDER_KIND: Record<Responder["kind"], string> = {
   private_security: "Private security",
   other: "Other",
 };
-type RForm = { id?: string; name: string; kind: Responder["kind"]; phone: string; whatsapp: string; at: LngLat | null; notes: string; active: boolean };
+type RForm = { id?: string; name: string; kind: Responder["kind"]; phone: string; whatsapp: string; at: LngLat | null; notes: string; active: boolean; org: string };
 
 export function RespondersView({ responders }: { responders: Responder[] }) {
   const { canManage } = useMovementPerms();
@@ -123,8 +124,10 @@ export function RespondersView({ responders }: { responders: Responder[] }) {
   const qc = useQueryClient();
   const save = useServerFn(saveResponder);
   const del = useServerFn(deleteResponder);
+  const dirFn = useServerFn(listLinkDirectory);
+  const dir = useQuery({ queryKey: ["link-directory"], queryFn: () => dirFn(), enabled: !!form });
   const saveM = useMutation({
-    mutationFn: (f: RForm) => save({ data: { id: f.id, name: f.name, kind: f.kind, phone: f.phone || null, whatsapp: f.whatsapp || null, lat: f.at?.[1] ?? null, lng: f.at?.[0] ?? null, notes: f.notes || null, active: f.active } }),
+    mutationFn: (f: RForm) => save({ data: { id: f.id, name: f.name, kind: f.kind, phone: f.phone || null, whatsapp: f.whatsapp || null, lat: f.at?.[1] ?? null, lng: f.at?.[0] ?? null, notes: f.notes || null, active: f.active, responder_org_id: f.org || null } }),
     onSuccess: () => { toast.success("Responder saved"); setForm(null); qc.invalidateQueries({ queryKey: ["movement-responders"] }); },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -136,17 +139,17 @@ export function RespondersView({ responders }: { responders: Responder[] }) {
 
   return (
     <div className="grid g16" style={{ gridTemplateColumns: form ? "minmax(0,1fr) 440px" : "minmax(0,1fr)" }}>
-      <Panel title="Responders" meta={responders.length} actions={canManage ? <button type="button" className="b b-sm b-pri" onClick={() => setForm({ name: "", kind: "marine_police", phone: "", whatsapp: "", at: null, notes: "", active: true })}><Plus size={14} /> Add responder</button> : undefined}>
+      <Panel title="Responders" meta={responders.length} actions={canManage ? <button type="button" className="b b-sm b-pri" onClick={() => setForm({ name: "", kind: "marine_police", phone: "", whatsapp: "", at: null, notes: "", active: true, org: "" })}><Plus size={14} /> Add responder</button> : undefined}>
         {responders.length === 0 ? (
           <Empty>Add the marine police posts, navy bases, rescue teams and clinics you'd call in an emergency, with where they are. When a boat is in trouble, the nearest ones are listed first.</Empty>
         ) : (
           <div className="col g4">
             {responders.map((r) => (
               <button key={r.id} type="button" disabled={!canManage} className="row g10 w-full text-left hover:bg-ink-3" style={{ padding: "9px 8px", borderRadius: 8 }}
-                onClick={() => setForm({ id: r.id, name: r.name, kind: r.kind, phone: r.phone ?? "", whatsapp: r.whatsapp ?? "", at: r.lat != null && r.lng != null ? [r.lng, r.lat] : null, notes: r.notes ?? "", active: r.active })}>
+                onClick={() => setForm({ id: r.id, name: r.name, kind: r.kind, phone: r.phone ?? "", whatsapp: r.whatsapp ?? "", at: r.lat != null && r.lng != null ? [r.lng, r.lat] : null, notes: r.notes ?? "", active: r.active, org: r.responder_org_id ?? "" })}>
                 <span className="col f1" style={{ minWidth: 0 }}>
                   <b className="trunc">{r.name}</b>
-                  <span className="t3 trunc" style={{ fontSize: 12 }}>{RESPONDER_KIND[r.kind]}{r.phone ? ` · ${r.phone}` : ""}{r.lat == null ? " · no location set" : ""}</span>
+                  <span className="t3 trunc" style={{ fontSize: 12 }}>{RESPONDER_KIND[r.kind]}{r.phone ? ` · ${r.phone}` : ""}{r.lat == null ? " · no location set" : ""}{r.responder_org_id ? " · on Lemtik" : ""}</span>
                 </span>
                 {!r.active && <Status tone="off">Off</Status>}
               </button>
@@ -167,6 +170,13 @@ export function RespondersView({ responders }: { responders: Responder[] }) {
               <label className="fl"><span>Phone</span><input className="in" maxLength={40} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="0803…" /></label>
               <label className="fl"><span>WhatsApp (if different)</span><input className="in" maxLength={40} value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} /></label>
             </div>
+            <label className="fl"><span>On Lemtik as (optional)</span>
+              <select className="in" value={form.org} onChange={(e) => setForm({ ...form, org: e.target.value })}>
+                <option value="">Not on Lemtik: phone, WhatsApp and the responder link only</option>
+                {(dir.data ?? []).map((o) => <option key={o.id} value={o.id}>{o.name} ({o.type === "authority" ? "authority" : "responder"})</option>)}
+              </select>
+              <span className="t3" style={{ fontSize: 11.5 }}>If they use Lemtik, every hand-off to them also lands on their responder board and their staff are alerted at once.</span>
+            </label>
             <span className="o-lbl">WHERE THEY ARE BASED</span>
             <LocationPicker value={form.at} center={form.at} onChange={(c) => setForm({ ...form, at: c })} height={220} />
             <label className="fl"><span>Notes</span><textarea className="in" rows={2} maxLength={1000} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Hours, boats available, who to ask for" /></label>
@@ -338,12 +348,12 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
     navigator.clipboard?.writeText(url).then(() => toast.success("Responder link copied"), () => toast.message(url));
   };
   const go = useMutation({
-    mutationFn: (channel: "call" | "whatsapp") => recordFn({ data: { subject_id: subjectId, voyage_id: q.data?.voyage_id ?? null, responder_id: picked!, channel, summary } }),
+    mutationFn: (channel: "call" | "whatsapp" | "lemtik") => recordFn({ data: { subject_id: subjectId, voyage_id: q.data?.voyage_id ?? null, responder_id: picked!, channel, summary } }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["movement-alerts"] });
       qc.invalidateQueries({ queryKey: ["handoff", subjectId] });
-      window.open(r.url, r.url.startsWith("tel:") ? "_self" : "_blank", "noopener");
-      toast.success("Hand-off recorded");
+      if (r.url) window.open(r.url, r.url.startsWith("tel:") ? "_self" : "_blank", "noopener");
+      toast.success(r.url ? "Hand-off recorded" : "Sent to their responder board. They've been alerted.");
     },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -364,7 +374,7 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
               <input type="radio" name="responder" checked={picked === x.id} onChange={() => setPicked(x.id)} />
               <span className="col f1" style={{ minWidth: 0 }}>
                 <b className="trunc">{x.name}</b>
-                <span className="t3">{RESPONDER_KIND[x.kind]}{x.phone ? ` · ${x.phone}` : ""}</span>
+                <span className="t3">{RESPONDER_KIND[x.kind]}{x.phone ? ` · ${x.phone}` : ""}{x.responder_org_id ? " · on Lemtik" : ""}</span>
               </span>
               <span className="mono t2">{x.distance_m != null ? km(x.distance_m) : "—"}</span>
             </label>
@@ -376,9 +386,11 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
         <textarea className="in mono" rows={8} style={{ fontSize: 12 }} value={summary} onChange={(e) => setSummary(e.target.value)} maxLength={4000} />
       </label>
       <div className="row g8 wrap">
-        <button type="button" className="b b-pri" disabled={!r || go.isPending || summary.trim().length < 10 || !(r.whatsapp || r.phone)} onClick={() => go.mutate("whatsapp")}><MessageCircle size={14} /> Approve and send on WhatsApp</button>
+        {r?.responder_org_id && <button type="button" className="b b-pri" disabled={go.isPending || summary.trim().length < 10} onClick={() => go.mutate("lemtik")}><Send size={14} /> Approve and send on Lemtik</button>}
+        <button type="button" className={r?.responder_org_id ? "b b-sec" : "b b-pri"} disabled={!r || go.isPending || summary.trim().length < 10 || !(r.whatsapp || r.phone)} onClick={() => go.mutate("whatsapp")}><MessageCircle size={14} /> Approve and send on WhatsApp</button>
         <button type="button" className="b b-sec" disabled={!r || go.isPending || !(r.phone || r.whatsapp)} onClick={() => go.mutate("call")}><Phone size={14} /> Approve and call</button>
       </div>
+      {r?.responder_org_id && <span className="t3" style={{ fontSize: 11.5 }}>{r.name} uses Lemtik. "Send on Lemtik" puts it on their responder board and alerts their staff straight away, with no call or message needed. A WhatsApp or call hand-off also appears on their board.</span>}
       <span className="t3" style={{ fontSize: 11.5 }}>WhatsApp opens on your device with the message and a responder link filled in; you press send. The link works for 24 hours without an account: the responder sees the boat's live position and track and can confirm receipt, dispatch and arrival. If you call instead, copy the link below and send it. The hand-off is logged with your name either way.</span>
       {d.previous.length > 0 && (
         <div className="col g2" style={{ fontSize: 12 }}>
@@ -389,7 +401,7 @@ export function HandoffPanel({ subjectId, onClose }: { subjectId: string; onClos
             return (
               <div key={p.id} className="row g8 wrap" style={{ alignItems: "center" }}>
                 <span className="f1" style={{ minWidth: 0 }}>
-                  {new Date(p.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · {p.responder_name} by {p.channel === "whatsapp" ? "WhatsApp" : "phone"} · {p.approved_by_name}
+                  {new Date(p.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · {p.responder_name} by {p.channel === "whatsapp" ? "WhatsApp" : p.channel === "lemtik" ? "Lemtik" : "phone"} · {p.approved_by_name}
                   {p.share_token ? <> · <b>{RESPONDER_STATUS_LABEL[shown] ?? shown}</b></> : null}
                 </span>
                 {live && (
