@@ -62,6 +62,7 @@ function ConsignmentPage() {
       <div className="row g8 wrap">
         <Status tone={STATUS[c.status][1]}>{STATUS[c.status][0]}</Status>
         {c.has_exception && <Status tone="fail">Exception recorded</Status>}
+        {q.data?.incident && <Link to="/app/incidents/$id" params={{ id: q.data.incident.id }} className="b b-sm b-gh">Incident {q.data.incident.code} · {q.data.incident.status}</Link>}
         {quietH > c.max_gap_hours && <Status tone="warn">No custody record for {Math.round(quietH)} h (limit {c.max_gap_hours} h)</Status>}
         {chain.intact ? <Status tone="ok"><ShieldCheck size={13} style={{ verticalAlign: "-2px" }} /> Chain intact · {chain.count} records</Status> : <Status tone="fail"><ShieldX size={13} style={{ verticalAlign: "-2px" }} /> Chain broken at record {chain.broken_at}: {chain.reason}</Status>}
       </div>
@@ -73,6 +74,7 @@ function ConsignmentPage() {
             <KV k="Containers" v={c.container_numbers.length ? <span className="mono">{c.container_numbers.join(", ")}</span> : "—"} />
             <KV k="Consignee" v={c.consignee ?? "—"} />
             <KV k="Carrier" v={c.carrier ?? "—"} />
+            <KV k="Held by now" v={c.current_holder ? `${c.current_holder}${c.holder_since ? ` · since ${when(c.holder_since)}` : ""}` : "—"} />
             <KV k="Tracked vehicle or boat" v={subject ? `${subject.name}${subject.last_seen_at ? ` · seen ${when(subject.last_seen_at)}` : ""}` : "—"} />
             <KV k="Checkpoints" v={c.checkpoints.length ? c.checkpoints.map((p, i) => `${i + 1}. ${p.name}`).join("  ") : "—"} />
             <KV k="Added" v={`${when(c.created_at)} by ${c.created_by_name ?? "—"}`} />

@@ -58,6 +58,7 @@ function CargoPage() {
                   {quietH > c.max_gap_hours && <Status tone="warn">No record for {Math.round(quietH)} h</Status>}
                   <span>{c.description}</span>
                   <span className="t3">{c.origin} → {c.destination}</span>
+                  {c.current_holder && c.status !== "delivered" && <span className="t3">· held by {c.current_holder}</span>}
                   <span className="f1" />
                   <span className="t3" style={{ fontSize: 12 }}>{c.last_event_at ? `last record ${when(c.last_event_at)}` : `added ${when(c.created_at)}`}</span>
                 </Link>

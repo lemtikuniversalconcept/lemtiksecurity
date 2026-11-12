@@ -61,8 +61,11 @@ export type Consignment = {
   delivered_at: string | null;
   created_by_name: string | null;
   created_at: string;
+  current_holder: string | null;
+  holder_since: string | null;
+  incident_id: string | null;
 };
-const COLS = "id, reference, description, quantity, container_numbers, seal_numbers, origin, destination, consignee, carrier, subject_id, checkpoints, max_gap_hours, status, has_exception, last_event_at, delivered_at, created_by_name, created_at";
+const COLS = "id, reference, description, quantity, container_numbers, seal_numbers, origin, destination, consignee, carrier, subject_id, checkpoints, max_gap_hours, status, has_exception, last_event_at, delivered_at, created_by_name, created_at, current_holder, holder_since, incident_id";
 
 export const listConsignments = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -185,8 +188,10 @@ export const getConsignment = createServerFn({ method: "POST" })
       for (const s of signed ?? []) if (s.path && s.signedUrl) urls.set(s.path, s.signedUrl);
     }
     const { driver_token, ...rest } = c;
+    const { data: inc } = c.incident_id ? await supabase.from("incidents").select("id, code, status").eq("id", c.incident_id).maybeSingle() : { data: null };
     return {
       consignment: rest as Consignment,
+      incident: inc as { id: string; code: string; status: string } | null,
       subject: subj.data as { name: string; kind: string; last_lat: number | null; last_lng: number | null; last_seen_at: string | null } | null,
       events: (ev ?? []).map((e: any) => ({
         id: e.id, seq: e.seq, kind: e.kind, checkpoint_index: e.checkpoint_index, recorded_at: e.recorded_at, device_at: e.device_at, lat: e.lat, lng: e.lng, accuracy_m: e.accuracy_m,
@@ -306,5 +311,5 @@ export const driverRecordCustody = createServerFn({ method: "POST" })
     const { appendCustodyEvent } = await import("./cargo.server");
     const { token: _t, driver_name, ...input } = data;
     const r = await appendCustodyEvent(c, input, { via: "driver_link", userId: null, name: `${driver_name} (driver link)` });
-    return { seq: r.seq, seals_ok: r.seals_ok, off_checkpoint_m: r.off_checkpoint_m };
+    return { seq: r.seq, seals_ok: r.seals_ok, off_checkpoint_m: r.off_checkpoint_m, skipped: r.skipped };
   });

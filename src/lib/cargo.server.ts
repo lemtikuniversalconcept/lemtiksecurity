@@ -138,6 +138,9 @@ export async function appendCustodyEvent(c: any, input: RecordInput, by: { via: 
     }
   }
 
+  const { data: priorRows } = await db.from("cargo_custody_events").select("checkpoint_index").eq("consignment_id", c.id).not("checkpoint_index", "is", null);
+  const skipped = newlySkipped(((priorRows ?? []) as any[]).map((r) => r.checkpoint_index), input.kind, input.checkpoint_index, cps.length);
+
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data: last } = await db.from("cargo_custody_events").select("seq, event_hash").eq("consignment_id", c.id).order("seq", { ascending: false }).limit(1).maybeSingle();
     const row: any = {
@@ -176,21 +179,128 @@ export async function appendCustodyEvent(c: any, input: RecordInput, by: { via: 
     if (input.kind === "sealed" && seen.length) patch.seal_numbers = seen;
     if (["departed", "checkpoint", "handover", "inspection"].includes(input.kind) && c.status === "planned") patch.status = "in_transit";
     if (input.kind === "delivered") Object.assign(patch, { status: "delivered", delivered_at: row.recorded_at });
-    if (problem) patch.has_exception = true;
+    if (problem || skipped.length) patch.has_exception = true;
+    // Who holds the cargo now: the receiver at a hand-over; at delivery, the receiver or consignee.
+    if (input.kind === "handover" && input.to_party) Object.assign(patch, { current_holder: input.to_party, holder_since: row.recorded_at });
+    else if (input.kind === "delivered") Object.assign(patch, { current_holder: input.to_party || c.consignee || c.current_holder || null, holder_since: row.recorded_at });
+    else if (!c.current_holder && c.carrier && ["loaded", "departed"].includes(input.kind)) Object.assign(patch, { current_holder: c.carrier, holder_since: row.recorded_at });
     await db.from("cargo_consignments").update(patch).eq("id", c.id);
 
+    let incident: { id: string; code: string | null } | null = null;
+    if (seals_ok === false || skipped.length) {
+      const reasons: { kind: "seal" | "skipped"; text: string }[] = [];
+      if (seals_ok === false) reasons.push({ kind: "seal", text: `Seals didn't match the record (${seal_issue}).` });
+      if (skipped.length) reasons.push({ kind: "skipped", text: `${skipped.length === 1 ? "Checkpoint" : "Checkpoints"} ${skipped.map((j) => `${j + 1}. ${cps[j]?.name ?? "?"}`).join(", ")} ${skipped.length === 1 ? "was" : "were"} never recorded before ${input.kind === "delivered" ? "delivery" : `checkpoint ${input.checkpoint_index! + 1}`}.` });
+      const place = input.checkpoint_index != null ? cps[input.checkpoint_index]?.name ?? null : null;
+      incident = await raiseCargoIncident(db, c, { seq: ins.seq, event_hash: ins.event_hash, lat: input.lat, lng: input.lng, recorded_by_name: by.name, recorded_by: by.userId, recorded_at: row.recorded_at }, reasons, media, place);
+    }
+
+    if (skipped.length && !problem) {
+      await db.from("alerts").insert({
+        organisation_id: c.organisation_id, severity: 3, channel: "in-app", channels: ["in-app"], alert_type: "cargo_exception", status: "delivered",
+        title: `${c.reference}: checkpoint skipped${incident?.code ? ` · incident ${incident.code}` : ""}`.slice(0, 200),
+        body: `${skipped.map((j) => cps[j]?.name ?? `Checkpoint ${j + 1}`).join(", ")} never recorded.`.slice(0, 1000), action: "Open cargo custody",
+        recipients: 1, delivered_count: 1, failed_count: 0, recipient_user_ids: [], acknowledged: false,
+      });
+    }
     if (problem) {
       await db.from("alerts").insert({
         organisation_id: c.organisation_id, severity: 4, channel: "in-app", channels: ["in-app"], alert_type: "cargo_exception", status: "delivered",
-        title: `${c.reference}: ${seals_ok === false ? "seal mismatch" : "custody exception"}`.slice(0, 200),
+        title: `${c.reference}: ${seals_ok === false ? "seal mismatch" : "custody exception"}${incident?.code ? ` · incident ${incident.code}` : ""}`.slice(0, 200),
         body: `${by.name}: ${seal_issue ?? input.note ?? "Exception recorded"}`.slice(0, 1000), action: "Open cargo custody",
         recipients: 1, delivered_count: 1, failed_count: 0, recipient_user_ids: [], acknowledged: false,
       });
     }
     if (by.userId) await recordBlackboxAudit({ userId: by.userId, orgId: c.organisation_id, resourceType: "cargo_custody", resourceId: ins.id, actionType: input.kind, actionDetail: { consignment: c.reference, seq: ins.seq, hash: ins.event_hash, media: media.length } });
-    return { seq: ins.seq as number, event_hash: ins.event_hash as string, seals_ok, seal_issue, off_checkpoint_m: off };
+    return { seq: ins.seq as number, event_hash: ins.event_hash as string, seals_ok, seal_issue, off_checkpoint_m: off, skipped: skipped.map((j) => cps[j]?.name ?? `Checkpoint ${j + 1}`), incident_code: incident?.code ?? null };
   }
   throw new Error("Busy, please try again.");
+}
+
+/**
+ * Checkpoints newly found skipped by this record. A checkpoint is skipped when a later one is
+ * recorded (or the cargo is delivered) without it. Ones before the furthest checkpoint already
+ * recorded were found earlier, so they aren't reported twice.
+ */
+export function newlySkipped(prior: (number | null)[], kind: CustodyKind, index: number | null, count: number): number[] {
+  const done = new Set(prior.filter((x): x is number => x != null));
+  const furthest = done.size ? Math.max(...done) : -1;
+  const upTo = kind === "delivered" ? count : kind === "checkpoint" && index != null ? index : -1;
+  const out: number[] = [];
+  for (let j = furthest + 1; j < upTo; j++) if (!done.has(j)) out.push(j);
+  return out;
+}
+
+/** Copies the record's photos and clips into incident evidence, keeping their fingerprints. */
+async function copyMedia(db: any, orgId: string, consignmentId: string, seq: number, eventHash: string, media: Media[]) {
+  const out: any[] = [];
+  for (const m of media) {
+    try {
+      const { data: blob, error } = await db.storage.from(CUSTODY_BUCKET).download(m.path);
+      if (error || !blob) continue;
+      const ext = (m.name.split(".").pop() || "bin").replace(/[^\w]/g, "").slice(0, 8) || "bin";
+      const path = `${orgId}/cargo/${consignmentId}/${seq}-${crypto.randomUUID()}.${ext}`;
+      const { error: upErr } = await db.storage.from("incident-evidence").upload(path, blob, { contentType: m.type });
+      if (upErr) continue;
+      out.push({ path, name: m.name, size: m.size, kind: m.type.startsWith("video/") ? "video" : "image", sha256: m.sha256, sha256_at: new Date().toISOString(), source: "cargo_custody", custody_seq: seq, custody_event_hash: eventHash });
+    } catch {
+      /* a file that can't be copied stays in the custody record */
+    }
+  }
+  return out;
+}
+
+/**
+ * Opens an incident for a seal mismatch or skipped checkpoint, or adds to the consignment's
+ * incident if one is still open. The record's photos are attached as evidence. Never throws:
+ * the custody record is already saved.
+ */
+async function raiseCargoIncident(db: any, c: any, ev: { seq: number; event_hash: string; lat: number | null; lng: number | null; recorded_by_name: string; recorded_by: string | null; recorded_at: string }, reasons: { kind: "seal" | "skipped"; text: string }[], media: Media[], place: string | null) {
+  try {
+    const evidence = await copyMedia(db, c.organisation_id, c.id, ev.seq, ev.event_hash, media);
+    const text = reasons.map((r) => r.text).join(" ");
+    const seal = reasons.some((r) => r.kind === "seal");
+    let incId: string | null = c.incident_id ?? null;
+    let code: string | null = null;
+    if (incId) {
+      const { data: inc } = await db.from("incidents").select("id, code, status, evidence").eq("id", incId).maybeSingle();
+      if (!inc || ["resolved", "closed"].includes(inc.status)) incId = null;
+      else {
+        code = inc.code;
+        if (evidence.length) await db.from("incidents").update({ evidence: [...(Array.isArray(inc.evidence) ? inc.evidence : []), ...evidence] }).eq("id", inc.id);
+      }
+    }
+    if (!incId) {
+      const { data: inc, error } = await db.from("incidents").insert({
+        organisation_id: c.organisation_id,
+        type: seal ? "seal_tamper" : "suspicious",
+        severity: seal ? 4 : 3,
+        status: "reported",
+        title: `${c.reference}: ${seal ? "seal mismatch" : "checkpoint skipped"}`.slice(0, 200),
+        description: `${c.description} · ${c.origin} → ${c.destination}${c.carrier ? ` · carrier ${c.carrier}` : ""}\n\n${text}\n\nOpened automatically from custody record ${ev.seq} (fingerprint ${ev.event_hash.slice(0, 16)}…), recorded by ${ev.recorded_by_name}.`,
+        location: place ?? `${c.origin} → ${c.destination}`,
+        zone: "Cargo custody",
+        coord_x: ev.lng,
+        coord_y: ev.lat,
+        occurred_at: ev.recorded_at,
+        reported_by: ev.recorded_by,
+        evidence,
+        source: "cargo_custody",
+      }).select("id, code").single();
+      if (error || !inc) return null;
+      incId = inc.id;
+      code = inc.code;
+      await db.from("cargo_consignments").update({ incident_id: inc.id }).eq("id", c.id);
+    }
+    await db.from("incident_activity").insert({
+      incident_id: incId, organisation_id: c.organisation_id, actor_id: ev.recorded_by, actor_name: ev.recorded_by_name,
+      kind: "cargo_custody", message: `${c.reference} record ${ev.seq}: ${text}${evidence.length ? ` ${evidence.length} photo${evidence.length === 1 ? "" : "s"} attached.` : ""}`.slice(0, 2000),
+      meta: { consignment_id: c.id, seq: ev.seq, event_hash: ev.event_hash, reasons: reasons.map((r) => r.kind) },
+    });
+    return { id: incId as string, code };
+  } catch {
+    return null;
+  }
 }
 
 /** Alerts when a consignment in transit has had no custody record for longer than allowed. */

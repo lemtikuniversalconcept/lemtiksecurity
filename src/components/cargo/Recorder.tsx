@@ -63,7 +63,7 @@ export function CustodyRecorder({
   checkpoints: string[];
   sealCount: number;
   getUploadUrl: (f: { name: string; type: string; size: number }) => Promise<{ path: string; token: string }>;
-  onSubmit: (input: RecorderInput) => Promise<{ seals_ok: boolean | null; off_checkpoint_m: number | null; seq: number }>;
+  onSubmit: (input: RecorderInput) => Promise<{ seals_ok: boolean | null; off_checkpoint_m: number | null; seq: number; skipped?: string[] }>;
   onDone?: () => void;
   extra?: React.ReactNode;
 }) {
@@ -140,7 +140,8 @@ export function CustodyRecorder({
       setResult(
         `Record ${r.seq} saved.` +
           (r.seals_ok === false ? " The seals don't match the ones on record. The operator has been alerted." : r.seals_ok ? " Seals match." : "") +
-          (r.off_checkpoint_m ? ` You were ${r.off_checkpoint_m} m from the checkpoint.` : ""),
+          (r.off_checkpoint_m ? ` You were ${r.off_checkpoint_m} m from the checkpoint.` : "") +
+          (r.skipped?.length ? ` ${r.skipped.join(", ")} ${r.skipped.length === 1 ? "was" : "were"} never recorded. The operator has been alerted.` : ""),
       );
       setSeals(""); setFrom(""); setTo(""); setNote(""); setFiles([]); setCp("");
       onDone?.();
@@ -204,7 +205,7 @@ export function CustodyRecorder({
       </div>
 
       {error && <Notice tone="fail">{error}</Notice>}
-      {result && <Notice tone={result.includes("don't match") ? "fail" : "ok"}>{result}</Notice>}
+      {result && <Notice tone={result.includes("don't match") || result.includes("never recorded") ? "fail" : "ok"}>{result}</Notice>}
       <button type="submit" className="b b-pri" disabled={busy || files.some((f) => f.status === "uploading")}>{busy && <Loader2 size={14} className="animate-spin" />} Save custody record</button>
       <span className="t3" style={{ fontSize: 12 }}>The time, your location and a fingerprint of each file are saved with the record. Records can't be edited afterwards.</span>
     </form>
