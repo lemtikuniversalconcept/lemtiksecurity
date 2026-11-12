@@ -65,19 +65,25 @@ const prevMonth = (month: string) => {
 
 async function load(db: any, orgId: string, from: string, to: string) {
   const voyOr = `and(departed_at.gte.${from},departed_at.lt.${to}),and(departed_at.is.null,planned_departure.gte.${from},planned_departure.lt.${to})`;
-  const [v, a, c, h, s] = await Promise.all([
-    db.from("movement_voyages").select("id, subject_id, corridor_id, status, planned_departure, planned_arrival, departed_at, arrived_at, departure_count, arrival_count, off_route, overdue_alerted, curfew_alerted, hijack_flagged_at, hijack_review").eq("organisation_id", orgId).or(voyOr).limit(5000),
-    db.from("movement_alerts").select("id, subject_id, voyage_id, kind, severity, message, created_at, acknowledged_at, escalation_step").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).limit(20000),
-    db.from("movement_checkins").select("subject_id, was_overdue").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).limit(20000),
-    db.from("movement_handoffs").select("id, created_at, status").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).limit(2000),
-    db.from("sar_cases").select("id, status, created_at, closed_at").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).limit(2000),
-  ]);
-  for (const r of [v, a, c, h, s]) if (r.error) throwSafeError("safety.load", r.error, "Unable to build the safety report.");
-  const handoffs = (h.data ?? []) as any[];
-  const { data: ups } = handoffs.length
-    ? await db.from("movement_handoff_updates").select("handoff_id, status, created_at").in("handoff_id", handoffs.map((x) => x.id)).in("status", ["acknowledged", "dispatched", "on_scene", "resolved"]).order("created_at", { ascending: true }).limit(10000)
-    : { data: [] };
-  return { voyages: (v.data ?? []) as any[], alerts: (a.data ?? []) as any[], checkins: (c.data ?? []) as any[], handoffs, updates: (ups ?? []) as any[], sar: (s.data ?? []) as any[] };
+  const { fetchAll } = await import("./fetch-all.server");
+  let voyages: any[], alerts: any[], checkins: any[], handoffs: any[], sar: any[];
+  try {
+    [voyages, alerts, checkins, handoffs, sar] = await Promise.all([
+      fetchAll(() => db.from("movement_voyages").select("id, subject_id, corridor_id, status, planned_departure, planned_arrival, departed_at, arrived_at, departure_count, arrival_count, off_route, overdue_alerted, curfew_alerted, hijack_flagged_at, hijack_review").eq("organisation_id", orgId).or(voyOr).order("id")),
+      fetchAll(() => db.from("movement_alerts").select("id, subject_id, voyage_id, kind, severity, message, created_at, acknowledged_at, escalation_step").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).order("id")),
+      fetchAll(() => db.from("movement_checkins").select("subject_id, was_overdue").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).order("id")),
+      fetchAll(() => db.from("movement_handoffs").select("id, created_at, status").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).order("id")),
+      fetchAll(() => db.from("sar_cases").select("id, status, created_at, closed_at").eq("organisation_id", orgId).gte("created_at", from).lt("created_at", to).order("id")),
+    ]);
+  } catch (e) {
+    throwSafeError("safety.load", e as Error, "Unable to build the safety report.");
+  }
+  const ups: any[] = [];
+  for (let i = 0; i < handoffs!.length; i += 200) {
+    const part = handoffs!.slice(i, i + 200).map((x) => x.id);
+    ups.push(...(await fetchAll(() => db.from("movement_handoff_updates").select("handoff_id, status, created_at").in("handoff_id", part).in("status", ["acknowledged", "dispatched", "on_scene", "resolved"]).order("created_at", { ascending: true }).order("id"))));
+  }
+  return { voyages: voyages!, alerts: alerts!, checkins: checkins!, handoffs: handoffs!, updates: ups, sar: sar! };
 }
 
 const ackS = (a: any) => (a.acknowledged_at ? Math.max(0, Math.round((Date.parse(a.acknowledged_at) - Date.parse(a.created_at)) / 1000)) : null);
@@ -153,7 +159,7 @@ export const getSafetyReport = createServerFn({ method: "POST" })
       db.from("organisations").select("name").eq("id", orgId).maybeSingle(),
       load(db, orgId, cur.from, cur.to),
       load(db, orgId, prev.from, prev.to),
-      db.from("movement_subjects").select("id, name").eq("organisation_id", orgId).limit(2000),
+      import("./fetch-all.server").then(({ fetchAll }) => fetchAll(() => db.from("movement_subjects").select("id, name").eq("organisation_id", orgId).order("id"))).then((data) => ({ data })),
       db.from("movement_corridors").select("id, name").eq("organisation_id", orgId).limit(500),
     ]);
     const subName = new Map<string, string>(((subs ?? []) as any[]).map((s) => [s.id, s.name]));

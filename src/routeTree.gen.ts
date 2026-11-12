@@ -22,6 +22,7 @@ import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAlertsRouteImport } from './routes/app.alerts'
 import { Route as AppAuditRouteImport } from './routes/app.audit'
 import { Route as AppCargoRouteImport } from './routes/app.cargo'
+import { Route as AppCustodyReportRouteImport } from './routes/app.custody-report'
 import { Route as AppDevicesRouteImport } from './routes/app.devices'
 import { Route as AppFacilityRouteImport } from './routes/app.facility'
 import { Route as AppFleetRouteImport } from './routes/app.fleet'
@@ -155,6 +156,11 @@ const AppAuditRoute = AppAuditRouteImport.update({
 const AppCargoRoute = AppCargoRouteImport.update({
   id: '/cargo',
   path: '/cargo',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCustodyReportRoute = AppCustodyReportRouteImport.update({
+  id: '/custody-report',
+  path: '/custody-report',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDevicesRoute = AppDevicesRouteImport.update({
@@ -516,6 +522,7 @@ export interface FileRoutesByFullPath {
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
   '/app/cargo': typeof AppCargoRoute
+  '/app/custody-report': typeof AppCustodyReportRoute
   '/app/devices': typeof AppDevicesRoute
   '/app/facility': typeof AppFacilityRoute
   '/app/fleet': typeof AppFleetRoute
@@ -596,6 +603,7 @@ export interface FileRoutesByTo {
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
   '/app/cargo': typeof AppCargoRoute
+  '/app/custody-report': typeof AppCustodyReportRoute
   '/app/devices': typeof AppDevicesRoute
   '/app/facility': typeof AppFacilityRoute
   '/app/fleet': typeof AppFleetRoute
@@ -681,6 +689,7 @@ export interface FileRoutesById {
   '/app/alerts': typeof AppAlertsRoute
   '/app/audit': typeof AppAuditRoute
   '/app/cargo': typeof AppCargoRoute
+  '/app/custody-report': typeof AppCustodyReportRoute
   '/app/devices': typeof AppDevicesRoute
   '/app/facility': typeof AppFacilityRoute
   '/app/fleet': typeof AppFleetRoute
@@ -767,6 +776,7 @@ export interface FileRouteTypes {
     | '/app/alerts'
     | '/app/audit'
     | '/app/cargo'
+    | '/app/custody-report'
     | '/app/devices'
     | '/app/facility'
     | '/app/fleet'
@@ -847,6 +857,7 @@ export interface FileRouteTypes {
     | '/app/alerts'
     | '/app/audit'
     | '/app/cargo'
+    | '/app/custody-report'
     | '/app/devices'
     | '/app/facility'
     | '/app/fleet'
@@ -931,6 +942,7 @@ export interface FileRouteTypes {
     | '/app/alerts'
     | '/app/audit'
     | '/app/cargo'
+    | '/app/custody-report'
     | '/app/devices'
     | '/app/facility'
     | '/app/fleet'
@@ -1116,6 +1128,13 @@ declare module '@tanstack/react-router' {
       path: '/cargo'
       fullPath: '/app/cargo'
       preLoaderRoute: typeof AppCargoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/custody-report': {
+      id: '/app/custody-report'
+      path: '/custody-report'
+      fullPath: '/app/custody-report'
+      preLoaderRoute: typeof AppCustodyReportRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/devices': {
@@ -1657,6 +1676,7 @@ interface AppRouteChildren {
   AppAlertsRoute: typeof AppAlertsRoute
   AppAuditRoute: typeof AppAuditRoute
   AppCargoRoute: typeof AppCargoRoute
+  AppCustodyReportRoute: typeof AppCustodyReportRoute
   AppDevicesRoute: typeof AppDevicesRoute
   AppFacilityRoute: typeof AppFacilityRoute
   AppFleetRoute: typeof AppFleetRoute
@@ -1696,6 +1716,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAlertsRoute: AppAlertsRoute,
   AppAuditRoute: AppAuditRoute,
   AppCargoRoute: AppCargoRoute,
+  AppCustodyReportRoute: AppCustodyReportRoute,
   AppDevicesRoute: AppDevicesRoute,
   AppFacilityRoute: AppFacilityRoute,
   AppFleetRoute: AppFleetRoute,

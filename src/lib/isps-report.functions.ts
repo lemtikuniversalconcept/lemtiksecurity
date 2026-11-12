@@ -107,15 +107,17 @@ export const getIspsReport = createServerFn({ method: "POST" })
     }
     const A = new Date(a).toISOString(), B = new Date(b).toISOString();
 
+    const { fetchAll } = await import("./fetch-all.server");
+    const all_ = (q: () => any) => fetchAll(q).then((data) => ({ data })).catch((e) => throwSafeError("isps.report", e as Error, "Unable to build the compliance report."));
     const [{ data: org }, { data: fac }, { data: changes }, { data: drills }, { data: br }, { data: dos }, { data: bc }, { data: nrec }] = await Promise.all([
       db.from("organisations").select("id, name").eq("id", orgId).maybeSingle(),
       db.from("isps_facilities").select("id, name, kind, identifier, security_level, level_set_at, security_officer_name, security_officer_phone, plan_approved_on, plan_expires_on, created_at").eq("organisation_id", orgId).order("name"),
-      db.from("isps_level_changes").select("facility_id, from_level, to_level, reason, changed_by_name, created_at").eq("organisation_id", orgId).lt("created_at", B).order("created_at", { ascending: true }).limit(5000),
-      db.from("isps_drills").select("facility_id, kind, scenario, held_on, participants, findings, corrective_actions, recorded_by_name").eq("organisation_id", orgId).order("held_on", { ascending: true }).limit(5000),
-      db.from("isps_breaches").select("facility_id, occurred_at, category, description, security_level, reported_to_authority, reported_at, reported_to, status, closed_at").eq("organisation_id", orgId).gte("occurred_at", A).lt("occurred_at", B).order("occurred_at", { ascending: true }).limit(5000),
-      db.from("isps_declarations").select("facility_id, reference, ship_name, ship_imo, security_level, valid_from, valid_to, status, ship_signed_at, created_at").eq("organisation_id", orgId).gte("created_at", A).lt("created_at", B).order("created_at", { ascending: true }).limit(5000),
-      db.from("isps_broadcasts").select("id, created_at").eq("organisation_id", orgId).eq("kind", "level_change").gte("created_at", A).lt("created_at", B).limit(1000),
-      db.from("authority_notice_recipients").select("notice_id, from_org_id, first_read_at, acknowledged_at, acknowledged_by_name").eq("org_id", orgId).gte("delivered_at", A).lt("delivered_at", B).limit(1000),
+      all_(() => db.from("isps_level_changes").select("facility_id, from_level, to_level, reason, changed_by_name, created_at").eq("organisation_id", orgId).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
+      all_(() => db.from("isps_drills").select("facility_id, kind, scenario, held_on, participants, findings, corrective_actions, recorded_by_name").eq("organisation_id", orgId).order("held_on", { ascending: true }).order("id")),
+      all_(() => db.from("isps_breaches").select("facility_id, occurred_at, category, description, security_level, reported_to_authority, reported_at, reported_to, status, closed_at").eq("organisation_id", orgId).gte("occurred_at", A).lt("occurred_at", B).order("occurred_at", { ascending: true }).order("id")),
+      all_(() => db.from("isps_declarations").select("facility_id, reference, ship_name, ship_imo, security_level, valid_from, valid_to, status, ship_signed_at, created_at").eq("organisation_id", orgId).gte("created_at", A).lt("created_at", B).order("created_at", { ascending: true }).order("id")),
+      all_(() => db.from("isps_broadcasts").select("id, created_at").eq("organisation_id", orgId).eq("kind", "level_change").gte("created_at", A).lt("created_at", B).order("id")),
+      all_(() => db.from("authority_notice_recipients").select("notice_id, from_org_id, first_read_at, acknowledged_at, acknowledged_by_name").eq("org_id", orgId).gte("delivered_at", A).lt("delivered_at", B).order("id")),
     ]);
     if (!org) throwSafeError("isps.report", new Error("org"), "Organisation not found.");
 
@@ -184,14 +186,15 @@ export const getIspsReport = createServerFn({ method: "POST" })
     });
 
     // Unreported breaches for today's flags count every breach, not only those in the period.
-    const { data: unrep } = await db.from("isps_breaches").select("facility_id").eq("organisation_id", orgId).eq("reported_to_authority", false).limit(5000);
+    const { data: unrep } = await all_(() => db.from("isps_breaches").select("facility_id").eq("organisation_id", orgId).eq("reported_to_authority", false).order("id"));
     for (const f of facilities) {
       const n = ((unrep ?? []) as any[]).filter((x) => x.facility_id === f.id).length;
       if (n) f.flags_now.push({ code: "breach_unreported", tone: "fail", text: `${n} breach${n === 1 ? "" : "es"} not yet reported to the authority` });
     }
 
     const bIds = ((bc ?? []) as any[]).map((x) => x.id);
-    const { data: recips } = bIds.length ? await db.from("isps_broadcast_recipients").select("broadcast_id, first_sent_at, acknowledged_at").in("broadcast_id", bIds).limit(20000) : { data: [] };
+    const recips: any[] = [];
+    for (let i = 0; i < bIds.length; i += 200) recips.push(...(await fetchAll(() => db.from("isps_broadcast_recipients").select("broadcast_id, first_sent_at, acknowledged_at").in("broadcast_id", bIds.slice(i, i + 200)).order("id"))));
     const ackMins = ((recips ?? []) as any[]).filter((r) => r.acknowledged_at).map((r) => (Date.parse(r.acknowledged_at) - Date.parse(r.first_sent_at)) / 60_000);
 
     const nIds = ((nrec ?? []) as any[]).map((r) => r.notice_id);

@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Package, Plus, Trash2 } from "lucide-react";
+import { FileText, Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { requireFeature, requireSectionAccess } from "@/lib/rbac";
 import { Empty, Notice, PageHeader, Panel, Status, type Tone } from "@/components/nw";
 import { LocationPicker } from "@/components/LocationPicker";
@@ -36,6 +36,7 @@ function CargoPage() {
   return (
     <div className="col g16">
       <PageHeader title="Cargo custody" sub="An unbroken record of who had the cargo, where, and what the seals looked like, from loading to delivery, with photos and video clips at each step.">
+        <Link to="/app/custody-report" className="b b-sec"><FileText size={14} /> Exceptions report</Link>
         {q.data.can_create && !creating && <button type="button" className="b b-pri" onClick={() => setCreating(true)}><Plus size={14} /> New consignment</button>}
       </PageHeader>
       {creating && <CreateForm onDone={() => setCreating(false)} />}
